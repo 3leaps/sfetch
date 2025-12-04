@@ -28,7 +28,9 @@ Auto-selects via heuristics ([docs/pattern-matching.md](docs/pattern-matching.md
 - See `docs/key-handling.md` for exporting keys, testing them safely, and wiring CI.
 - Need concrete flag combos? Run `sfetch -helpextended` to print the embedded quickstart.
 
-### Build & install
+### Build, versioning & install
+
+We use CalVer in `vYYYY.MM.DD` format (e.g., `v2025.12.20`). If multiple releases ship on the same day we append a revision (`v2025.12.20.1`, `v2025.12.20.2`, ...). See `CHANGELOG.md`, `RELEASE_NOTES.md`, and `docs/releases/` for per-release detail.
 
 ```bash
 make build             # produces bin/sfetch_${GOOS}_${GOARCH}
