@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -18,6 +19,11 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+)
+
+const (
+	defaultAPIBase  = "https://api.github.com"
+	maxCommandError = 2048
 )
 
 var version = "dev"
@@ -66,11 +72,32 @@ var defaults = RepoConfig{
 		"{{base}}.sig",
 		"{{base}}.sig.ed25519",
 		"{{asset}}.minisig",
+		"{{asset}}.asc",
+		"{{base}}.asc",
 	},
 }
 
 var repoConfigs = map[string]RepoConfig{
-	"3leaps/sfetch": defaults,
+	"3leaps/sfetch":   defaults,
+	"fulmenhq/goneat": RepoConfig{BinaryName: "goneat"},
+}
+
+const (
+	sigFormatBinary = "binary"
+	sigFormatPGP    = "pgp"
+)
+
+type signatureData struct {
+	format string
+	bytes  []byte
+}
+
+func apiBaseURL() string {
+	base := strings.TrimSpace(os.Getenv("SFETCH_API_BASE"))
+	if base == "" {
+		return defaultAPIBase
+	}
+	return strings.TrimRight(base, "/")
 }
 
 func main() {
@@ -80,9 +107,13 @@ func main() {
 	output := flag.String("output", "", "output path")
 	assetRegex := flag.String("asset-regex", "", "asset name regex (overrides auto-detect)")
 	key := flag.String("key", "", "ed25519 pubkey hex (32 bytes)")
+	pgpKeyFile := flag.String("pgp-key-file", "", "path to ASCII-armored PGP public key")
+	gpgBin := flag.String("gpg-bin", "gpg", "path to gpg executable")
 	destDir := flag.String("dest-dir", "", "destination directory")
 	cacheDir := flag.String("cache-dir", "", "cache directory")
 	selfVerify := flag.Bool("self-verify", false, "self-verify mode")
+	skipSig := flag.Bool("skip-sig", false, "skip signature verification (testing only)")
+	skipToolsCheck := flag.Bool("skip-tools-check", false, "skip preflight tool checks")
 	jsonOut := flag.Bool("json", false, "JSON output for CI")
 	versionFlag := flag.Bool("version", false, "print version")
 	flag.Parse()
@@ -107,6 +138,22 @@ func main() {
 		return
 	}
 
+	if !*skipToolsCheck {
+		goos := runtime.GOOS
+		goarch := runtime.GOARCH
+		goosAliases := aliasList(goos, goosAliasTable)
+		archAliases := aliasList(goarch, archAliasTable)
+		fmt.Fprintf(os.Stderr, "Preflight: GOOS=%s GOARCH=%s goosAliases=%v archAliases=%v\n", goos, goarch, goosAliases, archAliases)
+
+		tools := []string{"tar", "unzip"}
+		for _, tool := range tools {
+			if _, err := exec.LookPath(tool); err != nil {
+				fmt.Fprintf(os.Stderr, "missing required tool: %s\n", tool)
+				os.Exit(1)
+			}
+		}
+	}
+
 	if *repo == "" {
 		fmt.Fprintln(os.Stderr, "error: --repo is required")
 		flag.Usage()
@@ -123,8 +170,10 @@ func main() {
 		releaseID = "tags/" + *tag
 	}
 
-	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/%s", *repo, releaseID)
+	baseURL := apiBaseURL()
+	url := fmt.Sprintf("%s/repos/%s/releases/%s", baseURL, *repo, releaseID)
 
+	// #nosec G107 -- url GitHub API fmt.Sprintf controlled
 	resp, err := http.Get(url)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: fetching release: %v\n", err)
@@ -151,6 +200,7 @@ func main() {
 	}
 
 	cfg := getConfig(*repo)
+	fmt.Fprintf(os.Stderr, "DEBUG repo=%q BinaryName=%q\n", *repo, cfg.BinaryName)
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
@@ -214,6 +264,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// #nosec G304 -- checksumPath tmp controlled
 	checksumBytes, err := os.ReadFile(checksumPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "read checksum: %v\n", err)
@@ -226,6 +277,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// #nosec G304 -- assetPath tmp controlled
 	assetBytes, err := os.ReadFile(assetPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "read asset: %v\n", err)
@@ -260,7 +312,8 @@ func main() {
 		}
 	}
 	cacheAssetDir := filepath.Join(cd, actualHash)
-	if err := os.MkdirAll(cacheAssetDir, 0o755); err != nil {
+	if err := // #nosec G301 -- cacheAssetDir XDG_CACHE_HOME/hash controlled
+		os.MkdirAll(cacheAssetDir, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "mkdir cache %s: %v\n", cacheAssetDir, err)
 		os.Exit(1)
 	}
@@ -272,40 +325,67 @@ func main() {
 	assetPath = cacheAssetPath
 	fmt.Printf("Cached to %s\n", cacheAssetPath)
 
-	sigBytes, err := loadSignature(sigPath)
+	sigData, err := loadSignature(sigPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	pubKeyBytes, err := hex.DecodeString(*key)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid pubkey hex: %v\n", err)
-		os.Exit(1)
+	if *skipSig {
+		fmt.Fprintln(os.Stderr, "warning: --skip-sig enabled; signature verification skipped")
+	} else {
+		switch sigData.format {
+		case sigFormatPGP:
+			if *pgpKeyFile == "" {
+				fmt.Fprintln(os.Stderr, "error: --pgp-key-file is required to verify .asc signatures")
+				os.Exit(1)
+			}
+			if err := verifyPGPSignature(assetPath, sigPath, *pgpKeyFile, *gpgBin); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			fmt.Println("PGP signature verified OK")
+		case sigFormatBinary:
+			normalizedKey, err := normalizeHexKey(*key)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			pubKeyBytes, err := hex.DecodeString(normalizedKey)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "invalid ed25519 key provided")
+				os.Exit(1)
+			}
+			if len(pubKeyBytes) != ed25519.PublicKeySize {
+				fmt.Fprintf(os.Stderr, "invalid pubkey size: %d\n", len(pubKeyBytes))
+				os.Exit(1)
+			}
+			pub := ed25519.PublicKey(pubKeyBytes)
+			if !ed25519.Verify(pub, assetBytes, sigData.bytes) {
+				fmt.Fprintln(os.Stderr, "signature verification failed")
+				os.Exit(1)
+			}
+			fmt.Println("Signature verified OK")
+		default:
+			fmt.Fprintln(os.Stderr, "error: unsupported signature format")
+			os.Exit(1)
+		}
 	}
-	if len(pubKeyBytes) != ed25519.PublicKeySize {
-		fmt.Fprintf(os.Stderr, "invalid pubkey size: %d\n", len(pubKeyBytes))
-		os.Exit(1)
-	}
-
-	pub := ed25519.PublicKey(pubKeyBytes)
-	if !ed25519.Verify(pub, assetBytes, sigBytes) {
-		fmt.Fprintln(os.Stderr, "signature verification failed")
-		os.Exit(1)
-	}
-	fmt.Println("Signature verified OK")
 
 	binaryName := cfg.BinaryName
 	extractDir := filepath.Join(tmpDir, "extract")
-	if err := os.Mkdir(extractDir, 0o755); err != nil {
+	if err := // #nosec G301 -- extractDir tmpdir controlled
+		os.Mkdir(extractDir, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "mkdir extract: %v\n", err)
 		os.Exit(1)
 	}
 
 	var cmd *exec.Cmd
 	if cfg.ArchiveType == "zip" {
+		// #nosec G204 -- assetPath tmp controlled
 		cmd = exec.Command("unzip", "-q", assetPath, "-d", extractDir)
 	} else {
+		// #nosec G204 -- assetPath tmp controlled
 		cmd = exec.Command("tar", "xzf", assetPath, "-C", extractDir)
 	}
 	if err := cmd.Run(); err != nil {
@@ -319,7 +399,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := os.Chmod(binaryPath, 0o755); err != nil {
+	if err := // #nosec G302 -- binaryPath extracted tmp chmod +x safe
+		os.Chmod(binaryPath, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "chmod: %v\n", err)
 		os.Exit(1)
 	}
@@ -333,7 +414,8 @@ func main() {
 		finalPath = binaryName
 	}
 
-	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
+	if err := // #nosec G301 -- Dir(finalPath) user-controlled safe mkdir tmp
+		os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "mkdir %s: %v\n", filepath.Dir(finalPath), err)
 		os.Exit(1)
 	}
@@ -355,6 +437,7 @@ func getConfig(repo string) *RepoConfig {
 }
 
 func download(url, path string) error {
+	// #nosec G107 -- url GitHub API fmt.Sprintf controlled
 	resp, err := http.Get(url)
 	if err != nil {
 		return fmt.Errorf("fetch %s: %w", url, err)
@@ -366,6 +449,7 @@ func download(url, path string) error {
 		return fmt.Errorf("status %d from %s: %s", resp.StatusCode, url, string(body))
 	}
 
+	// #nosec G304 -- path tmp controlled
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
@@ -440,6 +524,11 @@ func pickByHeuristics(assets []Asset, cfg *RepoConfig, goos, goarch string) (*As
 	goosAliases := aliasList(goos, goosAliasTable)
 	archAliases := aliasList(goarch, archAliasTable)
 	binaryToken := strings.ToLower(cfg.BinaryName)
+
+	// Prefer exact matches
+	exactGoos := strings.ToLower(goos)
+	exactArch := strings.ToLower(goarch)
+
 	bestScore := 0
 	var best *Asset
 
@@ -449,12 +538,40 @@ func pickByHeuristics(assets []Asset, cfg *RepoConfig, goos, goarch string) (*As
 			continue
 		}
 		score := 0
-		if containsAny(nameLower, goosAliases) {
-			score += 4
+
+		// GoOS score: exact > alias
+		goosScore := 0
+		if strings.Contains(nameLower, exactGoos) {
+			goosScore = 5
+		} else {
+			extraGoos := make([]string, 0, len(goosAliases))
+			for _, a := range goosAliases {
+				if a != exactGoos {
+					extraGoos = append(extraGoos, a)
+				}
+			}
+			if len(extraGoos) > 0 && containsAny(nameLower, extraGoos) {
+				goosScore = 3
+			}
 		}
-		if containsAny(nameLower, archAliases) {
-			score += 4
+		score += goosScore
+
+		// GoARCH score: exact > alias
+		archScore := 0
+		if strings.Contains(nameLower, exactArch) {
+			archScore = 5
+		} else {
+			extraArch := make([]string, 0, len(archAliases))
+			for _, a := range archAliases {
+				if a != exactArch {
+					extraArch = append(extraArch, a)
+				}
+			}
+			if len(extraArch) > 0 && containsAny(nameLower, extraArch) {
+				archScore = 3
+			}
 		}
+		score += archScore
 		if binaryToken != "" && strings.Contains(nameLower, binaryToken) {
 			score += 3
 		}
@@ -716,18 +833,83 @@ func expectedDigestLength(algo string) int {
 	}
 }
 
-func loadSignature(path string) ([]byte, error) {
+func normalizeHexKey(input string) (string, error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return "", fmt.Errorf("error: --key is required to verify ed25519 signatures")
+	}
+	upper := strings.ToUpper(trimmed)
+	if strings.Contains(upper, "BEGIN") || strings.Contains(upper, "PRIVATE") {
+		return "", fmt.Errorf("ed25519 keys must be provided as 64-character hex strings, not PEM/PGP blobs")
+	}
+	expectedLen := ed25519.PublicKeySize * 2
+	if len(trimmed) != expectedLen {
+		return "", fmt.Errorf("ed25519 key must be %d hex characters", expectedLen)
+	}
+	if !isHexDigest(trimmed, expectedLen) {
+		return "", fmt.Errorf("ed25519 key must contain only hexadecimal characters")
+	}
+	return strings.ToLower(trimmed), nil
+}
+
+func loadSignature(path string) (signatureData, error) {
+	// #nosec G304 -- path sig tmp controlled
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read sig: %w", err)
-	}
-	if len(data) == ed25519.SignatureSize {
-		return data, nil
+		return signatureData{}, fmt.Errorf("read sig: %w", err)
 	}
 	trimmed := strings.TrimSpace(string(data))
+	if strings.HasPrefix(trimmed, "-----BEGIN PGP SIGNATURE-----") {
+		return signatureData{format: sigFormatPGP}, nil
+	}
+	if len(data) == ed25519.SignatureSize {
+		return signatureData{format: sigFormatBinary, bytes: data}, nil
+	}
 	decoded, err := hex.DecodeString(trimmed)
 	if err == nil && len(decoded) == ed25519.SignatureSize {
-		return decoded, nil
+		return signatureData{format: sigFormatBinary, bytes: decoded}, nil
 	}
-	return nil, fmt.Errorf("unsupported signature format in %s", path)
+	return signatureData{}, fmt.Errorf("unsupported signature format in %s", path)
+}
+
+func verifyPGPSignature(assetPath, sigPath, pubKeyPath, gpgBin string) error {
+	home, err := os.MkdirTemp("", "sfetch-gpg-")
+	if err != nil {
+		return fmt.Errorf("create gpg home: %w", err)
+	}
+	defer os.RemoveAll(home)
+
+	importArgs := []string{"--batch", "--no-tty", "--homedir", home, "--import", pubKeyPath}
+	if err := runCommand(gpgBin, importArgs...); err != nil {
+		return fmt.Errorf("import pgp key: %w", err)
+	}
+
+	verifyArgs := []string{"--batch", "--no-tty", "--homedir", home, "--trust-model", "always", "--verify", sigPath, assetPath}
+	if err := runCommand(gpgBin, verifyArgs...); err != nil {
+		return fmt.Errorf("verify pgp signature: %w", err)
+	}
+
+	return nil
+}
+
+func runCommand(bin string, args ...string) error {
+	cmd := exec.Command(bin, args...)
+	var combined bytes.Buffer
+	cmd.Stdout = &combined
+	cmd.Stderr = &combined
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s %s: %s", bin, strings.Join(args, " "), trimCommandOutput(combined.String()))
+	}
+	return nil
+}
+
+func trimCommandOutput(out string) string {
+	clean := strings.TrimSpace(out)
+	if clean == "" {
+		return "command failed"
+	}
+	if len(clean) > maxCommandError {
+		return clean[:maxCommandError] + "..."
+	}
+	return clean
 }

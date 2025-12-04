@@ -59,7 +59,14 @@ Example pattern: `(?i)^{{binary}}[-_]{{osToken}}[-_]{{archToken}}.*` matches `sf
 2. **Keyword fallback** – If templates miss, we look for filenames containing keyword bundles (e.g., `<basename> + sha`, `sha256sum`, `checksum`, or `<basename> + sig`). This allows aggregate files like `SHA256SUMS`.
 3. **Parsing expectations** –
    - Checksum files may contain raw hex or standard `<hash>  filename` lines. Only entries matching the selected asset are used.
-   - Signature files may contain raw 64-byte ed25519 data or hex-encoded signatures. Other encodings are rejected for now.
+   - Signature files may contain raw 64-byte ed25519 data, hex-encoded signatures, or ASCII-armored PGP signatures (`.asc`).
+
+## Signature verification flags
+
+- `--key` – Provide a 64-character hex ed25519 public key for `.sig`/`.minisig` assets.
+- `--pgp-key-file` – Provide an ASCII-armored public key (`*.asc`) for PGP signatures. The key is imported into a temporary `GNUPGHOME` and discarded.
+- `--gpg-bin` – Override the gpg executable path (defaults to `gpg`).
+- `--skip-sig` – Testing flag that disables verification; emits a warning and should never be used in production flows.
 
 ## Heuristics for non-Go assets
 

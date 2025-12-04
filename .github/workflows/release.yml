@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  NAME: sfetch
+
 jobs:
   create_release:
     runs-on: ubuntu-latest
@@ -30,61 +33,90 @@ jobs:
 
   build:
     needs: create_release
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            goos: linux
+          - goos: linux
             goarch: amd64
-          - os: ubuntu-latest
-            goos: linux
+          - goos: linux
             goarch: arm64
-          - os: macos-latest
-            goos: darwin
+          - goos: darwin
             goarch: amd64
-          - os: macos-latest
-            goos: darwin
+          - goos: darwin
             goarch: arm64
-          - os: windows-latest
-            goos: windows
+          - goos: windows
             goarch: amd64
-          - os: windows-latest
-            goos: windows
+          - goos: windows
             goarch: arm64
+    env:
+      VERSION: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
+
+      - name: Install release dependencies
+        run: sudo apt-get update && sudo apt-get install -y zip gnupg
+
+      - name: Import release signing key
+        env:
+          PGP_PRIVATE_KEY: ${{ secrets.PGP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PGP_PRIVATE_KEY}" ]; then
+            echo "PGP_PRIVATE_KEY secret must be set" >&2
+            exit 1
+          fi
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          install -d -m 700 "$GNUPGHOME"
+          printf '%s' "$PGP_PRIVATE_KEY" | gpg --batch --homedir "$GNUPGHOME" --import
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+
       - name: Build
-        run: make build VERSION=${{ github.ref_name }}
+        run: make build VERSION=${VERSION}
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          NAME: sfetch
-      - name: Package
+          CGO_ENABLED: 0
+
+      - name: Package artifact
         shell: bash
         run: |
+          set -euo pipefail
           ASSET="sfetch_${{ matrix.goos }}_${{ matrix.goarch }}"
-          BINARY="bin/sfetch_${{ matrix.goos }}_${{ matrix.goarch }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            7z a ${ASSET}.zip ${BINARY}.exe || zip ${ASSET}.zip ${BINARY}.exe
-            ASSET_FILE="${ASSET}.zip"
+            ARCHIVE="${ASSET}.zip"
+            zip -j "${ARCHIVE}" "bin/${ASSET}.exe"
+            CONTENT_TYPE="application/zip"
           else
-            tar czf ${ASSET}.tar.gz -C bin sfetch_${{ matrix.goos }}_${{ matrix.goarch }}
-            ASSET_FILE="${ASSET}.tar.gz"
+            ARCHIVE="${ASSET}.tar.gz"
+            tar czf "${ARCHIVE}" -C bin "${ASSET}"
+            CONTENT_TYPE="application/gzip"
           fi
-          echo "ASSET_FILE=${ASSET_FILE}" >> $GITHUB_ENV
-          echo "BINARY=${BINARY}" >> $GITHUB_ENV
+          echo "ASSET_FILE=${ARCHIVE}" >> "$GITHUB_ENV"
+          echo "ASSET_CONTENT_TYPE=${CONTENT_TYPE}" >> "$GITHUB_ENV"
+
       - name: Compute SHA256
-        shell: bash
-        run: sha256sum ${{ env.ASSET_FILE }} > ${{ env.ASSET_FILE }}.sha256
-      - name: Signing (TODO: ed25519 on binary or archive)
-        shell: bash
+        run: sha256sum "$ASSET_FILE" > "$ASSET_FILE.sha256"
+
+      - name: Sign artifact (.asc)
+        env:
+          PGP_KEY_PASSPHRASE: ${{ secrets.PGP_KEY_PASSPHRASE }}
         run: |
-          touch ${{ env.ASSET_FILE }}.sig
-          echo "Placeholder sig for ${{ env.ASSET_FILE }}"
+          set -euo pipefail
+          if [ -z "${GNUPGHOME:-}" ]; then
+            echo "GNUPGHOME missing" >&2
+            exit 1
+          fi
+          if [ -n "${PGP_KEY_PASSPHRASE}" ]; then
+            gpg --homedir "$GNUPGHOME" --batch --yes --pinentry-mode loopback --passphrase "$PGP_KEY_PASSPHRASE" --detach-sign --armor -o "$ASSET_FILE.asc" "$ASSET_FILE"
+          else
+            gpg --homedir "$GNUPGHOME" --batch --yes --detach-sign --armor -o "$ASSET_FILE.asc" "$ASSET_FILE"
+          fi
+
       - name: Upload Archive
         uses: actions/upload-release-asset@v1
         env:
@@ -93,7 +125,8 @@ jobs:
           upload_url: ${{ needs.create_release.outputs.upload_url }}
           asset_path: ${{ env.ASSET_FILE }}
           asset_name: ${{ env.ASSET_FILE }}
-          asset_content_type: application/gzip
+          asset_content_type: ${{ env.ASSET_CONTENT_TYPE }}
+
       - name: Upload SHA256
         uses: actions/upload-release-asset@v1
         env:
@@ -103,12 +136,13 @@ jobs:
           asset_path: ${{ env.ASSET_FILE }}.sha256
           asset_name: ${{ env.ASSET_FILE }}.sha256
           asset_content_type: text/plain
-      - name: Upload SIG
+
+      - name: Upload signature (.asc)
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: ${{ env.ASSET_FILE }}.sig
-          asset_name: ${{ env.ASSET_FILE }}.sig
-          asset_content_type: application/octet-stream
+          asset_path: ${{ env.ASSET_FILE }}.asc
+          asset_name: ${{ env.ASSET_FILE }}.asc
+          asset_content_type: text/plain

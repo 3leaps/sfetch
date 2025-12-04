@@ -19,10 +19,10 @@ sfetch auto-detects the correct artifact, checksum, and signature files from a G
 
 - When possible, publish one checksum and one signature per artifact, using either of the following templates (sfetch tries these first):
   - `{{asset}}.sha256`, `{{asset}}.sha256.txt`, `{{base}}.sha256`
-  - `{{asset}}.sig`, `{{asset}}.sig.ed25519`, `{{base}}.sig`
+  - `{{asset}}.sig`, `{{asset}}.sig.ed25519`, `{{base}}.sig`, `{{asset}}.asc`
 - `{{asset}}` resolves to the exact artifact filename and `{{base}}` strips the archive extension (`.tar.gz`, `.tgz`, `.zip`).
 - Aggregate checksum files such as `SHA256SUMS` or `SHA256SUMS.txt` are supported as long as they contain standard `<hash>  <filename>` lines.
-- Signature files may contain either raw 64-byte ed25519 data or a hex-encoded signature (newline-terminated text file).
+- Signature files may contain either raw 64-byte ed25519 data, a hex-encoded signature (newline-terminated text file), or an ASCII-armored PGP signature (`.asc`).
 
 ## Customization roadmap
 

@@ -10,9 +10,33 @@ ifeq ($(GOOS),windows)
 EXT := .exe
 endif
 
-.PHONY: all build test clean install release fmt lint build-all
+.PHONY: all build test clean install release fmt lint tools quality gosec gosec-high precommit build-all
 
 all: build
+
+tools:
+	go install honnef.co/go/tools/cmd/staticcheck@latest
+	go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+fmt:
+	go fmt ./...
+
+lint: tools
+	go vet ./...
+	staticcheck ./...
+
+test:
+	go test -v -race ./...
+
+gosec: tools
+	gosec ./...
+
+gosec-high: tools
+	gosec -confidence high -exclude G301,G302,G107,G304 ./...
+
+quality: tools fmt lint test gosec-high build-all
+
+precommit: quality
 
 build:
 	mkdir -p bin
@@ -20,21 +44,6 @@ build:
 		-ldflags="-s -w -X main.version=$(VERSION)" \
 		-trimpath \
 		-o bin/$(NAME)_$(GOOS)_$(GOARCH)$(EXT) $(MAIN)
-
-test:
-	go test -v -race ./...
-
-fmt:
-	go fmt ./...
-
-lint:
-	go vet ./...
-
-clean:
-	rm -rf bin/ dist/
-
-install: build
-	sudo install bin/$(NAME)_$(GOOS)_$(GOARCH)$(EXT) /usr/local/bin/$(NAME)$(EXT)
 
 build-all:
 	mkdir -p dist/release
@@ -48,3 +57,9 @@ release: build-all
 	# TODO: GitHub release automation
 	@echo "Release preparation for $(VERSION)"
 	@echo "Build all platforms and prepare assets"
+
+clean:
+	rm -rf bin/ dist/ coverage.out
+
+install: build
+	sudo install bin/$(NAME)_$(GOOS)_$(GOARCH)$(EXT) /usr/local/bin/$(NAME)$(EXT)VERSION=2025.12.04

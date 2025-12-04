@@ -15,9 +15,18 @@ Yet we still ship 15-line bash bootstrap scripts that do manual `curl → sha256
 
 `sfetch` is the missing 1% that deletes those scripts forever.
 
+### Security & Verification
+See [docs/security.md](docs/security.md) for scanning, exclusions, processes.
+
+### Signature verification
+
+- Use `--key <64-hex-bytes>` for raw `.sig`/`.minisig` ed25519 signatures.
+- Use `--pgp-key-file fulmen-release.asc` (and optional `--gpg-bin`) for ASCII-armored `.asc` signatures.
+- See `docs/key-handling.md` for exporting keys, testing them safely, and wiring CI.
+
 ```bash
 # Install the latest goneat (or any signed tool) in one line
-sfetch --repo fulmenhq/goneat --latest --output /usr/local/bin/goneat
+sfetch --repo fulmenhq/goneat --latest --output /usr/local/bin/goneat --pgp-key-file fulmen-release.asc
 
 # Or pin exactly
-sfetch --repo fulmenhq/goneat --tag v2025.12.3 --output /usr/local/bin/goneat
+sfetch --repo fulmenhq/goneat --tag v2025.12.3 --output /usr/local/bin/goneat --pgp-key-file fulmen-release.asc
