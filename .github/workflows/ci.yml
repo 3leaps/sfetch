@@ -18,5 +18,10 @@ jobs:
       with:
         go-version: '1.23'
 
+    - name: Lint YAML
+      run: |
+        pipx install yamllint
+        yamllint .github/workflows/*.yml
+
     - name: Quality
       run: make precommit
