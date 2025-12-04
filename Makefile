@@ -1,3 +1,5 @@
+-include buildconfig.mk
+
 VERSION ?= dev
 NAME ?= sfetch
 MAIN ?= ./main.go
@@ -6,10 +8,19 @@ YAMLLINT ?= yamllint
 # Defaults
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
-EXT := 
+EXT :=
 ifeq ($(GOOS),windows)
 EXT := .exe
 endif
+
+INSTALL_PREFIX ?= $(HOME)
+INSTALL_BINDIR ?= $(INSTALL_PREFIX)/.local/bin
+ifeq ($(GOOS),windows)
+INSTALL_PREFIX ?= $(USERPROFILE)
+INSTALL_BINDIR ?= $(INSTALL_PREFIX)/bin
+endif
+INSTALL_TARGET ?= $(INSTALL_BINDIR)/$(NAME)$(EXT)
+BUILD_ARTIFACT := bin/$(NAME)_$(GOOS)_$(GOARCH)$(EXT)
 
 .PHONY: all build test clean install release fmt fmt-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all
 
@@ -69,7 +80,7 @@ build:
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build \
 		-ldflags="-s -w -X main.version=$(VERSION)" \
 		-trimpath \
-		-o bin/$(NAME)_$(GOOS)_$(GOARCH)$(EXT) $(MAIN)
+		-o $(BUILD_ARTIFACT) $(MAIN)
 
 build-all:
 	mkdir -p dist/release
@@ -88,4 +99,11 @@ clean:
 	rm -rf bin/ dist/ coverage.out
 
 install: build
-	sudo install bin/$(NAME)_$(GOOS)_$(GOARCH)$(EXT) /usr/local/bin/$(NAME)$(EXT)
+	@mkdir -p "$(INSTALL_BINDIR)"
+	cp "$(BUILD_ARTIFACT)" "$(INSTALL_TARGET)"
+ifeq ($(GOOS),windows)
+	@echo "Installed $(NAME)$(EXT) to $(INSTALL_TARGET). Ensure this directory is on your PATH."
+else
+	chmod 755 "$(INSTALL_TARGET)"
+	@echo "Installed $(NAME)$(EXT) to $(INSTALL_TARGET). Add it to your PATH if needed."
+endif

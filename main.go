@@ -5,9 +5,11 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/sha512"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
+
 	"fmt"
 	"hash"
 	"io"
@@ -27,6 +29,9 @@ const (
 )
 
 var version = "dev"
+
+//go:embed docs/quickstart.txt
+var quickstartDoc string
 
 type Release struct {
 	TagName string  `json:"tag_name"`
@@ -78,8 +83,7 @@ var defaults = RepoConfig{
 }
 
 var repoConfigs = map[string]RepoConfig{
-	"3leaps/sfetch":   defaults,
-	"fulmenhq/goneat": RepoConfig{BinaryName: "goneat"},
+	"fulmenhq/goneat": {BinaryName: "goneat"},
 }
 
 const (
@@ -108,6 +112,8 @@ func main() {
 	assetRegex := flag.String("asset-regex", "", "asset name regex (overrides auto-detect)")
 	key := flag.String("key", "", "ed25519 pubkey hex (32 bytes)")
 	pgpKeyFile := flag.String("pgp-key-file", "", "path to ASCII-armored PGP public key")
+	pgpKeyURL := flag.String("pgp-key-url", "", "URL to download ASCII-armored PGP public key")
+	pgpKeyAsset := flag.String("pgp-key-asset", "", "release asset name for ASCII-armored PGP public key")
 	gpgBin := flag.String("gpg-bin", "gpg", "path to gpg executable")
 	destDir := flag.String("dest-dir", "", "destination directory")
 	cacheDir := flag.String("cache-dir", "", "cache directory")
@@ -115,6 +121,7 @@ func main() {
 	skipSig := flag.Bool("skip-sig", false, "skip signature verification (testing only)")
 	skipToolsCheck := flag.Bool("skip-tools-check", false, "skip preflight tool checks")
 	jsonOut := flag.Bool("json", false, "JSON output for CI")
+	extendedHelp := flag.Bool("helpextended", false, "print quickstart & examples")
 	versionFlag := flag.Bool("version", false, "print version")
 	flag.Parse()
 
@@ -135,6 +142,11 @@ func main() {
 
 	if *versionFlag {
 		fmt.Println("sfetch", version)
+		return
+	}
+
+	if *extendedHelp {
+		fmt.Println(strings.TrimSpace(quickstartDoc))
 		return
 	}
 
@@ -336,15 +348,17 @@ func main() {
 	} else {
 		switch sigData.format {
 		case sigFormatPGP:
-			if *pgpKeyFile == "" {
-				fmt.Fprintln(os.Stderr, "error: --pgp-key-file is required to verify .asc signatures")
+			pgpKeyPath, err := resolvePGPKey(*pgpKeyFile, *pgpKeyURL, *pgpKeyAsset, rel.Assets, tmpDir)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
-			if err := verifyPGPSignature(assetPath, sigPath, *pgpKeyFile, *gpgBin); err != nil {
+			if err := verifyPGPSignature(assetPath, sigPath, pgpKeyPath, *gpgBin); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
 			fmt.Println("PGP signature verified OK")
+
 		case sigFormatBinary:
 			normalizedKey, err := normalizeHexKey(*key)
 			if err != nil {
@@ -430,10 +444,37 @@ func main() {
 }
 
 func getConfig(repo string) *RepoConfig {
-	if c, ok := repoConfigs[repo]; ok {
-		return &c
+	if override, ok := repoConfigs[repo]; ok {
+		cfg := mergeConfig(defaults, override)
+		return &cfg
 	}
 	return &defaults
+}
+
+func mergeConfig(base RepoConfig, override RepoConfig) RepoConfig {
+	cfg := base
+	if override.BinaryName != "" {
+		cfg.BinaryName = override.BinaryName
+	}
+	if override.HashAlgo != "" {
+		cfg.HashAlgo = override.HashAlgo
+	}
+	if override.ArchiveType != "" {
+		cfg.ArchiveType = override.ArchiveType
+	}
+	if len(override.ArchiveExtensions) > 0 {
+		cfg.ArchiveExtensions = append([]string(nil), override.ArchiveExtensions...)
+	}
+	if len(override.AssetPatterns) > 0 {
+		cfg.AssetPatterns = append([]string(nil), override.AssetPatterns...)
+	}
+	if len(override.ChecksumCandidates) > 0 {
+		cfg.ChecksumCandidates = append([]string(nil), override.ChecksumCandidates...)
+	}
+	if len(override.SignatureCandidates) > 0 {
+		cfg.SignatureCandidates = append([]string(nil), override.SignatureCandidates...)
+	}
+	return cfg
 }
 
 func download(url, path string) error {
@@ -601,7 +642,11 @@ func pickByHeuristics(assets []Asset, cfg *RepoConfig, goos, goarch string) (*As
 }
 
 func looksLikeSupplemental(name string) bool {
-	return strings.Contains(name, "sha256") || strings.Contains(name, "checksum") || strings.Contains(name, "sig") || strings.Contains(name, "signature")
+	lower := strings.ToLower(name)
+	if strings.HasSuffix(lower, ".asc") || strings.HasSuffix(lower, ".sig") || strings.HasSuffix(lower, ".sig.ed25519") {
+		return true
+	}
+	return strings.Contains(lower, "sha256") || strings.Contains(lower, "checksum") || strings.Contains(lower, "sig") || strings.Contains(lower, "signature")
 }
 
 func containsAny(haystack string, needles []string) bool {
@@ -709,6 +754,98 @@ func findSupplementalAsset(assets []Asset, ctx templateContext, templates []stri
 		return asset, nil
 	}
 	return nil, fmt.Errorf("missing supplemental asset for %s", ctx.AssetName)
+}
+
+func resolvePGPKey(localPath, keyURL, keyAsset string, assets []Asset, tmpDir string) (string, error) {
+	if localPath != "" {
+		if isHTTPURL(localPath) {
+			return downloadKeyFromURL(localPath, tmpDir)
+		}
+		if _, err := os.Stat(localPath); err != nil {
+			return "", fmt.Errorf("pgp key file: %w", err)
+		}
+		return localPath, nil
+	}
+	if keyURL != "" {
+		return downloadKeyFromURL(keyURL, tmpDir)
+	}
+	if keyAsset != "" {
+		asset := findAssetByName(assets, keyAsset)
+		if asset == nil {
+			return "", fmt.Errorf("pgp key asset %q not found in release", keyAsset)
+		}
+		return downloadAssetToTemp(asset, tmpDir)
+	}
+	if asset := autoDetectKeyAsset(assets); asset != nil {
+		path, err := downloadAssetToTemp(asset, tmpDir)
+		if err == nil {
+			fmt.Fprintf(os.Stderr, "Auto-detected PGP key asset %s\n", asset.Name)
+		}
+		return path, err
+	}
+	return "", fmt.Errorf("error: provide --pgp-key-file, --pgp-key-url, or --pgp-key-asset to verify .asc signatures")
+}
+
+func downloadKeyFromURL(src string, tmpDir string) (string, error) {
+	resp, err := http.Get(src)
+	if err != nil {
+		return "", fmt.Errorf("fetch key %s: %w", src, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("status %d from %s: %s", resp.StatusCode, src, strings.TrimSpace(string(body)))
+	}
+	f, err := os.CreateTemp(tmpDir, "pgp-key-*.asc")
+	if err != nil {
+		return "", fmt.Errorf("create temp key: %w", err)
+	}
+	defer f.Close()
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		return "", fmt.Errorf("write key: %w", err)
+	}
+	return f.Name(), nil
+}
+
+func downloadAssetToTemp(asset *Asset, tmpDir string) (string, error) {
+	path := filepath.Join(tmpDir, asset.Name)
+	if err := download(asset.BrowserDownloadUrl, path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func findAssetByName(assets []Asset, name string) *Asset {
+	for i := range assets {
+		if assets[i].Name == name {
+			return &assets[i]
+		}
+	}
+	return nil
+}
+
+func autoDetectKeyAsset(assets []Asset) *Asset {
+	keywords := []string{"key", "pub", "release"}
+	for i := range assets {
+		nameLower := strings.ToLower(assets[i].Name)
+		if !strings.HasSuffix(nameLower, ".asc") {
+			continue
+		}
+		if strings.Contains(nameLower, ".tar") || strings.Contains(nameLower, ".zip") || strings.Contains(nameLower, ".gz") {
+			continue
+		}
+		for _, kw := range keywords {
+			if strings.Contains(nameLower, kw) {
+				return &assets[i]
+			}
+		}
+	}
+	return nil
+}
+
+func isHTTPURL(value string) bool {
+	lower := strings.ToLower(value)
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 }
 
 func findAssetByTemplates(assets []Asset, ctx templateContext, templates []string) *Asset {

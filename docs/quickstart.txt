@@ -1,0 +1,42 @@
+sfetch quickstart
+=================
+
+Install a signed release from GitHub in three steps:
+
+1. Choose the release selector:
+   - `-latest` for the newest tag
+   - `-tag v2025.12.3` to pin a specific version
+
+2. Provide the verification material:
+   - PGP signatures (`*.asc`): `-pgp-key-file fulmen-release.asc`
+   - Raw ed25519 signatures (`*.sig`): `-key <64-hex-bytes>`
+
+3. Choose install destination:
+   - `-output /usr/local/bin/tool` to clobber a path
+   - `-dest-dir ./bin` to place the extracted binary there
+
+Example (goneat):
+  sfetch -repo fulmenhq/goneat -latest -dest-dir ./bin -pgp-key-file fulmen-release.asc
+
+PGP key lookup order:
+ 1. `-pgp-key-file /path/to/key.asc` (if it starts with http/https, the file is downloaded first)
+ 2. `-pgp-key-url https://example.com/key.asc`
+ 3. `-pgp-key-asset fulmen-release.asc` (download companion asset from release)
+ 4. Auto-detect `.asc` assets containing "key"/"release" if none of the above were set
+
+Build/install helpers:
+  make build
+  make install                 # installs to ~/.local/bin (or %USERPROFILE%\bin on Windows)
+  INSTALL_BINDIR=~/bin make install   # override install dir without editing files
+  # Edit buildconfig.mk once to change NAME or the default INSTALL_BINDIR for everyone
+
+Environment knobs:
+  SFETCH_API_BASE  Override the GitHub API base (use enterprise hubs)
+  XDG_CACHE_HOME   Override the cache root (default ~/.cache/sfetch)
+
+Safety defaults:
+- Checksums must match SHA256/512 per repo config
+- Signatures are mandatory unless `-skip-sig` (testing only)
+- PGP keys import into a temporary GNUPGHOME and are deleted after verification
+
+Need more detail? Re-run with `sfetch -help` for flag descriptions.

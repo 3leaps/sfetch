@@ -16,13 +16,28 @@ Yet we still ship 15-line bash bootstrap scripts that do manual `curl → sha256
 `sfetch` is the missing 1% that deletes those scripts forever.
 
 ### Security & Verification
-See [docs/security.md](docs/security.md) for scanning, exclusions, processes.
+See [docs/security.md](docs/security.md).
+
+### Asset Discovery
+Auto-selects via heuristics ([docs/pattern-matching.md](docs/pattern-matching.md)).
 
 ### Signature verification
 
 - Use `--key <64-hex-bytes>` for raw `.sig`/`.minisig` ed25519 signatures.
-- Use `--pgp-key-file fulmen-release.asc` (and optional `--gpg-bin`) for ASCII-armored `.asc` signatures.
+- Use `--pgp-key-file fulmen-release.asc`, `--pgp-key-url https://example/key.asc`, or `--pgp-key-asset fulmen-release.asc` (plus optional `--gpg-bin`) for ASCII-armored `.asc` signatures. `--pgp-key-file` takes precedence and also supports http(s) URLs; next comes `--pgp-key-url`, then `--pgp-key-asset`, and finally auto-detect of `.asc` assets containing keywords like "key"/"release".
 - See `docs/key-handling.md` for exporting keys, testing them safely, and wiring CI.
+- Need concrete flag combos? Run `sfetch -helpextended` to print the embedded quickstart.
+
+### Build & install
+
+```bash
+make build             # produces bin/sfetch_${GOOS}_${GOARCH}
+make install           # installs to ~/.local/bin by default
+INSTALL_BINDIR=~/bin make install  # override install location
+```
+
+- Edit `buildconfig.mk` to change the canonical binary name (`NAME`) or default install destination once.
+- On Windows, `make install` targets `%USERPROFILE%\bin`; ensure that directory is present in `PATH`.
 
 ```bash
 # Install the latest goneat (or any signed tool) in one line

@@ -98,11 +98,15 @@ jobs:
           ASSET="sfetch_${{ matrix.goos }}_${{ matrix.goarch }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
             ARCHIVE="${ASSET}.zip"
-            zip -j "${ARCHIVE}" "bin/${ASSET}.exe"
+            (cd bin && mv "${ASSET}.exe" "sfetch.exe")
+            zip -j "${ARCHIVE}" "bin/sfetch.exe"
+            (cd bin && mv "sfetch.exe" "${ASSET}.exe")
             CONTENT_TYPE="application/zip"
           else
             ARCHIVE="${ASSET}.tar.gz"
-            tar czf "${ARCHIVE}" -C bin "${ASSET}"
+            (cd bin && mv "${ASSET}" sfetch)
+            tar czf "${ARCHIVE}" -C bin sfetch
+            (cd bin && mv sfetch "${ASSET}")
             CONTENT_TYPE="application/gzip"
           fi
           echo "ASSET_FILE=${ARCHIVE}" >> "$GITHUB_ENV"
