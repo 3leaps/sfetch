@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  create_release:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: sfetch ${{ github.ref }}
+          body: |
+            ## sfetch ${{ github.ref }}
+            Auto-generated release.
+          draft: false
+          prerelease: false
+
+  build:
+    needs: create_release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+          - os: windows-latest
+            goos: windows
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Build
+        run: make build VERSION=${{ github.ref_name }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          NAME: sfetch
+      - name: Package
+        shell: bash
+        run: |
+          ASSET="sfetch_${{ matrix.goos }}_${{ matrix.goarch }}"
+          BINARY="bin/sfetch_${{ matrix.goos }}_${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            7z a ${ASSET}.zip ${BINARY}.exe || zip ${ASSET}.zip ${BINARY}.exe
+            ASSET_FILE="${ASSET}.zip"
+          else
+            tar czf ${ASSET}.tar.gz -C bin sfetch_${{ matrix.goos }}_${{ matrix.goarch }}
+            ASSET_FILE="${ASSET}.tar.gz"
+          fi
+          echo "ASSET_FILE=${ASSET_FILE}" >> $GITHUB_ENV
+          echo "BINARY=${BINARY}" >> $GITHUB_ENV
+      - name: Compute SHA256
+        shell: bash
+        run: sha256sum ${{ env.ASSET_FILE }} > ${{ env.ASSET_FILE }}.sha256
+      - name: Signing (TODO: ed25519 on binary or archive)
+        shell: bash
+        run: |
+          touch ${{ env.ASSET_FILE }}.sig
+          echo "Placeholder sig for ${{ env.ASSET_FILE }}"
+      - name: Upload Archive
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create_release.outputs.upload_url }}
+          asset_path: ${{ env.ASSET_FILE }}
+          asset_name: ${{ env.ASSET_FILE }}
+          asset_content_type: application/gzip
+      - name: Upload SHA256
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create_release.outputs.upload_url }}
+          asset_path: ${{ env.ASSET_FILE }}.sha256
+          asset_name: ${{ env.ASSET_FILE }}.sha256
+          asset_content_type: text/plain
+      - name: Upload SIG
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create_release.outputs.upload_url }}
+          asset_path: ${{ env.ASSET_FILE }}.sig
+          asset_name: ${{ env.ASSET_FILE }}.sig
+          asset_content_type: application/octet-stream
