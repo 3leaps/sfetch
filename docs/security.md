@@ -2,13 +2,17 @@
 
 ## Scanning & Quality Gates
 
-`make precommit` (or `quality`) enforces:
+Run `make prereqs` (or `make bootstrap`) to install Go analysis tools and verify `yamllint` is present before every push. `make precommit` (or `quality`) enforces:
 
-- `fmt`: `go fmt ./...`
+- `prereqs`: installs `staticcheck`/`gosec` and fails fast if `yamllint` is missing (install it via `brew install yamllint`, `sudo apt-get install yamllint`, or `pipx install yamllint`)
+- `fmt-check`: `gofmt -l $(git ls-files '*.go')` (fails if formatting is needed; run `make fmt` to auto-fix)
 - `lint`: `go vet ./...` + `staticcheck ./...`
 - `test`: `go test -v -race ./...`
 - `gosec-high`: `gosec -confidence high -exclude G301,G302,G107,G304 ./...` (0 issues HIGH)
 - `build-all`: Cross-platform static binaries
+- `yamllint-workflows`: `yamllint .github/workflows`
+
+If `make prereqs` fails because `yamllint` is missing, install it manually via `brew install yamllint`, `sudo apt-get install yamllint`, or `pipx install yamllint` so `make precommit` matches CI.
 
 ### Gosec Exclusions Rationale
 

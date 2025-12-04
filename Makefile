@@ -1,6 +1,7 @@
 VERSION ?= dev
 NAME ?= sfetch
 MAIN ?= ./main.go
+YAMLLINT ?= yamllint
 
 # Defaults
 GOOS ?= $(shell go env GOOS)
@@ -10,7 +11,7 @@ ifeq ($(GOOS),windows)
 EXT := .exe
 endif
 
-.PHONY: all build test clean install release fmt lint tools quality gosec gosec-high precommit build-all
+.PHONY: all build test clean install release fmt fmt-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all
 
 all: build
 
@@ -18,8 +19,29 @@ tools:
 	go install honnef.co/go/tools/cmd/staticcheck@latest
 	go install github.com/securego/gosec/v2/cmd/gosec@latest
 
+prereqs: tools
+	@if command -v $(YAMLLINT) >/dev/null 2>&1; then \
+		echo "yamllint available"; \
+	else \
+		echo "yamllint not found. install via 'brew install yamllint' (macOS), 'sudo apt-get install yamllint' (Debian/Ubuntu), or 'pipx install yamllint'." >&2; \
+		exit 1; \
+	fi
+
+bootstrap: prereqs
+
 fmt:
 	go fmt ./...
+
+fmt-check:
+	@files=$$(git ls-files '*.go'); \
+	if [ -n "$$files" ]; then \
+		missing=$$(git ls-files -z '*.go' | xargs -0 gofmt -l); \
+		if [ -n "$$missing" ]; then \
+			echo "gofmt required for:"; \
+			echo "$$missing"; \
+			exit 1; \
+		fi; \
+	fi
 
 lint: tools
 	go vet ./...
@@ -34,7 +56,11 @@ gosec: tools
 gosec-high: tools
 	gosec -confidence high -exclude G301,G302,G107,G304 ./...
 
-quality: tools fmt lint test gosec-high build-all
+yamllint-workflows:
+	@command -v $(YAMLLINT) >/dev/null 2>&1 || { echo "$(YAMLLINT) not found; run 'make prereqs' for install guidance" >&2; exit 1; }
+	$(YAMLLINT) .github/workflows
+
+quality: prereqs fmt-check lint test gosec-high build-all yamllint-workflows
 
 precommit: quality
 
@@ -62,4 +88,4 @@ clean:
 	rm -rf bin/ dist/ coverage.out
 
 install: build
-	sudo install bin/$(NAME)_$(GOOS)_$(GOARCH)$(EXT) /usr/local/bin/$(NAME)$(EXT)VERSION=2025.12.04
+	sudo install bin/$(NAME)_$(GOOS)_$(GOARCH)$(EXT) /usr/local/bin/$(NAME)$(EXT)

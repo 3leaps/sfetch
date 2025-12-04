@@ -1,9 +1,10 @@
+---
 name: Release
 
-on:
+'on':
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
@@ -61,7 +62,9 @@ jobs:
       - name: License check
         run: |
           go install github.com/google/go-licenses@latest
-          go-licenses csv ./... | ! grep -E "(GPL|AGPL)" || (echo "GPL/AGPL detected—blocked" && exit 1)
+          go-licenses csv ./... | \
+            ! grep -E "(GPL|AGPL)" || \
+            (echo "GPL/AGPL detected—blocked" && exit 1)
 
       - name: Install release dependencies
         run: sudo apt-get update && sudo apt-get install -y zip gnupg
@@ -77,7 +80,8 @@ jobs:
           fi
           export GNUPGHOME="$RUNNER_TEMP/gnupg"
           install -d -m 700 "$GNUPGHOME"
-          printf '%s' "$PGP_PRIVATE_KEY" | gpg --batch --homedir "$GNUPGHOME" --import
+          printf '%s' "$PGP_PRIVATE_KEY" | \
+            gpg --batch --homedir "$GNUPGHOME" --import
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
 
       - name: Build
@@ -117,9 +121,19 @@ jobs:
             exit 1
           fi
           if [ -n "${PGP_KEY_PASSPHRASE}" ]; then
-            gpg --homedir "$GNUPGHOME" --batch --yes --pinentry-mode loopback --passphrase "$PGP_KEY_PASSPHRASE" --detach-sign --armor -o "$ASSET_FILE.asc" "$ASSET_FILE"
+            gpg --homedir "$GNUPGHOME" \
+              --batch --yes \
+              --pinentry-mode loopback \
+              --passphrase "$PGP_KEY_PASSPHRASE" \
+              --detach-sign --armor \
+              -o "$ASSET_FILE.asc" \
+              "$ASSET_FILE"
           else
-            gpg --homedir "$GNUPGHOME" --batch --yes --detach-sign --armor -o "$ASSET_FILE.asc" "$ASSET_FILE"
+            gpg --homedir "$GNUPGHOME" \
+              --batch --yes \
+              --detach-sign --armor \
+              -o "$ASSET_FILE.asc" \
+              "$ASSET_FILE"
           fi
 
       - name: Upload Archive
