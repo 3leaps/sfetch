@@ -72,20 +72,6 @@ jobs:
       - name: Install release dependencies
         run: sudo apt-get update && sudo apt-get install -y zip gnupg
 
-      - name: Import release signing key
-        env:
-          PGP_PRIVATE_KEY: ${{ secrets.PGP_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "${PGP_PRIVATE_KEY}" ]; then
-            echo "PGP_PRIVATE_KEY secret must be set" >&2
-            exit 1
-          fi
-          export GNUPGHOME="$RUNNER_TEMP/gnupg"
-          install -d -m 700 "$GNUPGHOME"
-          printf '%s' "$PGP_PRIVATE_KEY" | \
-            gpg --batch --homedir "$GNUPGHOME" --import
-          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
 
       - name: Build
         run: make build VERSION=${VERSION}
@@ -118,31 +104,6 @@ jobs:
       - name: Compute SHA256
         run: sha256sum "$ASSET_FILE" > "$ASSET_FILE.sha256"
 
-      - name: Sign artifact (.asc)
-        env:
-          PGP_KEY_PASSPHRASE: ${{ secrets.PGP_KEY_PASSPHRASE }}
-        run: |
-          set -euo pipefail
-          if [ -z "${GNUPGHOME:-}" ]; then
-            echo "GNUPGHOME missing" >&2
-            exit 1
-          fi
-          if [ -n "${PGP_KEY_PASSPHRASE}" ]; then
-            gpg --homedir "$GNUPGHOME" \
-              --batch --yes \
-              --pinentry-mode loopback \
-              --passphrase "$PGP_KEY_PASSPHRASE" \
-              --detach-sign --armor \
-              -o "$ASSET_FILE.asc" \
-              "$ASSET_FILE"
-          else
-            gpg --homedir "$GNUPGHOME" \
-              --batch --yes \
-              --detach-sign --armor \
-              -o "$ASSET_FILE.asc" \
-              "$ASSET_FILE"
-          fi
-
       - name: Upload Archive
         uses: actions/upload-release-asset@v1
         env:
@@ -162,13 +123,7 @@ jobs:
           asset_path: ${{ env.ASSET_FILE }}.sha256
           asset_name: ${{ env.ASSET_FILE }}.sha256
           asset_content_type: text/plain
-
-      - name: Upload signature (.asc)
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: ${{ env.ASSET_FILE }}.asc
-          asset_name: ${{ env.ASSET_FILE }}.asc
-          asset_content_type: text/plain
+      - name: Signing handled manually
+        if: ${{ false }}
+        run: echo "Signing occurs via scripts/sign-release.sh after CI"
+...
