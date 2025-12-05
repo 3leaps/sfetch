@@ -1,6 +1,6 @@
 #!/bin/sh
 set -e
-VERSION=v2025.12.20
+VERSION=v2025.12.05
 GOOS=$(uname -s | tr '[:upper:]' '[:lower:]')
 GOARCH=$(uname -m)
 ARCHIVE="sfetch_${GOOS}_${GOARCH}.tar.gz"

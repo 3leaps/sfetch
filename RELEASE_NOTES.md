@@ -1,6 +1,6 @@
 # Release Notes
 
-## v2025.12.20 (Unreleased)
+## v2025.12.05 (Unreleased)
 
 ### Highlights
 - Embedded quickstart (`sfetch -helpextended`) so users get practical examples without leaving the CLI.
