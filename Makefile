@@ -102,13 +102,19 @@ release-download:
 	@mkdir -p $(DIST_RELEASE)
 	./scripts/download-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
+release-sha256:
+	./scripts/generate-sha256sums.sh $(RELEASE_TAG) $(DIST_RELEASE)
+
 release-notes:
 	@mkdir -p $(DIST_RELEASE)
 	cp RELEASE_NOTES.md $(DIST_RELEASE)/release-notes-$(RELEASE_TAG).md
 	@echo "✅ Release notes copied to $(DIST_RELEASE)"
 
-release-sign:
+release-sign: release-sha256
 	./scripts/sign-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+
+release-export-key:
+	./scripts/export-release-key.sh $(PGP_KEY_ID) $(DIST_RELEASE)
 
 verify-release-key:
 	./scripts/verify-public-key.sh $(DIST_RELEASE)/$(PUBLIC_KEY_NAME)

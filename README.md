@@ -43,14 +43,12 @@ INSTALL_BINDIR=~/bin make install  # override install location
 
 ### Manual signing workflow
 
-CI uploads unsigned archives. Maintainers sign and re-upload artifacts with:
+CI uploads unsigned archives built remotely (the local scripts never rebuild/clobber those artifacts). Maintainers sign and re-upload with:
 
 ```bash
 RELEASE_TAG=v2025.12.05 make release-download        # needs GitHub CLI (gh)
-PGP_KEY_ID=security@fulmenhq.dev RELEASE_TAG=v2025.12.05 make release-sign
-# Export the public key used above
-mkdir -p dist/release
-gpg --armor --export security@fulmenhq.dev > dist/release/sfetch-release-signing-key.asc
+PGP_KEY_ID=security@fulmenhq.dev RELEASE_TAG=v2025.12.05 make release-sign  # regenerates SHA256SUMS first
+RELEASE_TAG=v2025.12.05 make release-export-key  # exports the matching public key into dist/release
 make verify-release-key
 RELEASE_TAG=v2025.12.05 make release-notes           # copies RELEASE_NOTES.md
 RELEASE_TAG=v2025.12.05 make release-upload          # gh release upload --clobber

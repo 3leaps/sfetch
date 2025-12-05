@@ -15,6 +15,8 @@ if [ ! -f "$NOTES_FILE" ]; then
   echo "release notes file $NOTES_FILE not found" >&2
   exit 1
 fi
+# Assumes release artifacts were built in CI and downloaded locally.
+# This script only re-uploads/clobbers assets on GitHub.
 shopt -s nullglob
 ARTIFACTS=("$DIR"/sfetch_* "$DIR"/SHA256SUMS)
 SIGNATURES=("$DIR"/sfetch_*.asc "$DIR"/SHA256SUMS.asc "$DIR"/*-signing-key.asc)
