@@ -62,9 +62,12 @@ jobs:
       - name: License check
         run: |
           go install github.com/google/go-licenses@latest
-          go-licenses csv ./... | \
-            ! grep -E "(GPL|AGPL)" || \
-            (echo "GPL/AGPL detected—blocked" && exit 1)
+          REPORT=$(go-licenses csv ./...)
+          echo "$REPORT"
+          if echo "$REPORT" | grep -E "(GPL|AGPL)" >/dev/null 2>&1; then
+            echo "GPL/AGPL detected—blocked"
+            exit 1
+          fi
 
       - name: Install release dependencies
         run: sudo apt-get update && sudo apt-get install -y zip gnupg
