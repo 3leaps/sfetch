@@ -21,8 +21,11 @@ INSTALL_BINDIR ?= $(INSTALL_PREFIX)/bin
 endif
 INSTALL_TARGET ?= $(INSTALL_BINDIR)/$(NAME)$(EXT)
 BUILD_ARTIFACT := bin/$(NAME)_$(GOOS)_$(GOARCH)$(EXT)
+DIST_RELEASE := dist/release
+RELEASE_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo v$(VERSION))
+PUBLIC_KEY_NAME ?= sfetch-release-signing-key.asc
 
-.PHONY: all build test clean install release fmt fmt-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all
+.PHONY: all build test clean install release fmt fmt-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-sign release-notes release-upload verify-release-key
 
 all: build
 
@@ -94,6 +97,24 @@ release: build-all
 	# TODO: GitHub release automation
 	@echo "Release preparation for $(VERSION)"
 	@echo "Build all platforms and prepare assets"
+
+release-download:
+	@mkdir -p $(DIST_RELEASE)
+	./scripts/download-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+
+release-notes:
+	@mkdir -p $(DIST_RELEASE)
+	cp RELEASE_NOTES.md $(DIST_RELEASE)/release-notes-$(RELEASE_TAG).md
+	@echo "✅ Release notes copied to $(DIST_RELEASE)"
+
+release-sign:
+	./scripts/sign-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+
+verify-release-key:
+	./scripts/verify-public-key.sh $(DIST_RELEASE)/$(PUBLIC_KEY_NAME)
+
+release-upload: release-notes verify-release-key
+	./scripts/upload-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
 clean:
 	rm -rf bin/ dist/ coverage.out

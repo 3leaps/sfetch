@@ -41,6 +41,23 @@ INSTALL_BINDIR=~/bin make install  # override install location
 - Edit `buildconfig.mk` to change the canonical binary name (`NAME`) or default install destination once.
 - On Windows, `make install` targets `%USERPROFILE%\bin`; ensure that directory is present in `PATH`.
 
+### Manual signing workflow
+
+CI uploads unsigned archives. Maintainers sign and re-upload artifacts with:
+
+```bash
+RELEASE_TAG=v2025.12.05 make release-download        # needs GitHub CLI (gh)
+PGP_KEY_ID=security@fulmenhq.dev RELEASE_TAG=v2025.12.05 make release-sign
+# Export the public key used above
+mkdir -p dist/release
+gpg --armor --export security@fulmenhq.dev > dist/release/sfetch-release-signing-key.asc
+make verify-release-key
+RELEASE_TAG=v2025.12.05 make release-notes           # copies RELEASE_NOTES.md
+RELEASE_TAG=v2025.12.05 make release-upload          # gh release upload --clobber
+```
+
+Set `RELEASE_TAG` to the tag you're publishing. The scripts in `scripts/` can be used individually if you prefer manual control.
+
 ```bash
 # Install the latest goneat (or any signed tool) in one line
 sfetch --repo fulmenhq/goneat --latest --output /usr/local/bin/goneat --pgp-key-file fulmen-release.asc

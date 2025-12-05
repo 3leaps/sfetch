@@ -32,6 +32,19 @@ Inline `#nosec` comments on 12 sites for line-granular audit.
 - **Preflight**: `--skip-tools-check` optional (tar/unzip req).
 - **gpg optional**: `--pgp-key-file` → temp keyring deleted.
 
+## Manual release signing
+
+CI uploads unsigned archives and individual SHA256 digests. Maintainers:
+
+1. `RELEASE_TAG=v2025.12.05 make release-download`
+2. `PGP_KEY_ID=security@fulmenhq.dev RELEASE_TAG=v2025.12.05 make release-sign`
+3. Export the matching public key into `dist/release/sfetch-release-signing-key.asc`
+4. `make verify-release-key`
+5. `RELEASE_TAG=v2025.12.05 make release-notes`
+6. `RELEASE_TAG=v2025.12.05 make release-upload`
+
+These targets call the helper scripts in `scripts/` (requires `gh` CLI + `gpg`). Adjust `RELEASE_TAG`/`PGP_KEY_ID` to match the release you’re publishing.
+
 ## Future
 
 - Pure-Go PGP (no gpg).
