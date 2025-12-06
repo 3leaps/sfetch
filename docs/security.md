@@ -34,20 +34,26 @@ Inline `#nosec` comments on 12 sites for line-granular audit.
 
 ## Manual release signing
 
-CI uploads unsigned archives and individual SHA256 digests. Maintainers:
+CI uploads unsigned archives only. Maintainers sign `SHA256SUMS` locally with minisign (primary) and optionally PGP:
 
-1. `RELEASE_TAG=v2025.12.05 make release-download`
-2. `PGP_KEY_ID=security@fulmenhq.dev RELEASE_TAG=v2025.12.05 make release-sign`
-3. `PGP_KEY_ID=security@fulmenhq.dev RELEASE_TAG=v2025.12.05 make release-export-key`
-4. `make verify-release-key`
-5. `RELEASE_TAG=v2025.12.05 make release-notes`
-6. `RELEASE_TAG=v2025.12.05 make release-upload`
+```bash
+export MINISIGN_KEY=/path/to/key.key
+export PGP_KEY_ID=your-key-id  # optional
 
-These targets call the helper scripts in `scripts/` (requires `gh` CLI + `gpg`). Adjust `RELEASE_TAG`/`PGP_KEY_ID` to match the release you’re publishing.
+RELEASE_TAG=v2025.12.06 make release-download
+RELEASE_TAG=v2025.12.06 make release-sign
+make release-export-minisign-key
+make release-export-key  # if using PGP
+RELEASE_TAG=v2025.12.06 make release-notes
+RELEASE_TAG=v2025.12.06 make release-upload
+```
+
+Only `SHA256SUMS` is signed (not individual files). Users verify the signature on `SHA256SUMS`, then verify archive checksums against it. This is standard practice - signing individual files would be redundant.
+
+See [docs/security/signing-runbook.md](security/signing-runbook.md) for detailed workflow.
 
 ## Future
 
-- Pure-Go PGP (no gpg).
 - Fuzz sig/checksum.
 - Cosign/Sigstore.
 

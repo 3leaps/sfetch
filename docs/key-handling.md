@@ -14,13 +14,17 @@ tags: ["docs", "signing", "security"]
 
 ## Supported signature formats
 
-| Format | Expected asset companion | Verification flag |
-| --- | --- | --- |
-| Raw ed25519 (`.sig`, `.sig.ed25519`, `.minisig`) | Detached 64-byte signature (binary or hex text). | `--key <64-hex-bytes>` |
-| ASCII-armored PGP (`.asc`) | Detached signature created with `gpg --detach-sign --armor`. | `--pgp-key-file path/to/public.asc` + optional `--gpg-bin` |
+| Format | Extension | Verification flag | Client deps |
+| --- | --- | --- | --- |
+| **Minisign** | `.minisig` | `--minisign-key <pubkey.pub>` | None (pure-Go) |
+| Raw ed25519 | `.sig`, `.sig.ed25519` | `--key <64-hex-bytes>` | None (pure-Go) |
+| ASCII-armored PGP | `.asc` | `--pgp-key-file path/to/public.asc` | `gpg` binary |
+
+Minisign is the recommended format for sfetch releases. It provides trusted comments (signed metadata) and password-protected keys.
 
 `sfetch` auto-detects the format by inspecting the signature file contents:
 
+- `untrusted comment:` prefix → minisign format, verified with pure-Go ed25519.
 - `-----BEGIN PGP SIGNATURE-----` → invokes `gpg` in a temporary keyring.
 - 64 raw bytes → treats as binary ed25519.
 - Hex text of length 128 → decoded into raw ed25519 before verification.
@@ -52,6 +56,7 @@ gpg --export --armor security@fulmenhq.dev | grep -v "-----" | tr -d '\n'
 
 ## Operational tips
 
-- Store org-wide keys under `docs/` (similar to `testdata/keys/test-pgp-pub.asc`) so CI, bootstrap scripts, and integration tests reference the same source.
-- For third-party projects, publish both `.sig` and `.asc` if possible: `.sig` enables purely-Go verification, while `.asc` supports users who already trust PGP tooling.
-- Document key rotation steps alongside release playbooks to keep future maintainers aligned (see `.plans/bootstrap.md`).
+- Store org-wide public keys under `docs/` or publish with releases so CI, bootstrap scripts, and integration tests reference the same source.
+- For your own releases, use minisign (`.minisig`) as primary format - it's pure-Go verifiable with signed metadata. Add PGP (`.asc`) as secondary for users who prefer gpg tooling.
+- Only sign `SHA256SUMS`, not individual files. Users verify the signature, then verify file checksums against SHA256SUMS.
+- Document key rotation steps alongside release playbooks to keep future maintainers aligned (see `docs/security/signing-runbook.md`).

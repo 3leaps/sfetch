@@ -24,8 +24,10 @@ BUILD_ARTIFACT := bin/$(NAME)_$(GOOS)_$(GOARCH)$(EXT)
 DIST_RELEASE := dist/release
 RELEASE_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo v$(VERSION))
 PUBLIC_KEY_NAME ?= sfetch-release-signing-key.asc
+MINISIGN_KEY ?=
+MINISIGN_PUB_NAME ?= sfetch-minisign.pub
 
-.PHONY: all build test clean install release fmt fmt-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-sign release-notes release-upload verify-release-key
+.PHONY: all build test clean install release fmt fmt-check shell-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script
 
 all: build
 
@@ -34,17 +36,19 @@ tools:
 	go install github.com/securego/gosec/v2/cmd/gosec@latest
 
 prereqs: tools
-	@if command -v $(YAMLLINT) >/dev/null 2>&1; then \
-		echo "yamllint available"; \
-	else \
-		echo "yamllint not found. install via 'brew install yamllint' (macOS), 'sudo apt-get install yamllint' (Debian/Ubuntu), or 'pipx install yamllint'." >&2; \
-		exit 1; \
-	fi
+	@echo "Checking prerequisites..."
+	@command -v $(YAMLLINT) >/dev/null 2>&1 || { echo "yamllint not found: brew install yamllint / apt install yamllint / pipx install yamllint" >&2; exit 1; }
+	@command -v shfmt >/dev/null 2>&1 || { echo "shfmt not found: brew install shfmt / go install mvdan.cc/sh/v3/cmd/shfmt@latest" >&2; exit 1; }
+	@command -v shellcheck >/dev/null 2>&1 || echo "shellcheck not found (optional): brew install shellcheck / apt install shellcheck"
+	@echo "All prerequisites available"
 
 bootstrap: prereqs
 
 fmt:
 	go fmt ./...
+	@if command -v shfmt >/dev/null 2>&1; then \
+		shfmt -w -i 4 -ci scripts/*.sh; \
+	fi
 
 fmt-check:
 	@files=$$(git ls-files '*.go'); \
@@ -55,6 +59,16 @@ fmt-check:
 			echo "$$missing"; \
 			exit 1; \
 		fi; \
+	fi
+
+shell-check:
+	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found: brew install shellcheck" >&2; exit 1; }
+	@command -v shfmt >/dev/null 2>&1 || { echo "shfmt not found: brew install shfmt" >&2; exit 1; }
+	shellcheck scripts/*.sh
+	@if ! shfmt -d scripts/*.sh >/dev/null 2>&1; then \
+		echo "shfmt formatting required for scripts/*.sh - run 'make fmt'"; \
+		shfmt -d scripts/*.sh; \
+		exit 1; \
 	fi
 
 lint: tools
@@ -74,7 +88,7 @@ yamllint-workflows:
 	@command -v $(YAMLLINT) >/dev/null 2>&1 || { echo "$(YAMLLINT) not found; run 'make prereqs' for install guidance" >&2; exit 1; }
 	$(YAMLLINT) .github/workflows
 
-quality: prereqs fmt-check lint test gosec-high build-all yamllint-workflows
+quality: prereqs fmt-check shell-check lint test gosec-high build-all yamllint-workflows
 
 precommit: quality
 
@@ -102,7 +116,12 @@ release-download:
 	@mkdir -p $(DIST_RELEASE)
 	./scripts/download-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
-release-sha256:
+bootstrap-script:
+	@mkdir -p $(DIST_RELEASE)
+	cp scripts/install-sfetch.sh $(DIST_RELEASE)/install-sfetch.sh
+	@echo "✅ Copied install-sfetch.sh to $(DIST_RELEASE)"
+
+release-sha256: bootstrap-script
 	./scripts/generate-sha256sums.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
 release-notes:
@@ -111,10 +130,23 @@ release-notes:
 	@echo "✅ Release notes copied to $(DIST_RELEASE)"
 
 release-sign: release-sha256
-	./scripts/sign-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+	MINISIGN_KEY=$(MINISIGN_KEY) PGP_KEY_ID=$(PGP_KEY_ID) ./scripts/sign-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
 release-export-key:
 	./scripts/export-release-key.sh $(PGP_KEY_ID) $(DIST_RELEASE)
+
+release-export-minisign-key:
+	@if [ -z "$(MINISIGN_KEY)" ]; then echo "MINISIGN_KEY not set" >&2; exit 1; fi
+	@mkdir -p $(DIST_RELEASE)
+	@# Extract public key path from secret key (replace .key with .pub)
+	@pubkey="$$(echo "$(MINISIGN_KEY)" | sed 's/\.key$$/.pub/')"; \
+	if [ -f "$$pubkey" ]; then \
+		cp "$$pubkey" "$(DIST_RELEASE)/$(MINISIGN_PUB_NAME)"; \
+		echo "✅ Copied minisign public key to $(DIST_RELEASE)/$(MINISIGN_PUB_NAME)"; \
+	else \
+		echo "error: public key $$pubkey not found (expected alongside secret key)" >&2; \
+		exit 1; \
+	fi
 
 verify-release-key:
 	./scripts/verify-public-key.sh $(DIST_RELEASE)/$(PUBLIC_KEY_NAME)

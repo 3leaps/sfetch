@@ -23,10 +23,11 @@ Auto-selects via heuristics ([docs/pattern-matching.md](docs/pattern-matching.md
 
 ### Signature verification
 
-- Use `--key <64-hex-bytes>` for raw `.sig`/`.minisig` ed25519 signatures.
-- Use `--pgp-key-file fulmen-release.asc`, `--pgp-key-url https://example/key.asc`, or `--pgp-key-asset fulmen-release.asc` (plus optional `--gpg-bin`) for ASCII-armored `.asc` signatures. `--pgp-key-file` takes precedence and also supports http(s) URLs; next comes `--pgp-key-url`, then `--pgp-key-asset`, and finally auto-detect of `.asc` assets containing keywords like "key"/"release".
-- See `docs/key-handling.md` for exporting keys, testing them safely, and wiring CI.
-- Need concrete flag combos? Run `sfetch -helpextended` to print the embedded quickstart.
+- Use `--minisign-key <pubkey.pub>` for minisign signatures (`.minisig`) - recommended, pure-Go verification.
+- Use `--key <64-hex-bytes>` for raw ed25519 signatures (`.sig`).
+- Use `--pgp-key-file <key.asc>` for PGP signatures (`.asc`) - requires `gpg`.
+- See [docs/key-handling.md](docs/key-handling.md) for supported formats and verification details.
+- Run `sfetch -helpextended` for concrete examples.
 
 ### Build, versioning & install
 
@@ -41,17 +42,82 @@ INSTALL_BINDIR=~/bin make install  # override install location
 - Edit `buildconfig.mk` to change the canonical binary name (`NAME`) or default install destination once.
 - On Windows, `make install` targets `%USERPROFILE%\bin`; ensure that directory is present in `PATH`.
 
-### Manual signing workflow
-
-CI uploads unsigned archives built remotely (the local scripts never rebuild/clobber those artifacts). Maintainers sign and re-upload with:
+### Bootstrap install
 
 ```bash
-RELEASE_TAG=v2025.12.05 make release-download        # needs GitHub CLI (gh)
-PGP_KEY_ID=security@fulmenhq.dev RELEASE_TAG=v2025.12.05 make release-sign  # regenerates SHA256SUMS first
-RELEASE_TAG=v2025.12.05 make release-export-key  # exports the matching public key into dist/release
-make verify-release-key
-RELEASE_TAG=v2025.12.05 make release-notes           # copies RELEASE_NOTES.md
-RELEASE_TAG=v2025.12.05 make release-upload          # gh release upload --clobber
+# Using curl
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+
+# Using wget
+wget -qO- https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+#### Installer options
+
+Pass arguments using `bash -s --`:
+
+```bash
+# Install to custom directory
+curl -sSfL .../install-sfetch.sh | bash -s -- --dir ~/bin
+
+# Install specific version
+curl -sSfL .../install-sfetch.sh | bash -s -- --tag v2025.12.06
+
+# Dry run (download and verify, don't install)
+curl -sSfL .../install-sfetch.sh | bash -s -- --dry-run
+
+# Skip confirmation prompt
+curl -sSfL .../install-sfetch.sh | bash -s -- --yes
+```
+
+The installer:
+- Detects platform (linux/darwin/windows, amd64/arm64)
+- Verifies signatures using embedded minisign public key (trust anchor)
+- Falls back to GPG if minisign unavailable, warns if neither present
+
+#### Verify before piping to bash
+
+For users who prefer to verify the installer before execution:
+
+```bash
+# Download assets (curl)
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh -o install-sfetch.sh
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS -o SHA256SUMS
+
+# Download assets (wget)
+wget -q https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh
+wget -q https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS
+
+# Option A: Verify with minisign (recommended)
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS.minisig -o SHA256SUMS.minisig
+minisign -Vm SHA256SUMS -P RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC
+grep install-sfetch.sh SHA256SUMS | sha256sum -c
+
+# Option B: Verify with GPG
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS.asc -o SHA256SUMS.asc
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/sfetch-release-signing-key.asc -o sfetch-release-signing-key.asc
+gpg --import sfetch-release-signing-key.asc
+gpg --verify SHA256SUMS.asc SHA256SUMS
+grep install-sfetch.sh SHA256SUMS | sha256sum -c
+
+# Run after verification
+bash install-sfetch.sh
+```
+
+### Manual signing workflow
+
+CI uploads unsigned archives. Maintainers sign `SHA256SUMS` locally with minisign (primary) and optionally PGP:
+
+```bash
+export MINISIGN_KEY=/path/to/sfetch.key
+export PGP_KEY_ID=security@fulmenhq.dev  # optional
+
+RELEASE_TAG=v2025.12.06 make release-download
+RELEASE_TAG=v2025.12.06 make release-sign
+make release-export-minisign-key
+make release-export-key                   # if using PGP
+RELEASE_TAG=v2025.12.06 make release-notes
+RELEASE_TAG=v2025.12.06 make release-upload
 ```
 
 Set `RELEASE_TAG` to the tag you're publishing. The scripts in `scripts/` can be used individually if you prefer manual control.

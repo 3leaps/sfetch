@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	_ "embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -87,13 +88,17 @@ var repoConfigs = map[string]RepoConfig{
 }
 
 const (
-	sigFormatBinary = "binary"
-	sigFormatPGP    = "pgp"
+	sigFormatBinary   = "binary"
+	sigFormatPGP      = "pgp"
+	sigFormatMinisign = "minisign"
 )
 
 type signatureData struct {
-	format string
-	bytes  []byte
+	format         string
+	bytes          []byte
+	keyID          []byte // minisign: 8-byte key ID
+	trustedComment string // minisign: trusted comment (signed)
+	globalSig      []byte // minisign: signature over (sig + trusted comment)
 }
 
 func apiBaseURL() string {
@@ -111,6 +116,7 @@ func main() {
 	output := flag.String("output", "", "output path")
 	assetRegex := flag.String("asset-regex", "", "asset name regex (overrides auto-detect)")
 	key := flag.String("key", "", "ed25519 pubkey hex (32 bytes)")
+	minisignPubKey := flag.String("minisign-key", "", "path to minisign public key file (.pub)")
 	pgpKeyFile := flag.String("pgp-key-file", "", "path to ASCII-armored PGP public key")
 	pgpKeyURL := flag.String("pgp-key-url", "", "URL to download ASCII-armored PGP public key")
 	pgpKeyAsset := flag.String("pgp-key-asset", "", "release asset name for ASCII-armored PGP public key")
@@ -358,6 +364,22 @@ func main() {
 				os.Exit(1)
 			}
 			fmt.Println("PGP signature verified OK")
+
+		case sigFormatMinisign:
+			if *minisignPubKey == "" {
+				fmt.Fprintln(os.Stderr, "error: --minisign-key required for .minisig signatures")
+				os.Exit(1)
+			}
+			pubKey, err := parseMinisignPublicKey(*minisignPubKey)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			if err := verifyMinisignSignature(assetBytes, sigData, pubKey); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			fmt.Println("Minisign signature verified OK")
 
 		case sigFormatBinary:
 			normalizedKey, err := normalizeHexKey(*key)
@@ -999,6 +1021,10 @@ func loadSignature(path string) (signatureData, error) {
 	if strings.HasPrefix(trimmed, "-----BEGIN PGP SIGNATURE-----") {
 		return signatureData{format: sigFormatPGP}, nil
 	}
+	// Check for minisign format (starts with "untrusted comment:")
+	if strings.HasPrefix(trimmed, "untrusted comment:") {
+		return parseMinisignSignature(trimmed)
+	}
 	if len(data) == ed25519.SignatureSize {
 		return signatureData{format: sigFormatBinary, bytes: data}, nil
 	}
@@ -1007,6 +1033,128 @@ func loadSignature(path string) (signatureData, error) {
 		return signatureData{format: sigFormatBinary, bytes: decoded}, nil
 	}
 	return signatureData{}, fmt.Errorf("unsupported signature format in %s", path)
+}
+
+// parseMinisignSignature parses a minisign .minisig file.
+// Format:
+//
+//	untrusted comment: <text>
+//	<base64: 2-byte algo "Ed" + 8-byte keyID + 64-byte sig>
+//	trusted comment: <text>
+//	<base64: 64-byte global sig>
+func parseMinisignSignature(content string) (signatureData, error) {
+	lines := strings.Split(content, "\n")
+	if len(lines) < 4 {
+		return signatureData{}, fmt.Errorf("minisign signature: expected 4 lines, got %d", len(lines))
+	}
+
+	// Line 0: untrusted comment (ignored)
+	// Line 1: base64 signature blob
+	sigBlob, err := base64.StdEncoding.DecodeString(strings.TrimSpace(lines[1]))
+	if err != nil {
+		return signatureData{}, fmt.Errorf("minisign signature: decode sig: %w", err)
+	}
+	// Expected: 2 (algo) + 8 (keyID) + 64 (sig) = 74 bytes
+	if len(sigBlob) != 74 {
+		return signatureData{}, fmt.Errorf("minisign signature: expected 74 bytes, got %d", len(sigBlob))
+	}
+	algo := sigBlob[0:2]
+	if algo[0] != 0x45 || algo[1] != 0x64 { // "Ed"
+		return signatureData{}, fmt.Errorf("minisign signature: unsupported algorithm %x", algo)
+	}
+	keyID := sigBlob[2:10]
+	sig := sigBlob[10:74]
+
+	// Line 2: trusted comment
+	if !strings.HasPrefix(lines[2], "trusted comment:") {
+		return signatureData{}, fmt.Errorf("minisign signature: expected 'trusted comment:' on line 3")
+	}
+	trustedComment := strings.TrimPrefix(lines[2], "trusted comment:")
+	trustedComment = strings.TrimSpace(trustedComment)
+
+	// Line 3: global signature
+	globalSig, err := base64.StdEncoding.DecodeString(strings.TrimSpace(lines[3]))
+	if err != nil {
+		return signatureData{}, fmt.Errorf("minisign signature: decode global sig: %w", err)
+	}
+	if len(globalSig) != 64 {
+		return signatureData{}, fmt.Errorf("minisign signature: expected 64-byte global sig, got %d", len(globalSig))
+	}
+
+	return signatureData{
+		format:         sigFormatMinisign,
+		bytes:          sig,
+		keyID:          keyID,
+		trustedComment: trustedComment,
+		globalSig:      globalSig,
+	}, nil
+}
+
+// minisignPublicKey holds a parsed minisign public key.
+type minisignPublicKey struct {
+	keyID  []byte
+	pubKey ed25519.PublicKey
+}
+
+// parseMinisignPublicKey parses a minisign .pub file.
+// Format:
+//
+//	untrusted comment: <text>
+//	<base64: 2-byte algo "Ed" + 8-byte keyID + 32-byte pubkey>
+func parseMinisignPublicKey(path string) (minisignPublicKey, error) {
+	// #nosec G304 -- path controlled by user flag
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return minisignPublicKey{}, fmt.Errorf("read minisign pubkey: %w", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 2 {
+		return minisignPublicKey{}, fmt.Errorf("minisign pubkey: expected at least 2 lines")
+	}
+
+	// Line 0: untrusted comment (ignored)
+	// Line 1: base64 key blob
+	keyBlob, err := base64.StdEncoding.DecodeString(strings.TrimSpace(lines[1]))
+	if err != nil {
+		return minisignPublicKey{}, fmt.Errorf("minisign pubkey: decode: %w", err)
+	}
+	// Expected: 2 (algo) + 8 (keyID) + 32 (pubkey) = 42 bytes
+	if len(keyBlob) != 42 {
+		return minisignPublicKey{}, fmt.Errorf("minisign pubkey: expected 42 bytes, got %d", len(keyBlob))
+	}
+	algo := keyBlob[0:2]
+	if algo[0] != 0x45 || algo[1] != 0x64 { // "Ed"
+		return minisignPublicKey{}, fmt.Errorf("minisign pubkey: unsupported algorithm %x", algo)
+	}
+
+	return minisignPublicKey{
+		keyID:  keyBlob[2:10],
+		pubKey: ed25519.PublicKey(keyBlob[10:42]),
+	}, nil
+}
+
+// verifyMinisignSignature verifies a minisign signature.
+// It checks both the main signature over the file content and the global signature
+// over (signature + trusted comment).
+func verifyMinisignSignature(fileContent []byte, sig signatureData, pubKey minisignPublicKey) error {
+	// Check key ID matches
+	if !bytes.Equal(sig.keyID, pubKey.keyID) {
+		return fmt.Errorf("minisign: key ID mismatch (sig: %x, key: %x)", sig.keyID, pubKey.keyID)
+	}
+
+	// Verify main signature over file content
+	if !ed25519.Verify(pubKey.pubKey, fileContent, sig.bytes) {
+		return fmt.Errorf("minisign: signature verification failed")
+	}
+
+	// Verify global signature over (signature + trusted comment)
+	// The trusted comment is prefixed with "trusted comment: " in the global sig calculation
+	globalMsg := append(sig.bytes, []byte(sig.trustedComment)...)
+	if !ed25519.Verify(pubKey.pubKey, globalMsg, sig.globalSig) {
+		return fmt.Errorf("minisign: global signature verification failed")
+	}
+
+	return nil
 }
 
 func verifyPGPSignature(assetPath, sigPath, pubKeyPath, gpgBin string) error {
