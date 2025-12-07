@@ -7,6 +7,26 @@ and this project adheres to [CalVer: YYYY.MM.DD](https://calver.org/).
 
 ## [Unreleased]
 
+## [v2025.12.06] - 2025-12-06
+
+### Added
+- `--minisign-key` flag for pure-Go minisign signature verification.
+- `install-sfetch.sh` bootstrap installer with embedded minisign trust anchor.
+- Dual signing: SHA256SUMS signed with both minisign (.minisig) and PGP (.asc).
+- `shell-check` Makefile target (shellcheck + shfmt) added to precommit.
+- Key rotation checklist in `docs/security/signing-runbook.md`.
+- Pre-pipe verification docs with minisign and GPG options.
+
+### Changed
+- Install script included in SHA256SUMS for unified verification.
+- CI workflow installs shellcheck and shfmt for shell script validation.
+- Release workflow uploads install-sfetch.sh as release asset.
+
+### Removed
+- `bootstrap.sh` (replaced by `install-sfetch.sh` with proper verification).
+
+## [v2025.12.05] - 2025-12-05
+
 ### Added
 - Embedded quickstart text printable via `sfetch -helpextended`.
 - `buildconfig.mk` to centralize binary name and install defaults.

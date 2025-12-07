@@ -1,13 +1,23 @@
 # Release Notes
 
-## v2025.12.05 (Unreleased)
+## v2025.12.06
 
 ### Highlights
-- Embedded quickstart (`sfetch -helpextended`) so users get practical examples without leaving the CLI.
-- Automated PGP key discovery (`--pgp-key-url`, `--pgp-key-asset`, and auto-detect) so goneat and similar releases no longer require manual key downloads.
-- `make install` now installs into user-space by default and can be customized via `buildconfig.mk`.
-- Release artifacts ship with a consistent `sfetch`/`sfetch.exe` name, simplifying bootstrap scripts and downstream installers.
+- **Minisign verification**: Pure-Go parsing of `.minisig` files via `--minisign-key` flag.
+- **Secure bootstrap installer**: `install-sfetch.sh` with embedded minisign trust anchor for `curl | bash` installs.
+- **Dual signing**: Releases signed with both minisign and PGP for user choice.
+- **Shell script validation**: `shellcheck` and `shfmt` added to precommit checks.
+
+### Install
+
+```bash
+# Quick install
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+
+# With options
+curl -sSfL .../install-sfetch.sh | bash -s -- --dir ~/bin --yes
+```
 
 ### Details
-- See `CHANGELOG.md` (Unreleased) for the complete list of additions and fixes.
-- Each release will have a dedicated notes file under `docs/releases/` named `vYYYY.MM.DD.md`.
+- See `CHANGELOG.md` for the complete list of additions and fixes.
+- Release notes: `docs/releases/v2025.12.06.md`
