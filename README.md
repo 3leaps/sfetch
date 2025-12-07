@@ -91,14 +91,16 @@ wget -q https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS
 # Option A: Verify with minisign (recommended)
 curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS.minisig -o SHA256SUMS.minisig
 minisign -Vm SHA256SUMS -P RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC
-grep install-sfetch.sh SHA256SUMS | sha256sum -c
+shasum -a 256 -c SHA256SUMS --ignore-missing  # or: sha256sum -c SHA256SUMS --ignore-missing (Linux)
 
-# Option B: Verify with GPG
+# Option B: Verify with GPG (uses temp keyring)
 curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS.asc -o SHA256SUMS.asc
 curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/sfetch-release-signing-key.asc -o sfetch-release-signing-key.asc
-gpg --import sfetch-release-signing-key.asc
-gpg --verify SHA256SUMS.asc SHA256SUMS
-grep install-sfetch.sh SHA256SUMS | sha256sum -c
+GPG_TMPDIR=$(mktemp -d)
+gpg --homedir "$GPG_TMPDIR" --import sfetch-release-signing-key.asc
+gpg --homedir "$GPG_TMPDIR" --verify SHA256SUMS.asc SHA256SUMS
+rm -rf "$GPG_TMPDIR"
+shasum -a 256 -c SHA256SUMS --ignore-missing  # or: sha256sum -c SHA256SUMS --ignore-missing (Linux)
 
 # Run after verification
 bash install-sfetch.sh

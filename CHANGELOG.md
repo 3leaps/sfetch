@@ -7,7 +7,20 @@ and this project adheres to [CalVer: YYYY.MM.DD](https://calver.org/).
 
 ## [Unreleased]
 
-## [v2025.12.06] - 2025-12-06
+## [v2025.12.06.1] - 2025-12-06
+
+### Fixed
+- Install script EXIT trap error due to `local` variable scoping.
+- SHA256SUMS now contains basenames only (was including `dist/release/` prefix).
+
+### Changed
+- CI now tests install script with `--dry-run` to catch runtime issues.
+- README verification examples use `shasum -a 256` (macOS compatible) and temp GPG keyring.
+- Upload script includes minisign files (`SHA256SUMS.minisig`, `sfetch-minisign.pub`).
+
+## [v2025.12.06] - 2025-12-06 [YANKED]
+
+**Note:** This release had a bug in install-sfetch.sh. Use v2025.12.06.1 instead.
 
 ### Added
 - `--minisign-key` flag for pure-Go minisign signature verification.

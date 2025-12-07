@@ -333,8 +333,7 @@ main() {
 	# Check verification tools
 	check_verification_tools
 
-	# Create temp directory
-	local tmpdir
+	# Create temp directory (not local - needed for EXIT trap)
 	tmpdir=$(mktemp -d)
 	trap 'rm -rf "$tmpdir"' EXIT
 

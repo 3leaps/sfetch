@@ -1,23 +1,24 @@
 # Release Notes
 
-## v2025.12.06
+## v2025.12.06.1
 
-### Highlights
-- **Minisign verification**: Pure-Go parsing of `.minisig` files via `--minisign-key` flag.
-- **Secure bootstrap installer**: `install-sfetch.sh` with embedded minisign trust anchor for `curl | bash` installs.
-- **Dual signing**: Releases signed with both minisign and PGP for user choice.
-- **Shell script validation**: `shellcheck` and `shfmt` added to precommit checks.
+### Summary
+Patch release fixing install script bug from v2025.12.06.
+
+### Fixed
+- Install script EXIT trap error (`tmpdir: unbound variable`) due to `local` variable scoping.
+
+### Changed
+- CI now tests install script with `--dry-run` against previous release.
+- README verification examples use `shasum -a 256` (macOS compatible) and temp GPG keyring.
+- Upload script includes minisign signature files.
 
 ### Install
 
 ```bash
-# Quick install
 curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
-
-# With options
-curl -sSfL .../install-sfetch.sh | bash -s -- --dir ~/bin --yes
 ```
 
 ### Details
-- See `CHANGELOG.md` for the complete list of additions and fixes.
-- Release notes: `docs/releases/v2025.12.06.md`
+- See `CHANGELOG.md` for the complete list.
+- Release notes: `docs/releases/v2025.12.06.1.md`

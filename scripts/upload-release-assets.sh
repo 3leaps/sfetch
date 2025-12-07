@@ -18,8 +18,8 @@ fi
 # Assumes release artifacts were built in CI and downloaded locally.
 # This script only re-uploads/clobbers assets on GitHub.
 shopt -s nullglob
-ARTIFACTS=("$DIR"/sfetch_* "$DIR"/SHA256SUMS)
-SIGNATURES=("$DIR"/sfetch_*.asc "$DIR"/SHA256SUMS.asc "$DIR"/*-signing-key.asc)
+ARTIFACTS=("$DIR"/sfetch_* "$DIR"/SHA256SUMS "$DIR"/install-sfetch.sh)
+SIGNATURES=("$DIR"/SHA256SUMS.minisig "$DIR"/SHA256SUMS.asc "$DIR"/*-minisign.pub "$DIR"/*-signing-key.asc)
 if [ ${#ARTIFACTS[@]} -eq 0 ]; then
 	echo "no artifacts to upload" >&2
 	exit 1
