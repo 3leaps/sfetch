@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/3leaps/sfetch/schemas/repo-config.schema.json",
+  "title": "sfetch Repository Configuration",
+  "description": "Configuration for how sfetch discovers and verifies release artifacts from a repository",
+  "type": "object",
+  "properties": {
+    "binaryName": {
+      "type": "string",
+      "description": "Name of the binary to extract from archives",
+      "examples": ["sfetch", "goneat", "kubectl"]
+    },
+    "hashAlgo": {
+      "type": "string",
+      "enum": ["sha256", "sha512"],
+      "default": "sha256",
+      "description": "Hash algorithm used in checksum files"
+    },
+    "archiveType": {
+      "type": "string",
+      "enum": ["tar.gz", "tgz", "zip"],
+      "default": "tar.gz",
+      "description": "Primary archive format for this repository"
+    },
+    "archiveExtensions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [".tar.gz", ".tgz", ".zip"],
+      "description": "File extensions recognized as archives"
+    },
+    "assetPatterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Regex patterns for matching release assets. Supports template variables: {{binary}}, {{osToken}}, {{archToken}}, {{goos}}, {{goarch}}",
+      "examples": [
+        "(?i)^{{binary}}[_-]{{osToken}}[_-]{{archToken}}.*"
+      ]
+    },
+    "checksumCandidates": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Patterns for finding checksum files. Supports: {{asset}}, {{base}}, {{binary}}",
+      "default": [
+        "{{asset}}.sha256",
+        "{{asset}}.sha256.txt",
+        "{{base}}.sha256",
+        "{{base}}.sha256.txt",
+        "SHA256SUMS",
+        "SHA256SUMS.txt",
+        "checksums.txt",
+        "CHECKSUMS",
+        "CHECKSUMS.txt"
+      ]
+    },
+    "checksumSigCandidates": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Patterns for finding signatures over checksum files (Workflow A). Evaluated in order; first match wins.",
+      "default": [
+        "SHA256SUMS.minisig",
+        "SHA256SUMS.txt.minisig",
+        "checksums.txt.minisig",
+        "CHECKSUMS.minisig",
+        "SHA256SUMS.asc",
+        "SHA256SUMS.txt.asc",
+        "checksums.txt.asc",
+        "CHECKSUMS.asc"
+      ]
+    },
+    "signatureCandidates": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Patterns for finding per-asset signatures (Workflow B). Supports: {{asset}}, {{base}}",
+      "default": [
+        "{{asset}}.minisig",
+        "{{asset}}.sig",
+        "{{asset}}.sig.ed25519",
+        "{{base}}.sig",
+        "{{base}}.sig.ed25519",
+        "{{asset}}.asc",
+        "{{base}}.asc"
+      ]
+    },
+    "signatureFormats": {
+      "type": "object",
+      "description": "Maps file extensions to signature verification methods",
+      "properties": {
+        "minisign": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [".minisig"],
+          "description": "Extensions verified via minisign (pure-Go, github.com/jedisct1/go-minisign)"
+        },
+        "pgp": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [".asc", ".gpg", ".sig.asc"],
+          "description": "Extensions verified via GPG sidecar (requires gpg binary)"
+        },
+        "ed25519": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [".sig", ".sig.ed25519"],
+          "description": "Extensions verified as raw ed25519 signatures (pure-Go)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "preferChecksumSig": {
+      "type": "boolean",
+      "default": true,
+      "description": "When true, prefer checksum-level signatures (Workflow A) over per-asset signatures (Workflow B)"
+    }
+  },
+  "additionalProperties": false
+}

@@ -6,11 +6,9 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	_ "embed"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
-
 	"fmt"
 	"hash"
 	"io"
@@ -22,6 +20,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/jedisct1/go-minisign"
 )
 
 const (
@@ -45,14 +45,27 @@ type Asset struct {
 	Size               int64  `json:"size"`
 }
 
+// SignatureFormats maps file extensions to verification methods.
+// This allows detection of signature type from filename without inspecting content.
+type SignatureFormats struct {
+	Minisign []string `json:"minisign"` // verified via minisign (pure-Go)
+	PGP      []string `json:"pgp"`      // verified via gpg sidecar
+	Ed25519  []string `json:"ed25519"`  // verified as raw ed25519 (pure-Go)
+}
+
+// RepoConfig defines how sfetch discovers and verifies release artifacts.
+// Schema: schemas/repo-config.schema.json
 type RepoConfig struct {
-	BinaryName          string
-	HashAlgo            string
-	ArchiveType         string
-	ArchiveExtensions   []string
-	AssetPatterns       []string
-	ChecksumCandidates  []string
-	SignatureCandidates []string
+	BinaryName            string           `json:"binaryName"`
+	HashAlgo              string           `json:"hashAlgo"`
+	ArchiveType           string           `json:"archiveType"`
+	ArchiveExtensions     []string         `json:"archiveExtensions"`
+	AssetPatterns         []string         `json:"assetPatterns"`
+	ChecksumCandidates    []string         `json:"checksumCandidates"`
+	ChecksumSigCandidates []string         `json:"checksumSigCandidates"` // Workflow A: sigs over checksum files
+	SignatureCandidates   []string         `json:"signatureCandidates"`   // Workflow B: per-asset sigs
+	SignatureFormats      SignatureFormats `json:"signatureFormats"`
+	PreferChecksumSig     *bool            `json:"preferChecksumSig,omitempty"` // prefer Workflow A over B; nil = use default (true)
 }
 
 var defaults = RepoConfig{
@@ -71,16 +84,50 @@ var defaults = RepoConfig{
 		"{{base}}.sha256.txt",
 		"SHA256SUMS",
 		"SHA256SUMS.txt",
+		"checksums.txt",
+		"CHECKSUMS",
+		"CHECKSUMS.txt",
 	},
+	// Workflow A: signatures over checksum files (preferred)
+	ChecksumSigCandidates: []string{
+		"SHA256SUMS.minisig",
+		"SHA256SUMS.txt.minisig",
+		"checksums.txt.minisig",
+		"CHECKSUMS.minisig",
+		"SHA256SUMS.asc",
+		"SHA256SUMS.txt.asc",
+		"checksums.txt.asc",
+		"CHECKSUMS.asc",
+	},
+	// Workflow B: per-asset signatures
 	SignatureCandidates: []string{
+		"{{asset}}.minisig",
 		"{{asset}}.sig",
 		"{{asset}}.sig.ed25519",
 		"{{base}}.sig",
 		"{{base}}.sig.ed25519",
-		"{{asset}}.minisig",
 		"{{asset}}.asc",
 		"{{base}}.asc",
 	},
+	// Extension to verification method mapping
+	SignatureFormats: SignatureFormats{
+		Minisign: []string{".minisig"},
+		PGP:      []string{".asc", ".gpg", ".sig.asc"},
+		Ed25519:  []string{".sig", ".sig.ed25519"},
+	},
+	PreferChecksumSig: boolPtr(true),
+}
+
+// boolPtr returns a pointer to a bool value
+func boolPtr(v bool) *bool { return &v }
+
+// preferChecksumSig returns whether to prefer checksum-level signatures.
+// Defaults to true if not explicitly set.
+func (c *RepoConfig) preferChecksumSig() bool {
+	if c.PreferChecksumSig == nil {
+		return true // default
+	}
+	return *c.PreferChecksumSig
 }
 
 var repoConfigs = map[string]RepoConfig{
@@ -94,11 +141,8 @@ const (
 )
 
 type signatureData struct {
-	format         string
-	bytes          []byte
-	keyID          []byte // minisign: 8-byte key ID
-	trustedComment string // minisign: trusted comment (signed)
-	globalSig      []byte // minisign: signature over (sig + trusted comment)
+	format string
+	bytes  []byte // raw ed25519 signature bytes (only for sigFormatBinary)
 }
 
 func apiBaseURL() string {
@@ -250,45 +294,126 @@ func main() {
 		GOARCH:     goarch,
 	}
 
-	checksumAsset, err := findSupplementalAsset(rel.Assets, ctx, cfg.ChecksumCandidates, [][]string{
-		{strings.ToLower(baseName), "sha"},
-		{"sha256sum"},
-		{"checksum"},
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+	// Check for checksum-level signature first (Workflow A: signature over checksum file)
+	checksumSigAsset, checksumFileName := findChecksumSignature(rel.Assets, cfg)
+	useChecksumLevelSig := checksumSigAsset != nil && cfg.preferChecksumSig()
+
+	var checksumAsset *Asset
+	var sigAsset *Asset
+	var sigPath string
+	var checksumPath string
+	var checksumBytes []byte
+
+	if useChecksumLevelSig {
+		// Workflow A: Verify signature over checksum file, then verify hash
+		fmt.Fprintf(os.Stderr, "Detected checksum-level signature: %s\n", checksumSigAsset.Name)
+
+		// Find the checksum file
+		checksumAsset = findAssetByName(rel.Assets, checksumFileName)
+		if checksumAsset == nil {
+			fmt.Fprintf(os.Stderr, "error: checksum file %s not found\n", checksumFileName)
+			os.Exit(1)
+		}
+
+		// Download checksum file
+		checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
+		if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
+		// Download checksum signature
+		sigPath = filepath.Join(tmpDir, checksumSigAsset.Name)
+		if err := download(checksumSigAsset.BrowserDownloadUrl, sigPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
+		// Read checksum file for verification
+		// #nosec G304 -- checksumPath tmp controlled
+		checksumBytes, err = os.ReadFile(checksumPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "read checksum: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Verify checksum file signature (not asset signature)
+		if !*skipSig {
+			sigFormat := signatureFormatFromExtension(checksumSigAsset.Name, cfg.SignatureFormats)
+			switch sigFormat {
+			case sigFormatMinisign:
+				if *minisignPubKey == "" {
+					fmt.Fprintln(os.Stderr, "error: --minisign-key required for .minisig signatures")
+					os.Exit(1)
+				}
+				if err := verifyMinisignSignature(checksumBytes, sigPath, *minisignPubKey); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				fmt.Println("Minisign checksum signature verified OK")
+
+			case sigFormatPGP:
+				pgpKeyPath, err := resolvePGPKey(*pgpKeyFile, *pgpKeyURL, *pgpKeyAsset, rel.Assets, tmpDir)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				if err := verifyPGPSignature(checksumPath, sigPath, pgpKeyPath, *gpgBin); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				fmt.Println("PGP checksum signature verified OK")
+
+			default:
+				fmt.Fprintf(os.Stderr, "error: unknown signature format for %s\n", checksumSigAsset.Name)
+				os.Exit(1)
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "warning: --skip-sig enabled; signature verification skipped")
+		}
+	} else {
+		// Workflow B: Per-asset signature (original behavior)
+		checksumAsset, err = findSupplementalAsset(rel.Assets, ctx, cfg.ChecksumCandidates, [][]string{
+			{strings.ToLower(baseName), "sha"},
+			{"sha256sum"},
+			{"checksum"},
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+
+		sigAsset, err = findSupplementalAsset(rel.Assets, ctx, cfg.SignatureCandidates, [][]string{
+			{strings.ToLower(baseName), "sig"},
+			{strings.ToLower(baseName), "signature"},
+			{"minisig"},
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+
+		checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
+		if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
+		sigPath = filepath.Join(tmpDir, sigAsset.Name)
+		if err := download(sigAsset.BrowserDownloadUrl, sigPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
+		// #nosec G304 -- checksumPath tmp controlled
+		checksumBytes, err = os.ReadFile(checksumPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "read checksum: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
-	sigAsset, err := findSupplementalAsset(rel.Assets, ctx, cfg.SignatureCandidates, [][]string{
-		{strings.ToLower(baseName), "sig"},
-		{strings.ToLower(baseName), "signature"},
-		{"minisig"},
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	checksumPath := filepath.Join(tmpDir, checksumAsset.Name)
-	if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
-	sigPath := filepath.Join(tmpDir, sigAsset.Name)
-	if err := download(sigAsset.BrowserDownloadUrl, sigPath); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
-	// #nosec G304 -- checksumPath tmp controlled
-	checksumBytes, err := os.ReadFile(checksumPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "read checksum: %v\n", err)
-		os.Exit(1)
-	}
-
+	// Extract expected hash from checksum file
 	expectedHash, err := extractChecksum(checksumBytes, cfg.HashAlgo, selected.Name)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -343,68 +468,67 @@ func main() {
 	assetPath = cacheAssetPath
 	fmt.Printf("Cached to %s\n", cacheAssetPath)
 
-	sigData, err := loadSignature(sigPath)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
-	if *skipSig {
-		fmt.Fprintln(os.Stderr, "warning: --skip-sig enabled; signature verification skipped")
-	} else {
-		switch sigData.format {
-		case sigFormatPGP:
-			pgpKeyPath, err := resolvePGPKey(*pgpKeyFile, *pgpKeyURL, *pgpKeyAsset, rel.Assets, tmpDir)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-			if err := verifyPGPSignature(assetPath, sigPath, pgpKeyPath, *gpgBin); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-			fmt.Println("PGP signature verified OK")
-
-		case sigFormatMinisign:
-			if *minisignPubKey == "" {
-				fmt.Fprintln(os.Stderr, "error: --minisign-key required for .minisig signatures")
-				os.Exit(1)
-			}
-			pubKey, err := parseMinisignPublicKey(*minisignPubKey)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-			if err := verifyMinisignSignature(assetBytes, sigData, pubKey); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-			fmt.Println("Minisign signature verified OK")
-
-		case sigFormatBinary:
-			normalizedKey, err := normalizeHexKey(*key)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-			pubKeyBytes, err := hex.DecodeString(normalizedKey)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "invalid ed25519 key provided")
-				os.Exit(1)
-			}
-			if len(pubKeyBytes) != ed25519.PublicKeySize {
-				fmt.Fprintf(os.Stderr, "invalid pubkey size: %d\n", len(pubKeyBytes))
-				os.Exit(1)
-			}
-			pub := ed25519.PublicKey(pubKeyBytes)
-			if !ed25519.Verify(pub, assetBytes, sigData.bytes) {
-				fmt.Fprintln(os.Stderr, "signature verification failed")
-				os.Exit(1)
-			}
-			fmt.Println("Signature verified OK")
-		default:
-			fmt.Fprintln(os.Stderr, "error: unsupported signature format")
+	// Workflow B: Verify per-asset signature (only if not using checksum-level sig)
+	if !useChecksumLevelSig {
+		sigData, err := loadSignature(sigPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
+		}
+
+		if *skipSig {
+			fmt.Fprintln(os.Stderr, "warning: --skip-sig enabled; signature verification skipped")
+		} else {
+			switch sigData.format {
+			case sigFormatPGP:
+				pgpKeyPath, err := resolvePGPKey(*pgpKeyFile, *pgpKeyURL, *pgpKeyAsset, rel.Assets, tmpDir)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				if err := verifyPGPSignature(assetPath, sigPath, pgpKeyPath, *gpgBin); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				fmt.Println("PGP signature verified OK")
+
+			case sigFormatMinisign:
+				if *minisignPubKey == "" {
+					fmt.Fprintln(os.Stderr, "error: --minisign-key required for .minisig signatures")
+					os.Exit(1)
+				}
+				if err := verifyMinisignSignature(assetBytes, sigPath, *minisignPubKey); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				fmt.Println("Minisign signature verified OK")
+
+			case sigFormatBinary:
+				normalizedKey, err := normalizeHexKey(*key)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				pubKeyBytes, err := hex.DecodeString(normalizedKey)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "invalid ed25519 key provided")
+					os.Exit(1)
+				}
+				if len(pubKeyBytes) != ed25519.PublicKeySize {
+					fmt.Fprintf(os.Stderr, "invalid pubkey size: %d\n", len(pubKeyBytes))
+					os.Exit(1)
+				}
+				pub := ed25519.PublicKey(pubKeyBytes)
+				if !ed25519.Verify(pub, assetBytes, sigData.bytes) {
+					fmt.Fprintln(os.Stderr, "signature verification failed")
+					os.Exit(1)
+				}
+				fmt.Println("Signature verified OK")
+
+			default:
+				fmt.Fprintln(os.Stderr, "error: unsupported signature format")
+				os.Exit(1)
+			}
 		}
 	}
 
@@ -493,8 +617,25 @@ func mergeConfig(base RepoConfig, override RepoConfig) RepoConfig {
 	if len(override.ChecksumCandidates) > 0 {
 		cfg.ChecksumCandidates = append([]string(nil), override.ChecksumCandidates...)
 	}
+	if len(override.ChecksumSigCandidates) > 0 {
+		cfg.ChecksumSigCandidates = append([]string(nil), override.ChecksumSigCandidates...)
+	}
 	if len(override.SignatureCandidates) > 0 {
 		cfg.SignatureCandidates = append([]string(nil), override.SignatureCandidates...)
+	}
+	// Merge SignatureFormats if any overrides provided
+	if len(override.SignatureFormats.Minisign) > 0 {
+		cfg.SignatureFormats.Minisign = append([]string(nil), override.SignatureFormats.Minisign...)
+	}
+	if len(override.SignatureFormats.PGP) > 0 {
+		cfg.SignatureFormats.PGP = append([]string(nil), override.SignatureFormats.PGP...)
+	}
+	if len(override.SignatureFormats.Ed25519) > 0 {
+		cfg.SignatureFormats.Ed25519 = append([]string(nil), override.SignatureFormats.Ed25519...)
+	}
+	// PreferChecksumSig: only override if explicitly set (non-nil pointer)
+	if override.PreferChecksumSig != nil {
+		cfg.PreferChecksumSig = override.PreferChecksumSig
 	}
 	return cfg
 }
@@ -778,6 +919,45 @@ func findSupplementalAsset(assets []Asset, ctx templateContext, templates []stri
 	return nil, fmt.Errorf("missing supplemental asset for %s", ctx.AssetName)
 }
 
+// findChecksumSignature looks for a signature over the checksum file (Workflow A).
+// It searches for assets matching the ChecksumSigCandidates patterns.
+// Returns the signature asset and the corresponding checksum asset name, or nil if not found.
+func findChecksumSignature(assets []Asset, cfg *RepoConfig) (*Asset, string) {
+	for _, candidate := range cfg.ChecksumSigCandidates {
+		for i := range assets {
+			if assets[i].Name == candidate {
+				// Extract the checksum file name by removing the signature extension
+				checksumName := strings.TrimSuffix(candidate, ".minisig")
+				checksumName = strings.TrimSuffix(checksumName, ".asc")
+				return &assets[i], checksumName
+			}
+		}
+	}
+	return nil, ""
+}
+
+// signatureFormatFromExtension determines the signature verification method from file extension.
+// Returns sigFormatMinisign, sigFormatPGP, sigFormatBinary, or empty string if unknown.
+func signatureFormatFromExtension(filename string, formats SignatureFormats) string {
+	lower := strings.ToLower(filename)
+	for _, ext := range formats.Minisign {
+		if strings.HasSuffix(lower, ext) {
+			return sigFormatMinisign
+		}
+	}
+	for _, ext := range formats.PGP {
+		if strings.HasSuffix(lower, ext) {
+			return sigFormatPGP
+		}
+	}
+	for _, ext := range formats.Ed25519 {
+		if strings.HasSuffix(lower, ext) {
+			return sigFormatBinary
+		}
+	}
+	return ""
+}
+
 func resolvePGPKey(localPath, keyURL, keyAsset string, assets []Asset, tmpDir string) (string, error) {
 	if localPath != "" {
 		if isHTTPURL(localPath) {
@@ -1022,8 +1202,9 @@ func loadSignature(path string) (signatureData, error) {
 		return signatureData{format: sigFormatPGP}, nil
 	}
 	// Check for minisign format (starts with "untrusted comment:")
+	// Actual parsing is done by minisign library during verification
 	if strings.HasPrefix(trimmed, "untrusted comment:") {
-		return parseMinisignSignature(trimmed)
+		return signatureData{format: sigFormatMinisign}, nil
 	}
 	if len(data) == ed25519.SignatureSize {
 		return signatureData{format: sigFormatBinary, bytes: data}, nil
@@ -1035,123 +1216,26 @@ func loadSignature(path string) (signatureData, error) {
 	return signatureData{}, fmt.Errorf("unsupported signature format in %s", path)
 }
 
-// parseMinisignSignature parses a minisign .minisig file.
-// Format:
-//
-//	untrusted comment: <text>
-//	<base64: 2-byte algo "Ed" + 8-byte keyID + 64-byte sig>
-//	trusted comment: <text>
-//	<base64: 64-byte global sig>
-func parseMinisignSignature(content string) (signatureData, error) {
-	lines := strings.Split(content, "\n")
-	if len(lines) < 4 {
-		return signatureData{}, fmt.Errorf("minisign signature: expected 4 lines, got %d", len(lines))
-	}
-
-	// Line 0: untrusted comment (ignored)
-	// Line 1: base64 signature blob
-	sigBlob, err := base64.StdEncoding.DecodeString(strings.TrimSpace(lines[1]))
+// verifyMinisignSignature verifies a minisign signature using the github.com/jedisct1/go-minisign library.
+// sigPath is the path to the .minisig file, pubKeyPath is the path to the .pub file.
+// contentToVerify is the bytes that were signed (either asset bytes or checksum file bytes).
+func verifyMinisignSignature(contentToVerify []byte, sigPath, pubKeyPath string) error {
+	pubKey, err := minisign.NewPublicKeyFromFile(pubKeyPath)
 	if err != nil {
-		return signatureData{}, fmt.Errorf("minisign signature: decode sig: %w", err)
+		return fmt.Errorf("read minisign pubkey: %w", err)
 	}
-	// Expected: 2 (algo) + 8 (keyID) + 64 (sig) = 74 bytes
-	if len(sigBlob) != 74 {
-		return signatureData{}, fmt.Errorf("minisign signature: expected 74 bytes, got %d", len(sigBlob))
-	}
-	algo := sigBlob[0:2]
-	if algo[0] != 0x45 || algo[1] != 0x64 { // "Ed"
-		return signatureData{}, fmt.Errorf("minisign signature: unsupported algorithm %x", algo)
-	}
-	keyID := sigBlob[2:10]
-	sig := sigBlob[10:74]
 
-	// Line 2: trusted comment
-	if !strings.HasPrefix(lines[2], "trusted comment:") {
-		return signatureData{}, fmt.Errorf("minisign signature: expected 'trusted comment:' on line 3")
-	}
-	trustedComment := strings.TrimPrefix(lines[2], "trusted comment:")
-	trustedComment = strings.TrimSpace(trustedComment)
-
-	// Line 3: global signature
-	globalSig, err := base64.StdEncoding.DecodeString(strings.TrimSpace(lines[3]))
+	sig, err := minisign.NewSignatureFromFile(sigPath)
 	if err != nil {
-		return signatureData{}, fmt.Errorf("minisign signature: decode global sig: %w", err)
-	}
-	if len(globalSig) != 64 {
-		return signatureData{}, fmt.Errorf("minisign signature: expected 64-byte global sig, got %d", len(globalSig))
+		return fmt.Errorf("read minisign signature: %w", err)
 	}
 
-	return signatureData{
-		format:         sigFormatMinisign,
-		bytes:          sig,
-		keyID:          keyID,
-		trustedComment: trustedComment,
-		globalSig:      globalSig,
-	}, nil
-}
-
-// minisignPublicKey holds a parsed minisign public key.
-type minisignPublicKey struct {
-	keyID  []byte
-	pubKey ed25519.PublicKey
-}
-
-// parseMinisignPublicKey parses a minisign .pub file.
-// Format:
-//
-//	untrusted comment: <text>
-//	<base64: 2-byte algo "Ed" + 8-byte keyID + 32-byte pubkey>
-func parseMinisignPublicKey(path string) (minisignPublicKey, error) {
-	// #nosec G304 -- path controlled by user flag
-	data, err := os.ReadFile(path)
+	valid, err := pubKey.Verify(contentToVerify, sig)
 	if err != nil {
-		return minisignPublicKey{}, fmt.Errorf("read minisign pubkey: %w", err)
+		return fmt.Errorf("minisign: verification error: %w", err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) < 2 {
-		return minisignPublicKey{}, fmt.Errorf("minisign pubkey: expected at least 2 lines")
-	}
-
-	// Line 0: untrusted comment (ignored)
-	// Line 1: base64 key blob
-	keyBlob, err := base64.StdEncoding.DecodeString(strings.TrimSpace(lines[1]))
-	if err != nil {
-		return minisignPublicKey{}, fmt.Errorf("minisign pubkey: decode: %w", err)
-	}
-	// Expected: 2 (algo) + 8 (keyID) + 32 (pubkey) = 42 bytes
-	if len(keyBlob) != 42 {
-		return minisignPublicKey{}, fmt.Errorf("minisign pubkey: expected 42 bytes, got %d", len(keyBlob))
-	}
-	algo := keyBlob[0:2]
-	if algo[0] != 0x45 || algo[1] != 0x64 { // "Ed"
-		return minisignPublicKey{}, fmt.Errorf("minisign pubkey: unsupported algorithm %x", algo)
-	}
-
-	return minisignPublicKey{
-		keyID:  keyBlob[2:10],
-		pubKey: ed25519.PublicKey(keyBlob[10:42]),
-	}, nil
-}
-
-// verifyMinisignSignature verifies a minisign signature.
-// It checks both the main signature over the file content and the global signature
-// over (signature + trusted comment).
-func verifyMinisignSignature(fileContent []byte, sig signatureData, pubKey minisignPublicKey) error {
-	// Check key ID matches
-	if !bytes.Equal(sig.keyID, pubKey.keyID) {
-		return fmt.Errorf("minisign: key ID mismatch (sig: %x, key: %x)", sig.keyID, pubKey.keyID)
-	}
-
-	// Verify main signature over file content
-	if !ed25519.Verify(pubKey.pubKey, fileContent, sig.bytes) {
+	if !valid {
 		return fmt.Errorf("minisign: signature verification failed")
-	}
-
-	// Verify global signature over (signature + trusted comment)
-	// The trusted comment is prefixed with "trusted comment: " in the global sig calculation
-	globalMsg := append(sig.bytes, []byte(sig.trustedComment)...)
-	if !ed25519.Verify(pubKey.pubKey, globalMsg, sig.globalSig) {
-		return fmt.Errorf("minisign: global signature verification failed")
 	}
 
 	return nil

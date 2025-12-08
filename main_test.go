@@ -170,3 +170,170 @@ func TestResolvePGPKey(t *testing.T) {
 		}
 	})
 }
+
+func TestVerifyMinisignSignature(t *testing.T) {
+	// Test with fixtures from testdata/minisign/
+	checksumFile := "testdata/minisign/SHA256SUMS"
+	sigFile := "testdata/minisign/SHA256SUMS.minisig"
+	pubKeyFile := "testdata/keys/test-minisign.pub"
+
+	// Read checksum file content
+	checksumBytes, err := os.ReadFile(checksumFile)
+	if err != nil {
+		t.Fatalf("read checksum file: %v", err)
+	}
+
+	t.Run("valid signature", func(t *testing.T) {
+		err := verifyMinisignSignature(checksumBytes, sigFile, pubKeyFile)
+		if err != nil {
+			t.Fatalf("verification failed: %v", err)
+		}
+	})
+
+	t.Run("tampered content", func(t *testing.T) {
+		tampered := append(checksumBytes, []byte("tampered")...)
+		err := verifyMinisignSignature(tampered, sigFile, pubKeyFile)
+		if err == nil {
+			t.Fatal("expected error for tampered content")
+		}
+	})
+
+	t.Run("missing pubkey", func(t *testing.T) {
+		err := verifyMinisignSignature(checksumBytes, sigFile, "nonexistent.pub")
+		if err == nil {
+			t.Fatal("expected error for missing pubkey")
+		}
+	})
+
+	t.Run("missing sigfile", func(t *testing.T) {
+		err := verifyMinisignSignature(checksumBytes, "nonexistent.minisig", pubKeyFile)
+		if err == nil {
+			t.Fatal("expected error for missing sigfile")
+		}
+	})
+}
+
+func TestFindChecksumSignature(t *testing.T) {
+	cfg := &defaults
+
+	t.Run("finds SHA256SUMS.minisig", func(t *testing.T) {
+		assets := []Asset{
+			{Name: "binary.tar.gz"},
+			{Name: "SHA256SUMS"},
+			{Name: "SHA256SUMS.minisig"},
+		}
+		sigAsset, checksumName := findChecksumSignature(assets, cfg)
+		if sigAsset == nil {
+			t.Fatal("expected to find checksum signature")
+		}
+		if sigAsset.Name != "SHA256SUMS.minisig" {
+			t.Errorf("expected SHA256SUMS.minisig, got %s", sigAsset.Name)
+		}
+		if checksumName != "SHA256SUMS" {
+			t.Errorf("expected SHA256SUMS, got %s", checksumName)
+		}
+	})
+
+	t.Run("finds SHA256SUMS.asc", func(t *testing.T) {
+		assets := []Asset{
+			{Name: "binary.tar.gz"},
+			{Name: "SHA256SUMS"},
+			{Name: "SHA256SUMS.asc"},
+		}
+		sigAsset, checksumName := findChecksumSignature(assets, cfg)
+		if sigAsset == nil {
+			t.Fatal("expected to find checksum signature")
+		}
+		if sigAsset.Name != "SHA256SUMS.asc" {
+			t.Errorf("expected SHA256SUMS.asc, got %s", sigAsset.Name)
+		}
+		if checksumName != "SHA256SUMS" {
+			t.Errorf("expected SHA256SUMS, got %s", checksumName)
+		}
+	})
+
+	t.Run("prefers minisig over asc", func(t *testing.T) {
+		assets := []Asset{
+			{Name: "SHA256SUMS"},
+			{Name: "SHA256SUMS.minisig"},
+			{Name: "SHA256SUMS.asc"},
+		}
+		sigAsset, _ := findChecksumSignature(assets, cfg)
+		if sigAsset == nil {
+			t.Fatal("expected to find checksum signature")
+		}
+		// minisig comes before asc in ChecksumSigCandidates
+		if sigAsset.Name != "SHA256SUMS.minisig" {
+			t.Errorf("expected SHA256SUMS.minisig (preferred), got %s", sigAsset.Name)
+		}
+	})
+
+	t.Run("no checksum sig found", func(t *testing.T) {
+		assets := []Asset{
+			{Name: "binary.tar.gz"},
+			{Name: "SHA256SUMS"},
+			{Name: "binary.tar.gz.asc"}, // per-asset sig, not checksum sig
+		}
+		sigAsset, _ := findChecksumSignature(assets, cfg)
+		if sigAsset != nil {
+			t.Errorf("expected nil, got %s", sigAsset.Name)
+		}
+	})
+}
+
+func TestMergeConfigPreferChecksumSig(t *testing.T) {
+	t.Run("default is true", func(t *testing.T) {
+		cfg := defaults
+		if !cfg.preferChecksumSig() {
+			t.Error("expected default preferChecksumSig to be true")
+		}
+	})
+
+	t.Run("override to false", func(t *testing.T) {
+		override := RepoConfig{
+			BinaryName:        "test",
+			PreferChecksumSig: boolPtr(false),
+		}
+		cfg := mergeConfig(defaults, override)
+		if cfg.preferChecksumSig() {
+			t.Error("expected preferChecksumSig to be false after override")
+		}
+	})
+
+	t.Run("no override keeps default", func(t *testing.T) {
+		override := RepoConfig{
+			BinaryName: "test",
+			// PreferChecksumSig not set (nil)
+		}
+		cfg := mergeConfig(defaults, override)
+		if !cfg.preferChecksumSig() {
+			t.Error("expected preferChecksumSig to remain true when not overridden")
+		}
+	})
+}
+
+func TestSignatureFormatFromExtension(t *testing.T) {
+	formats := defaults.SignatureFormats
+
+	tests := []struct {
+		filename string
+		want     string
+	}{
+		{"SHA256SUMS.minisig", sigFormatMinisign},
+		{"binary.tar.gz.minisig", sigFormatMinisign},
+		{"SHA256SUMS.asc", sigFormatPGP},
+		{"binary.tar.gz.asc", sigFormatPGP},
+		{"binary.tar.gz.sig", sigFormatBinary},
+		{"binary.tar.gz.sig.ed25519", sigFormatBinary},
+		{"unknown.txt", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.filename, func(t *testing.T) {
+			got := signatureFormatFromExtension(tt.filename, formats)
+			if got != tt.want {
+				t.Errorf("signatureFormatFromExtension(%q) = %q, want %q", tt.filename, got, tt.want)
+			}
+		})
+	}
+}
