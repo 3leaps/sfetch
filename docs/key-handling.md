@@ -5,20 +5,56 @@ author: "Schema Cartographer"
 author_of_record: "Dave Thompson (https://github.com/3leapsdave)"
 supervised_by: "@3leapsdave"
 date: "2025-12-03"
-last_updated: "2025-12-03"
+last_updated: "2025-12-08"
 status: "draft"
 tags: ["docs", "signing", "security"]
 ---
 
 # Key handling guide
 
+## Signing workflows
+
+sfetch supports two industry-standard signing patterns:
+
+### Workflow A: Checksum-level signing (recommended, ~70% of signed tools)
+
+```
+SHA256SUMS          ← hashes of all release assets
+SHA256SUMS.minisig  ← signature over SHA256SUMS
+binary.tar.gz       ← unsigned, verified via checksum
+```
+
+Verification order:
+1. Download checksum file + signature
+2. Verify checksum file authenticity (minisign/PGP)
+3. Download asset, compute hash, compare to verified checksums
+
+**Examples:** kubectl, Hugo, ripgrep, bat, starship
+
+### Workflow B: Per-asset signing (~30% of signed tools)
+
+```
+binary.tar.gz       ← the asset
+binary.tar.gz.sig   ← signature over asset bytes
+SHA256SUMS          ← optional, may be unsigned
+```
+
+Verification order:
+1. Download asset + signature
+2. Verify asset bytes directly
+3. Optionally verify checksum
+
+**Examples:** cosign, gh CLI (goreleaser default)
+
+sfetch auto-detects the workflow: if `SHA256SUMS.minisig` or `SHA256SUMS.asc` exists, it uses Workflow A; otherwise Workflow B.
+
 ## Supported signature formats
 
-| Format | Extension | Verification flag | Client deps |
+| Format | Extension | Verification flags | Client deps |
 | --- | --- | --- | --- |
-| **Minisign** | `.minisig` | `--minisign-key <pubkey.pub>` | None (pure-Go) |
+| **Minisign** | `.minisig` | `--minisign-key`, `--minisign-key-url`, `--minisign-key-asset` | None (pure-Go) |
 | Raw ed25519 | `.sig`, `.sig.ed25519` | `--key <64-hex-bytes>` | None (pure-Go) |
-| ASCII-armored PGP | `.asc` | `--pgp-key-file path/to/public.asc` | `gpg` binary |
+| ASCII-armored PGP | `.asc` | `--pgp-key-file`, `--pgp-key-url`, `--pgp-key-asset` | `gpg` binary |
 
 Minisign is the recommended format for sfetch releases. It provides trusted comments (signed metadata) and password-protected keys.
 
@@ -28,6 +64,57 @@ Minisign is the recommended format for sfetch releases. It provides trusted comm
 - `-----BEGIN PGP SIGNATURE-----` → invokes `gpg` in a temporary keyring.
 - 64 raw bytes → treats as binary ed25519.
 - Hex text of length 128 → decoded into raw ed25519 before verification.
+
+## Minisign key resolution
+
+sfetch resolves minisign public keys in priority order:
+
+1. **`--minisign-key <path>`** - Local file path (or URL if starts with `http://`/`https://`)
+2. **`--minisign-key-url <url>`** - Download from URL
+3. **`--minisign-key-asset <name>`** - Fetch from release assets by exact name
+4. **Auto-detect** - Scan release assets for `*minisign*.pub` or `*-signing-key.pub`
+
+### Strict mode
+
+Use `--require-minisign` to enforce minisign verification:
+- Fails fast if no `.minisig` signature is found
+- Forces minisign path even if `preferChecksumSig` is false in repo config
+- Rejects PGP/raw signatures when minisign is required
+
+## Getting started with minisign
+
+### For users verifying releases
+
+Most releases publish their minisign public key as a release asset (e.g., `project-minisign.pub`).
+sfetch auto-detects these keys, so often no flags are needed:
+
+```bash
+# Auto-detect key from release assets
+sfetch --repo owner/project --latest
+
+# Explicit key from local file
+sfetch --repo owner/project --latest --minisign-key /path/to/project.pub
+
+# Strict mode: fail if minisign verification unavailable
+sfetch --repo owner/project --latest --require-minisign
+```
+
+### For maintainers signing releases
+
+Install minisign: `brew install minisign` (macOS), `apt install minisign` (Debian/Ubuntu),
+or download from https://jedisct1.github.io/minisign/
+
+```bash
+# Generate keypair (will prompt for password)
+minisign -G -p myproject-minisign.pub -s myproject-minisign.key
+
+# Sign your SHA256SUMS file
+minisign -Sm SHA256SUMS -s myproject-minisign.key -t "myproject v1.0.0"
+
+# Publish the .pub file with your release
+```
+
+See [docs/security/signing-runbook.md](security/signing-runbook.md) for complete release signing workflow.
 
 ## ed25519 key expectations
 

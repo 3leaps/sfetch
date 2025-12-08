@@ -45,3 +45,4 @@ logs/
 
 # Test private keys (only public keys + fixtures committed)
 testdata/keys/*.key
+testdata/integration/*.key

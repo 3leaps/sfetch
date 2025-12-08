@@ -35,8 +35,15 @@ This approach means one signature operation per release (one password prompt) wh
 
 | Format | File | Verification | Client Dependency |
 |--------|------|--------------|-------------------|
-| **minisign** | `SHA256SUMS.minisig` | `sfetch --minisign-key <pubkey.pub>` | None (pure-Go) |
-| **PGP** | `SHA256SUMS.asc` | `sfetch --pgp-key-file <key.asc>` | `gpg` binary |
+| **minisign** | `SHA256SUMS.minisig` | `sfetch --minisign-key <path>` or auto-detect | None (pure-Go) |
+| **PGP** | `SHA256SUMS.asc` | `sfetch --pgp-key-file <path>` or auto-detect | `gpg` binary |
+
+**Minisign key flags:**
+- `--minisign-key <path>` - Local file or URL
+- `--minisign-key-url <url>` - Download from URL
+- `--minisign-key-asset <name>` - Fetch from release assets
+- `--require-minisign` - Fail if minisign verification unavailable
+- Auto-detects `*minisign*.pub` from release assets when no flags provided
 
 ## Key Generation
 
@@ -99,8 +106,12 @@ RELEASE_TAG=v2025.12.06 make release-upload
 After signing, verify locally before upload:
 
 ```bash
-# Test minisign verification
+# Test minisign verification (explicit key)
 sfetch --minisign-key dist/release/sfetch-minisign.pub \
+       --repo yourorg/sfetch --tag v2025.12.06 --dest-dir /tmp/test
+
+# Test minisign verification (strict mode - requires minisign, auto-detects key)
+sfetch --require-minisign \
        --repo yourorg/sfetch --tag v2025.12.06 --dest-dir /tmp/test
 
 # Test PGP verification

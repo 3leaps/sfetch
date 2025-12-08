@@ -23,11 +23,18 @@ Auto-selects via heuristics ([docs/pattern-matching.md](docs/pattern-matching.md
 
 ### Signature verification
 
-- Use `--minisign-key <pubkey.pub>` for minisign signatures (`.minisig`) - recommended, pure-Go verification.
-- Use `--key <64-hex-bytes>` for raw ed25519 signatures (`.sig`).
-- Use `--pgp-key-file <key.asc>` for PGP signatures (`.asc`) - requires `gpg`.
-- See [docs/key-handling.md](docs/key-handling.md) for supported formats and verification details.
-- Run `sfetch -helpextended` for concrete examples.
+**Minisign (recommended)**
+- `--minisign-key <pubkey.pub>` - path to public key file
+- `--minisign-key-url <url>` - download key from URL
+- `--minisign-key-asset <name>` - fetch key from release assets
+- `--require-minisign` - fail if minisign verification unavailable
+- Auto-detects `*minisign*.pub` from release assets when no key flags provided
+
+**Other formats**
+- `--key <64-hex-bytes>` for raw ed25519 signatures (`.sig`) - pure-Go
+- `--pgp-key-file <key.asc>` for PGP signatures (`.asc`) - requires `gpg`
+
+See [docs/key-handling.md](docs/key-handling.md) for details. Run `sfetch -helpextended` for examples.
 
 ### Build, versioning & install
 
@@ -80,18 +87,25 @@ The installer:
 For users who prefer to verify the installer before execution:
 
 ```bash
+# Detect OS-appropriate SHA256 command (macOS uses shasum, Linux uses sha256sum)
+if command -v sha256sum &>/dev/null; then
+  SHA_CMD="sha256sum"
+else
+  SHA_CMD="shasum -a 256"
+fi
+
 # Download assets (curl)
 curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh -o install-sfetch.sh
 curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS -o SHA256SUMS
 
-# Download assets (wget)
-wget -q https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh
-wget -q https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS
+# Download assets (wget alternative - use -O to overwrite existing files)
+# wget -qO install-sfetch.sh https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh
+# wget -qO SHA256SUMS https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS
 
 # Option A: Verify with minisign (recommended)
 curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS.minisig -o SHA256SUMS.minisig
 minisign -Vm SHA256SUMS -P RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC
-shasum -a 256 -c SHA256SUMS --ignore-missing  # or: sha256sum -c SHA256SUMS --ignore-missing (Linux)
+$SHA_CMD -c SHA256SUMS --ignore-missing
 
 # Option B: Verify with GPG (uses temp keyring)
 curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS.asc -o SHA256SUMS.asc
@@ -100,7 +114,7 @@ GPG_TMPDIR=$(mktemp -d)
 gpg --homedir "$GPG_TMPDIR" --import sfetch-release-signing-key.asc
 gpg --homedir "$GPG_TMPDIR" --verify SHA256SUMS.asc SHA256SUMS
 rm -rf "$GPG_TMPDIR"
-shasum -a 256 -c SHA256SUMS --ignore-missing  # or: sha256sum -c SHA256SUMS --ignore-missing (Linux)
+$SHA_CMD -c SHA256SUMS --ignore-missing
 
 # Run after verification
 bash install-sfetch.sh
