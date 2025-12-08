@@ -42,3 +42,6 @@ temp/
 # Logs
 *.log
 logs/
+
+# Test private keys (only public keys + fixtures committed)
+testdata/keys/*.key

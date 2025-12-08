@@ -337,3 +337,215 @@ func TestSignatureFormatFromExtension(t *testing.T) {
 		})
 	}
 }
+
+func TestAutoDetectMinisignKeyAsset(t *testing.T) {
+	tests := []struct {
+		name   string
+		assets []Asset
+		want   string // expected asset name, "" if nil
+	}{
+		{
+			name: "finds sfetch-release-minisign.pub",
+			assets: []Asset{
+				{Name: "binary.tar.gz"},
+				{Name: "SHA256SUMS"},
+				{Name: "sfetch-release-minisign.pub"},
+			},
+			want: "sfetch-release-minisign.pub",
+		},
+		{
+			name: "finds project-signing-key.pub",
+			assets: []Asset{
+				{Name: "binary.tar.gz"},
+				{Name: "project-signing-key.pub"},
+			},
+			want: "project-signing-key.pub",
+		},
+		{
+			name: "finds release-key.pub",
+			assets: []Asset{
+				{Name: "binary.tar.gz"},
+				{Name: "release-key.pub"},
+			},
+			want: "release-key.pub",
+		},
+		{
+			name: "prefers minisign over signing-key",
+			assets: []Asset{
+				{Name: "project-minisign.pub"},
+				{Name: "project-signing-key.pub"},
+			},
+			want: "project-minisign.pub",
+		},
+		{
+			name: "ignores non-.pub files",
+			assets: []Asset{
+				{Name: "binary.tar.gz"},
+				{Name: "SHA256SUMS"},
+				{Name: "minisign.key"}, // private key, not .pub
+			},
+			want: "",
+		},
+		{
+			name: "ignores archive-like names",
+			assets: []Asset{
+				{Name: "minisign.tar.gz.pub"}, // unlikely but possible
+			},
+			want: "",
+		},
+		{
+			name: "no minisign key found",
+			assets: []Asset{
+				{Name: "binary.tar.gz"},
+				{Name: "SHA256SUMS"},
+				{Name: "release-key.asc"}, // PGP, not minisign
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := autoDetectMinisignKeyAsset(tt.assets)
+			if tt.want == "" {
+				if got != nil {
+					t.Errorf("expected nil, got %s", got.Name)
+				}
+			} else {
+				if got == nil {
+					t.Errorf("expected %s, got nil", tt.want)
+				} else if got.Name != tt.want {
+					t.Errorf("expected %s, got %s", tt.want, got.Name)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveMinisignKey(t *testing.T) {
+	t.Run("local file", func(t *testing.T) {
+		tmp := t.TempDir()
+		path := filepath.Join(tmp, "key.pub")
+		if err := os.WriteFile(path, []byte("local minisign key"), 0o644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+		got, err := resolveMinisignKey(path, "", "", nil, tmp)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if got != path {
+			t.Fatalf("want %s got %s", path, got)
+		}
+	})
+
+	t.Run("remote via minisign-key-url", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("remote minisign key"))
+		}))
+		defer server.Close()
+		tmp := t.TempDir()
+		got, err := resolveMinisignKey("", server.URL+"/key.pub", "", nil, tmp)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		data, err := os.ReadFile(got)
+		if err != nil {
+			t.Fatalf("read key: %v", err)
+		}
+		if string(data) != "remote minisign key" {
+			t.Fatalf("unexpected data: %s", data)
+		}
+	})
+
+	t.Run("release asset via minisign-key-asset", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("asset minisign key"))
+		}))
+		defer server.Close()
+		tmp := t.TempDir()
+		assets := []Asset{{Name: "project-minisign.pub", BrowserDownloadUrl: server.URL + "/project-minisign.pub"}}
+		got, err := resolveMinisignKey("", "", "project-minisign.pub", assets, tmp)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		data, err := os.ReadFile(got)
+		if err != nil {
+			t.Fatalf("read key: %v", err)
+		}
+		if string(data) != "asset minisign key" {
+			t.Fatalf("unexpected data: %s", data)
+		}
+	})
+
+	t.Run("auto-detect minisign key", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("auto-detected minisign key"))
+		}))
+		defer server.Close()
+		tmp := t.TempDir()
+		assets := []Asset{{Name: "sfetch-release-minisign.pub", BrowserDownloadUrl: server.URL + "/sfetch-release-minisign.pub"}}
+		got, err := resolveMinisignKey("", "", "", assets, tmp)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		data, err := os.ReadFile(got)
+		if err != nil {
+			t.Fatalf("read key: %v", err)
+		}
+		if string(data) != "auto-detected minisign key" {
+			t.Fatalf("unexpected data: %s", data)
+		}
+	})
+
+	t.Run("local path as URL", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("url-as-local-path key"))
+		}))
+		defer server.Close()
+		tmp := t.TempDir()
+		// Pass URL in localPath position (first arg)
+		got, err := resolveMinisignKey(server.URL+"/key.pub", "", "", nil, tmp)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		data, err := os.ReadFile(got)
+		if err != nil {
+			t.Fatalf("read key: %v", err)
+		}
+		if string(data) != "url-as-local-path key" {
+			t.Fatalf("unexpected data: %s", data)
+		}
+	})
+
+	t.Run("missing asset", func(t *testing.T) {
+		tmp := t.TempDir()
+		assets := []Asset{{Name: "other-asset.txt"}}
+		_, err := resolveMinisignKey("", "", "nonexistent.pub", assets, tmp)
+		if err == nil {
+			t.Fatal("expected error for missing asset")
+		}
+		if !strings.Contains(err.Error(), "not found") {
+			t.Errorf("expected 'not found' in error, got: %v", err)
+		}
+	})
+
+	t.Run("missing local file", func(t *testing.T) {
+		tmp := t.TempDir()
+		_, err := resolveMinisignKey("/nonexistent/path.pub", "", "", nil, tmp)
+		if err == nil {
+			t.Fatal("expected error for missing file")
+		}
+	})
+
+	t.Run("no inputs and no auto-detect match", func(t *testing.T) {
+		tmp := t.TempDir()
+		assets := []Asset{{Name: "binary.tar.gz"}}
+		_, err := resolveMinisignKey("", "", "", assets, tmp)
+		if err == nil {
+			t.Fatal("expected error when no key sources available")
+		}
+		if !strings.Contains(err.Error(), "--minisign-key") {
+			t.Errorf("expected helpful error message mentioning flags, got: %v", err)
+		}
+	})
+}

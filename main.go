@@ -161,6 +161,9 @@ func main() {
 	assetRegex := flag.String("asset-regex", "", "asset name regex (overrides auto-detect)")
 	key := flag.String("key", "", "ed25519 pubkey hex (32 bytes)")
 	minisignPubKey := flag.String("minisign-key", "", "path to minisign public key file (.pub)")
+	minisignKeyURL := flag.String("minisign-key-url", "", "URL to download minisign public key")
+	minisignKeyAsset := flag.String("minisign-key-asset", "", "release asset name for minisign public key")
+	requireMinisign := flag.Bool("require-minisign", false, "require minisign signature verification (fail if unavailable)")
 	pgpKeyFile := flag.String("pgp-key-file", "", "path to ASCII-armored PGP public key")
 	pgpKeyURL := flag.String("pgp-key-url", "", "URL to download ASCII-armored PGP public key")
 	pgpKeyAsset := flag.String("pgp-key-asset", "", "release asset name for ASCII-armored PGP public key")
@@ -296,7 +299,38 @@ func main() {
 
 	// Check for checksum-level signature first (Workflow A: signature over checksum file)
 	checksumSigAsset, checksumFileName := findChecksumSignature(rel.Assets, cfg)
-	useChecksumLevelSig := checksumSigAsset != nil && cfg.preferChecksumSig()
+	// Use checksum-level sig if: (1) it exists AND (2) config prefers it OR --require-minisign forces minisign path
+	useChecksumLevelSig := checksumSigAsset != nil && (cfg.preferChecksumSig() || *requireMinisign)
+
+	// --require-minisign: validate that minisign signature is available and will be used
+	if *requireMinisign {
+		checksumSigIsMinisign := checksumSigAsset != nil &&
+			signatureFormatFromExtension(checksumSigAsset.Name, cfg.SignatureFormats) == sigFormatMinisign
+
+		if checksumSigIsMinisign {
+			// Checksum-level minisign available - force using it
+			useChecksumLevelSig = true
+		} else {
+			// Check for per-asset minisign sig as fallback
+			perAssetMinisig := false
+			for _, candidate := range cfg.SignatureCandidates {
+				if strings.Contains(candidate, ".minisig") {
+					rendered := renderTemplate(candidate, ctx)
+					if findAssetByName(rel.Assets, rendered) != nil {
+						perAssetMinisig = true
+						break
+					}
+				}
+			}
+			if perAssetMinisig {
+				// Force per-asset path (Workflow B) for minisign verification
+				useChecksumLevelSig = false
+			} else {
+				fmt.Fprintln(os.Stderr, "error: --require-minisign specified but no .minisig signature found in release")
+				os.Exit(1)
+			}
+		}
+	}
 
 	var checksumAsset *Asset
 	var sigAsset *Asset
@@ -342,11 +376,12 @@ func main() {
 			sigFormat := signatureFormatFromExtension(checksumSigAsset.Name, cfg.SignatureFormats)
 			switch sigFormat {
 			case sigFormatMinisign:
-				if *minisignPubKey == "" {
-					fmt.Fprintln(os.Stderr, "error: --minisign-key required for .minisig signatures")
+				minisignKeyPath, err := resolveMinisignKey(*minisignPubKey, *minisignKeyURL, *minisignKeyAsset, rel.Assets, tmpDir)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
 					os.Exit(1)
 				}
-				if err := verifyMinisignSignature(checksumBytes, sigPath, *minisignPubKey); err != nil {
+				if err := verifyMinisignSignature(checksumBytes, sigPath, minisignKeyPath); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					os.Exit(1)
 				}
@@ -476,6 +511,12 @@ func main() {
 			os.Exit(1)
 		}
 
+		// Enforce minisign format when --require-minisign is set
+		if *requireMinisign && sigData.format != sigFormatMinisign {
+			fmt.Fprintf(os.Stderr, "error: --require-minisign specified but signature %s is %s format, not minisign\n", sigAsset.Name, sigData.format)
+			os.Exit(1)
+		}
+
 		if *skipSig {
 			fmt.Fprintln(os.Stderr, "warning: --skip-sig enabled; signature verification skipped")
 		} else {
@@ -493,11 +534,12 @@ func main() {
 				fmt.Println("PGP signature verified OK")
 
 			case sigFormatMinisign:
-				if *minisignPubKey == "" {
-					fmt.Fprintln(os.Stderr, "error: --minisign-key required for .minisig signatures")
+				minisignKeyPath, err := resolveMinisignKey(*minisignPubKey, *minisignKeyURL, *minisignKeyAsset, rel.Assets, tmpDir)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
 					os.Exit(1)
 				}
-				if err := verifyMinisignSignature(assetBytes, sigPath, *minisignPubKey); err != nil {
+				if err := verifyMinisignSignature(assetBytes, sigPath, minisignKeyPath); err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					os.Exit(1)
 				}
@@ -1043,6 +1085,98 @@ func autoDetectKeyAsset(assets []Asset) *Asset {
 		}
 	}
 	return nil
+}
+
+// autoDetectMinisignKeyAsset scans release assets for a minisign public key.
+// Looks for patterns like *minisign*.pub or *-signing-key.pub
+func autoDetectMinisignKeyAsset(assets []Asset) *Asset {
+	// Priority order: explicit minisign key names first
+	patterns := []string{
+		"minisign.pub",     // exact match first
+		"minisign",         // contains minisign
+		"-signing-key.pub", // common naming pattern
+		"release-key.pub",  // alternate naming
+	}
+
+	for _, pattern := range patterns {
+		for i := range assets {
+			nameLower := strings.ToLower(assets[i].Name)
+			if !strings.HasSuffix(nameLower, ".pub") {
+				continue
+			}
+			// Skip archive-like names
+			if strings.Contains(nameLower, ".tar") || strings.Contains(nameLower, ".zip") || strings.Contains(nameLower, ".gz") {
+				continue
+			}
+			if strings.Contains(nameLower, pattern) {
+				return &assets[i]
+			}
+		}
+	}
+	return nil
+}
+
+// resolveMinisignKey resolves a minisign public key from various sources.
+// Priority: localPath (file or URL) > keyURL > keyAsset > auto-detect.
+// Mirrors resolvePGPKey for consistency.
+func resolveMinisignKey(localPath, keyURL, keyAsset string, assets []Asset, tmpDir string) (string, error) {
+	// 1. Local path (or URL passed as path)
+	if localPath != "" {
+		if isHTTPURL(localPath) {
+			return downloadMinisignKeyFromURL(localPath, tmpDir)
+		}
+		if _, err := os.Stat(localPath); err != nil {
+			return "", fmt.Errorf("minisign key file: %w", err)
+		}
+		return localPath, nil
+	}
+
+	// 2. Explicit URL
+	if keyURL != "" {
+		return downloadMinisignKeyFromURL(keyURL, tmpDir)
+	}
+
+	// 3. Explicit release asset name
+	if keyAsset != "" {
+		asset := findAssetByName(assets, keyAsset)
+		if asset == nil {
+			return "", fmt.Errorf("minisign key asset %q not found in release", keyAsset)
+		}
+		return downloadAssetToTemp(asset, tmpDir)
+	}
+
+	// 4. Auto-detect from release assets
+	if asset := autoDetectMinisignKeyAsset(assets); asset != nil {
+		path, err := downloadAssetToTemp(asset, tmpDir)
+		if err == nil {
+			fmt.Fprintf(os.Stderr, "Auto-detected minisign key asset %s\n", asset.Name)
+		}
+		return path, err
+	}
+
+	return "", fmt.Errorf("error: provide --minisign-key, --minisign-key-url, or --minisign-key-asset to verify minisign signatures")
+}
+
+// downloadMinisignKeyFromURL fetches a minisign public key from a URL.
+func downloadMinisignKeyFromURL(src string, tmpDir string) (string, error) {
+	resp, err := http.Get(src)
+	if err != nil {
+		return "", fmt.Errorf("fetch minisign key %s: %w", src, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("status %d from %s: %s", resp.StatusCode, src, strings.TrimSpace(string(body)))
+	}
+	f, err := os.CreateTemp(tmpDir, "minisign-key-*.pub")
+	if err != nil {
+		return "", fmt.Errorf("create temp key: %w", err)
+	}
+	defer f.Close()
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		return "", fmt.Errorf("write key: %w", err)
+	}
+	return f.Name(), nil
 }
 
 func isHTTPURL(value string) bool {
