@@ -423,9 +423,11 @@ RW...base64key...
 
 2. **Single binary**: Extracts one file. Multi-binary archives need multiple sfetch calls.
 
-3. **GitHub only**: Currently GitHub releases API only. GitLab, generic URLs planned.
+3. **Flat archive structure**: Binary must be at the root of the archive, not in a subdirectory. Archives like ripgrep (`ripgrep-15.1.0-aarch64-apple-darwin/rg`) don't work currently.
 
-4. **Cosign**: Not yet implemented.
+4. **GitHub only**: Currently GitHub releases API only. GitLab, generic URLs planned.
+
+5. **Cosign**: Not yet implemented.
 
 ---
 
