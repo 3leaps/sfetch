@@ -72,7 +72,7 @@ func TestIntegrationPGPSignature(t *testing.T) {
 
 	destDir := t.TempDir()
 	cacheDir := filepath.Join(destDir, "cache")
-	cmd := exec.Command("go", "run", ".", "--repo", "test/example", "--latest", "--dest-dir", destDir, "--pgp-key-file", "testdata/keys/test-pgp-pub.asc", "--gpg-bin", gpgPath, "--cache-dir", cacheDir)
+	cmd := exec.Command("go", "run", ".", "--repo", "test/example", "--latest", "--dest-dir", destDir, "--pgp-key-file", "testdata/keys/test-pgp-pub.asc", "--gpg-bin", gpgPath, "--cache-dir", cacheDir, "--binary-name", "sfetch")
 	cmd.Env = append(os.Environ(), "SFETCH_API_BASE="+ts.URL)
 	var output bytes.Buffer
 	cmd.Stdout = &output
@@ -150,6 +150,7 @@ func TestIntegrationMinisignChecksumLevel(t *testing.T) {
 		"--dest-dir", destDir,
 		"--minisign-key-asset", "test-minisign.pub",
 		"--cache-dir", cacheDir,
+		"--binary-name", "sfetch",
 	)
 	cmd.Env = append(os.Environ(), "SFETCH_API_BASE="+ts.URL)
 	var output bytes.Buffer
@@ -230,6 +231,7 @@ func TestIntegrationMinisignAutoDetect(t *testing.T) {
 		"--latest",
 		"--dest-dir", destDir,
 		"--cache-dir", cacheDir,
+		"--binary-name", "sfetch",
 	)
 	cmd.Env = append(os.Environ(), "SFETCH_API_BASE="+ts.URL)
 	var output bytes.Buffer

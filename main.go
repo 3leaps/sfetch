@@ -130,8 +130,12 @@ func (c *RepoConfig) preferChecksumSig() bool {
 	return *c.PreferChecksumSig
 }
 
+// repoConfigs holds overrides for repos that don't follow standard patterns.
+// Most repos work without entries here - BinaryName is inferred from repo name,
+// ArchiveType is inferred from asset extension. Only add entries for edge cases.
 var repoConfigs = map[string]RepoConfig{
-	"fulmenhq/goneat": {BinaryName: "goneat"},
+	// Example: repos where binary name differs from repo name
+	// "owner/repo": {BinaryName: "actual-binary-name"},
 }
 
 const (
@@ -164,10 +168,12 @@ func main() {
 	minisignKeyURL := flag.String("minisign-key-url", "", "URL to download minisign public key")
 	minisignKeyAsset := flag.String("minisign-key-asset", "", "release asset name for minisign public key")
 	requireMinisign := flag.Bool("require-minisign", false, "require minisign signature verification (fail if unavailable)")
+	preferPerAsset := flag.Bool("prefer-per-asset", false, "prefer per-asset signatures over checksum-level signatures (Workflow B over A)")
 	pgpKeyFile := flag.String("pgp-key-file", "", "path to ASCII-armored PGP public key")
 	pgpKeyURL := flag.String("pgp-key-url", "", "URL to download ASCII-armored PGP public key")
 	pgpKeyAsset := flag.String("pgp-key-asset", "", "release asset name for ASCII-armored PGP public key")
 	gpgBin := flag.String("gpg-bin", "gpg", "path to gpg executable")
+	binaryNameFlag := flag.String("binary-name", "", "binary name to extract (default: inferred from repo name)")
 	destDir := flag.String("dest-dir", "", "destination directory")
 	cacheDir := flag.String("cache-dir", "", "cache directory")
 	selfVerify := flag.Bool("self-verify", false, "self-verify mode")
@@ -265,7 +271,12 @@ func main() {
 	}
 
 	cfg := getConfig(*repo)
-	fmt.Fprintf(os.Stderr, "DEBUG repo=%q BinaryName=%q\n", *repo, cfg.BinaryName)
+
+	// Apply CLI override for binary name
+	if *binaryNameFlag != "" {
+		cfg.BinaryName = *binaryNameFlag
+	}
+
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
@@ -274,6 +285,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+
+	// Infer archive type from selected asset extension
+	if inferred := inferArchiveType(selected.Name); inferred != "" {
+		cfg.ArchiveType = inferred
+	}
+
+	fmt.Fprintf(os.Stderr, "DEBUG repo=%q BinaryName=%q ArchiveType=%q Asset=%q\n",
+		*repo, cfg.BinaryName, cfg.ArchiveType, selected.Name)
 
 	tmpDir, err := os.MkdirTemp("", "sfetch-*")
 	if err != nil {
@@ -300,7 +319,13 @@ func main() {
 	// Check for checksum-level signature first (Workflow A: signature over checksum file)
 	checksumSigAsset, checksumFileName := findChecksumSignature(rel.Assets, cfg)
 	// Use checksum-level sig if: (1) it exists AND (2) config prefers it OR --require-minisign forces minisign path
-	useChecksumLevelSig := checksumSigAsset != nil && (cfg.preferChecksumSig() || *requireMinisign)
+	// UNLESS --prefer-per-asset is set, which forces Workflow B
+	useChecksumLevelSig := checksumSigAsset != nil && (cfg.preferChecksumSig() || *requireMinisign) && !*preferPerAsset
+
+	// --prefer-per-asset: verify per-asset signatures exist before bypassing Workflow A
+	if *preferPerAsset && checksumSigAsset != nil {
+		fmt.Fprintf(os.Stderr, "Note: --prefer-per-asset specified, bypassing checksum-level signature (%s)\n", checksumSigAsset.Name)
+	}
 
 	// --require-minisign: validate that minisign signature is available and will be used
 	if *requireMinisign {
@@ -408,16 +433,7 @@ func main() {
 		}
 	} else {
 		// Workflow B: Per-asset signature (original behavior)
-		checksumAsset, err = findSupplementalAsset(rel.Assets, ctx, cfg.ChecksumCandidates, [][]string{
-			{strings.ToLower(baseName), "sha"},
-			{"sha256sum"},
-			{"checksum"},
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-
+		// Find signature first - it's required
 		sigAsset, err = findSupplementalAsset(rel.Assets, ctx, cfg.SignatureCandidates, [][]string{
 			{strings.ToLower(baseName), "sig"},
 			{strings.ToLower(baseName), "signature"},
@@ -428,31 +444,48 @@ func main() {
 			os.Exit(1)
 		}
 
-		checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
-		if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-
 		sigPath = filepath.Join(tmpDir, sigAsset.Name)
 		if err := download(sigAsset.BrowserDownloadUrl, sigPath); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 
-		// #nosec G304 -- checksumPath tmp controlled
-		checksumBytes, err = os.ReadFile(checksumPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "read checksum: %v\n", err)
-			os.Exit(1)
-		}
-	}
+		// In Workflow B (per-asset), the signature directly verifies the asset bytes.
+		// Checksum is optional since the signature provides integrity verification.
+		// This applies to minisign, GPG, and ed25519 per-asset signatures.
+		sigFormat := signatureFormatFromExtension(sigAsset.Name, cfg.SignatureFormats)
 
-	// Extract expected hash from checksum file
-	expectedHash, err := extractChecksum(checksumBytes, cfg.HashAlgo, selected.Name)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		// When --prefer-per-asset is set, skip checksum file entirely (trust the signature)
+		if *preferPerAsset {
+			fmt.Fprintf(os.Stderr, "Skipping checksum verification; using %s per-asset signature for integrity\n", sigFormat)
+		} else {
+			checksumAsset, _ = findSupplementalAsset(rel.Assets, ctx, cfg.ChecksumCandidates, [][]string{
+				{strings.ToLower(baseName), "sha"},
+				{"sha256sum"},
+				{"checksum"},
+			})
+
+			if checksumAsset != nil {
+				checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
+				if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				// #nosec G304 -- checksumPath tmp controlled
+				checksumBytes, err = os.ReadFile(checksumPath)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "read checksum: %v\n", err)
+					os.Exit(1)
+				}
+			} else if sigFormat == sigFormatBinary {
+				// Raw ed25519 requires checksum for integrity (signature alone isn't sufficient
+				// without knowing what was signed - could be hash of asset or asset itself)
+				fmt.Fprintf(os.Stderr, "error: no checksum file found for %s (required for raw ed25519 signatures)\n", selected.Name)
+				os.Exit(1)
+			} else {
+				fmt.Fprintf(os.Stderr, "No checksum file found; using %s signature for integrity verification\n", sigFormat)
+			}
+		}
 	}
 
 	// #nosec G304 -- assetPath tmp controlled
@@ -462,6 +495,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Compute hash for caching (and verification if checksum file exists)
 	var h hash.Hash
 	switch cfg.HashAlgo {
 	case "sha256":
@@ -475,11 +509,19 @@ func main() {
 	h.Write(assetBytes)
 	actualHash := hex.EncodeToString(h.Sum(nil))
 
-	if actualHash != strings.ToLower(expectedHash) {
-		fmt.Fprintf(os.Stderr, "checksum mismatch: expected %s, got %s\n", expectedHash, actualHash)
-		os.Exit(1)
+	// Verify checksum if checksum file was found
+	if checksumBytes != nil {
+		expectedHash, err := extractChecksum(checksumBytes, cfg.HashAlgo, selected.Name)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if actualHash != strings.ToLower(expectedHash) {
+			fmt.Fprintf(os.Stderr, "checksum mismatch: expected %s, got %s\n", expectedHash, actualHash)
+			os.Exit(1)
+		}
+		fmt.Println("Checksum verified OK")
 	}
-	fmt.Println("Checksum verified OK")
 
 	cd := *cacheDir
 	if cd == "" {
@@ -632,11 +674,43 @@ func main() {
 }
 
 func getConfig(repo string) *RepoConfig {
+	// Start with defaults, then infer BinaryName from repo
+	cfg := defaults
+	cfg.BinaryName = inferBinaryName(repo)
+
+	// Apply repo-specific overrides if any
 	if override, ok := repoConfigs[repo]; ok {
-		cfg := mergeConfig(defaults, override)
-		return &cfg
+		cfg = mergeConfig(cfg, override)
 	}
-	return &defaults
+	return &cfg
+}
+
+// inferBinaryName extracts the binary name from "owner/repo" format.
+// Examples: "jedisct1/minisign" → "minisign", "3leaps/sfetch" → "sfetch"
+func inferBinaryName(repo string) string {
+	parts := strings.Split(repo, "/")
+	if len(parts) >= 2 {
+		return parts[1]
+	}
+	return repo // fallback to full string if no slash
+}
+
+// inferArchiveType determines archive type from asset filename extension.
+// Returns "zip" for .zip files, "tar.gz" for .tar.gz/.tgz, empty string if unknown.
+func inferArchiveType(assetName string) string {
+	lower := strings.ToLower(assetName)
+	switch {
+	case strings.HasSuffix(lower, ".zip"):
+		return "zip"
+	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"):
+		return "tar.gz"
+	case strings.HasSuffix(lower, ".tar.xz"):
+		return "tar.xz"
+	case strings.HasSuffix(lower, ".tar.bz2"):
+		return "tar.bz2"
+	default:
+		return ""
+	}
 }
 
 func mergeConfig(base RepoConfig, override RepoConfig) RepoConfig {

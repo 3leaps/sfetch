@@ -21,7 +21,8 @@ func TestGetConfig(t *testing.T) {
 		wantBin string
 	}{
 		{"3leaps/sfetch", "sfetch"},
-		{"unknown/repo", "sfetch"},
+		{"unknown/repo", "repo"},          // BinaryName inferred from repo name
+		{"jedisct1/minisign", "minisign"}, // BinaryName inferred from repo name
 	}
 	for _, tt := range tests {
 		t.Run(tt.repo, func(t *testing.T) {
