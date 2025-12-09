@@ -135,18 +135,24 @@ release-sign: release-sha256
 release-export-key:
 	./scripts/export-release-key.sh $(PGP_KEY_ID) $(DIST_RELEASE)
 
-release-export-minisign-key:
+release-export-minisign-key: build
 	@if [ -z "$(MINISIGN_KEY)" ]; then echo "MINISIGN_KEY not set" >&2; exit 1; fi
 	@mkdir -p $(DIST_RELEASE)
 	@# Extract public key path from secret key (replace .key with .pub)
 	@pubkey="$$(echo "$(MINISIGN_KEY)" | sed 's/\.key$$/.pub/')"; \
 	if [ -f "$$pubkey" ]; then \
+		echo "Verifying $$pubkey is a valid minisign public key..."; \
+		./$(BUILD_ARTIFACT) --verify-minisign-pubkey "$$pubkey" || exit 1; \
 		cp "$$pubkey" "$(DIST_RELEASE)/$(MINISIGN_PUB_NAME)"; \
 		echo "✅ Copied minisign public key to $(DIST_RELEASE)/$(MINISIGN_PUB_NAME)"; \
 	else \
 		echo "error: public key $$pubkey not found (expected alongside secret key)" >&2; \
 		exit 1; \
 	fi
+
+verify-minisign-pubkey: build
+	@if [ -z "$(FILE)" ]; then echo "usage: make verify-minisign-pubkey FILE=path/to/key.pub" >&2; exit 1; fi
+	./$(BUILD_ARTIFACT) --verify-minisign-pubkey "$(FILE)"
 
 verify-release-key:
 	./scripts/verify-public-key.sh $(DIST_RELEASE)/$(PUBLIC_KEY_NAME)

@@ -7,6 +7,44 @@ and this project adheres to [CalVer: YYYY.MM.DD](https://calver.org/).
 
 ## [Unreleased]
 
+## [v2025.12.09] - 2025-12-09
+
+### Added
+- **Verification Assessment & Provenance**: Structured JSON provenance records for audit trails and CI integration.
+  - `--dry-run`: Assess what verification is available without downloading.
+  - `--provenance`: Output provenance record JSON to stderr after operation.
+  - `--provenance-file <path>`: Write provenance record to file.
+  - Schema: `schemas/provenance.schema.json` (JSON Schema 2020-12).
+- **Workflow C (checksum-only)**: Support for repos that publish checksums without signatures.
+  - Per-asset checksums (`.sha256`, `.sha512`) and consolidated (`checksums.txt`, `SHA256SUMS`).
+  - Warning emitted when no signature available.
+- **Override flags**:
+  - `--skip-checksum`: Skip checksum verification even if available.
+  - `--insecure`: Skip ALL verification (dangerous - use only for testing).
+- **Minisign enhancements**:
+  - `--minisign-key-url`: Download minisign public key from URL.
+  - `--minisign-key-asset`: Use minisign public key from release asset.
+  - `--require-minisign`: Fail if minisign signature not available.
+  - `--prefer-per-asset`: Force Workflow B over Workflow A when both available.
+  - Auto-detection of minisign public keys in release assets (`.pub` files).
+  - `--verify-minisign-pubkey <path>`: Validate file is a public key (not secret key).
+- **Inference improvements**:
+  - `--binary-name`: Override inferred binary name.
+  - Binary name inferred from repo name (e.g., `jedisct1/minisign` → `minisign`).
+  - Archive type inferred from asset extension (`.tar.gz`, `.zip`, `.tgz`).
+- **Trust levels**: Computed trust assessment (high/medium/low/none) based on verification performed.
+- **Documentation**: Comprehensive `docs/examples.md` with real-world examples and pattern matching transparency.
+- **Integration tests**: Full minisign verification tests with testdata fixtures.
+- **Unit tests**: `TestValidateMinisignPubkey` covering public key validation (rejects secret keys, signatures).
+
+### Changed
+- Verification workflow detection now prefers checksum-level signatures (Workflow A) over per-asset (Workflow B) by default.
+- Minisign verification uses pure-Go `github.com/jedisct1/go-minisign` library (no external dependencies).
+- `RepoConfig` struct now includes `SignatureFormats` for extension-based signature type detection.
+
+### Fixed
+- Minisign per-asset signatures (Workflow B) now correctly skip checksum verification when checksum file unavailable.
+
 ## [v2025.12.06.1] - 2025-12-06
 
 ### Fixed

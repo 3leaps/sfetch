@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/3leaps/sfetch/schemas/provenance.schema.json",
+  "title": "sfetch Provenance Record",
+  "description": "Structured record of verification actions performed during asset download. Use for audit trails, CI integration, and compliance.",
+  "type": "object",
+  "required": ["version", "timestamp", "source", "asset", "verification", "trustLevel"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "https://github.com/3leaps/sfetch/schemas/provenance.schema.json",
+      "description": "Schema reference for validation tooling"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Provenance schema version (semver, independent of sfetch version)",
+      "examples": ["1.0.0"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC3339 timestamp of when verification was performed"
+    },
+    "sfetchVersion": {
+      "type": "string",
+      "description": "Version of sfetch that produced this record (CalVer: vYYYY.MM.DD[.N])",
+      "examples": ["v2025.12.09", "v2025.12.06.1", "dev"]
+    },
+    "source": {
+      "type": "object",
+      "description": "Source repository and release information",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["github", "url"],
+          "description": "Source type: GitHub release or direct URL"
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[^/]+/[^/]+$",
+          "description": "GitHub repository in owner/repo format",
+          "examples": ["3leaps/sfetch", "BurntSushi/ripgrep"]
+        },
+        "release": {
+          "type": "object",
+          "description": "Release metadata (GitHub sources only)",
+          "properties": {
+            "tag": {
+              "type": "string",
+              "description": "Release tag name",
+              "examples": ["v2025.12.09", "v15.1.0"]
+            },
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "description": "URL to release page"
+            },
+            "publishedAt": {
+              "type": "string",
+              "format": "date-time",
+              "description": "When the release was published (for cooling policy)"
+            }
+          }
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Direct download URL (URL sources only)"
+        }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "description": "Downloaded asset information",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Asset filename",
+          "examples": ["sfetch_darwin_arm64.tar.gz"]
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Asset size in bytes"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Download URL for the asset"
+        },
+        "computedChecksum": {
+          "type": "object",
+          "description": "Checksum computed by sfetch after download",
+          "properties": {
+            "algorithm": {
+              "type": "string",
+              "enum": ["sha256", "sha512"],
+              "description": "Hash algorithm used"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^[a-f0-9]+$",
+              "description": "Lowercase hex-encoded hash value"
+            }
+          },
+          "required": ["algorithm", "value"]
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "description": "Verification actions performed",
+      "required": ["workflow", "signature", "checksum"],
+      "properties": {
+        "workflow": {
+          "type": "string",
+          "enum": ["A", "B", "C", "insecure"],
+          "description": "Verification workflow used: A=checksum-level-sig, B=per-asset-sig, C=checksum-only, insecure=none"
+        },
+        "signature": {
+          "type": "object",
+          "description": "Signature verification status",
+          "required": ["available", "verified", "skipped"],
+          "properties": {
+            "available": {
+              "type": "boolean",
+              "description": "Whether a signature was found in the release"
+            },
+            "format": {
+              "type": "string",
+              "enum": ["minisign", "pgp", "ed25519", "sigstore"],
+              "description": "Signature format detected"
+            },
+            "file": {
+              "type": "string",
+              "description": "Signature filename used for verification"
+            },
+            "keySource": {
+              "type": "string",
+              "enum": ["flag", "url", "asset", "auto-detect"],
+              "description": "How the public key was obtained"
+            },
+            "verified": {
+              "type": "boolean",
+              "description": "Whether signature verification succeeded"
+            },
+            "skipped": {
+              "type": "boolean",
+              "description": "Whether signature verification was skipped (--skip-sig)"
+            },
+            "reason": {
+              "type": "string",
+              "description": "Explanation for skipped/failed verification"
+            }
+          }
+        },
+        "checksum": {
+          "type": "object",
+          "description": "Checksum verification status",
+          "required": ["available", "verified", "skipped"],
+          "properties": {
+            "available": {
+              "type": "boolean",
+              "description": "Whether a checksum file was found in the release"
+            },
+            "algorithm": {
+              "type": "string",
+              "enum": ["sha256", "sha512"],
+              "description": "Hash algorithm used in checksum file"
+            },
+            "file": {
+              "type": "string",
+              "description": "Checksum filename used for verification"
+            },
+            "type": {
+              "type": "string",
+              "enum": ["consolidated", "per-asset"],
+              "description": "Checksum file type: consolidated (SHA256SUMS) or per-asset (.sha256)"
+            },
+            "verified": {
+              "type": "boolean",
+              "description": "Whether checksum verification succeeded"
+            },
+            "skipped": {
+              "type": "boolean",
+              "description": "Whether checksum verification was skipped (--skip-checksum)"
+            },
+            "reason": {
+              "type": "string",
+              "description": "Explanation for skipped/failed verification"
+            }
+          }
+        }
+      }
+    },
+    "trustLevel": {
+      "type": "string",
+      "enum": ["high", "medium", "low", "none"],
+      "description": "Computed trust level: high=sig+checksum, medium=sig-only, low=checksum-only, none=insecure"
+    },
+    "trustSignals": {
+      "type": "object",
+      "description": "Additional trust signals (extensible for future features)",
+      "properties": {
+        "releaseAge": {
+          "type": "object",
+          "description": "Release age analysis for cooling policy",
+          "properties": {
+            "days": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Days since release was published"
+            },
+            "meetsMinAge": {
+              "type": "boolean",
+              "description": "Whether release meets --min-age requirement"
+            },
+            "minAgeOverridden": {
+              "type": "boolean",
+              "description": "Whether --min-age-override was used"
+            }
+          }
+        },
+        "repositoryMetrics": {
+          "type": "object",
+          "description": "Repository popularity metrics (future)",
+          "properties": {
+            "stars": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "GitHub star count at time of download"
+            },
+            "forks": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Warning messages generated during verification"
+    },
+    "flags": {
+      "type": "object",
+      "description": "CLI flags that affected verification behavior",
+      "properties": {
+        "skipSig": { "type": "boolean" },
+        "skipChecksum": { "type": "boolean" },
+        "insecure": { "type": "boolean" },
+        "requireMinisign": { "type": "boolean" },
+        "preferPerAsset": { "type": "boolean" },
+        "dryRun": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "$schema": "https://github.com/3leaps/sfetch/schemas/provenance.schema.json",
+      "version": "1.0.0",
+      "timestamp": "2025-12-09T14:30:00Z",
+      "sfetchVersion": "v2025.12.09",
+      "source": {
+        "type": "github",
+        "repository": "BurntSushi/ripgrep",
+        "release": {
+          "tag": "v15.1.0",
+          "url": "https://github.com/BurntSushi/ripgrep/releases/tag/v15.1.0"
+        }
+      },
+      "asset": {
+        "name": "ripgrep-15.1.0-aarch64-apple-darwin.tar.gz",
+        "size": 2200000,
+        "url": "https://github.com/BurntSushi/ripgrep/releases/download/v15.1.0/ripgrep-15.1.0-aarch64-apple-darwin.tar.gz",
+        "computedChecksum": {
+          "algorithm": "sha256",
+          "value": "abc123def456..."
+        }
+      },
+      "verification": {
+        "workflow": "C",
+        "signature": {
+          "available": false,
+          "verified": false,
+          "skipped": false,
+          "reason": "no signature file found in release"
+        },
+        "checksum": {
+          "available": true,
+          "algorithm": "sha256",
+          "file": "ripgrep-15.1.0-aarch64-apple-darwin.tar.gz.sha256",
+          "type": "per-asset",
+          "verified": true,
+          "skipped": false
+        }
+      },
+      "trustLevel": "low",
+      "warnings": [
+        "No signature available; authenticity cannot be proven"
+      ],
+      "flags": {}
+    }
+  ]
+}

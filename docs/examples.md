@@ -465,6 +465,89 @@ This is useful when:
 - Checksum-level signature is broken but per-asset sigs are valid
 - You want to verify the specific asset file directly
 
+### New: Verification Assessment & Provenance
+
+#### --dry-run
+
+Assess what verification is available without downloading:
+
+```bash
+$ sfetch --repo BurntSushi/ripgrep --latest --dry-run
+
+sfetch dry-run assessment
+─────────────────────────
+Repository:  BurntSushi/ripgrep
+Release:     15.1.0
+Asset:       ripgrep-15.1.0-aarch64-apple-darwin.tar.gz (1.7 MB)
+
+Verification available:
+  Signature:  none
+  Checksum:   ripgrep-15.1.0-aarch64-apple-darwin.tar.gz.sha256 (sha256, per-asset)
+
+Verification plan:
+  Workflow:   C (checksum-only)
+  Trust:      low
+
+Warnings:
+  - No signature available; authenticity cannot be proven
+```
+
+#### --provenance
+
+Output a structured JSON provenance record for audit/compliance:
+
+```bash
+# Output provenance to stderr after download
+sfetch --repo jesseduffield/lazygit --latest --dest-dir /tmp --provenance
+
+# Write provenance to file
+sfetch --repo jesseduffield/lazygit --latest --dest-dir /tmp --provenance-file provenance.json
+
+# Dry-run with JSON output (no download, just assessment)
+sfetch --repo jesseduffield/lazygit --latest --dry-run --provenance
+```
+
+Provenance record includes:
+- Source repository and release info
+- Asset name, size, URL, and computed checksum
+- Verification workflow used (A/B/C/insecure)
+- Signature and checksum verification status
+- Trust level (high/medium/low/none)
+- Any warnings generated
+
+Schema: `schemas/provenance.schema.json`
+
+#### Workflow C: Checksum-Only
+
+Many popular tools publish checksums but no signatures. sfetch now supports this with Workflow C:
+
+| Repo | Checksum Pattern | Status |
+|------|------------------|--------|
+| BurntSushi/ripgrep | per-asset `.sha256` | ✅ Supported |
+| jesseduffield/lazygit | `checksums.txt` | ✅ Supported |
+| junegunn/fzf | versioned `fzf_X.Y.Z_checksums.txt` | ⚠️ Needs pattern |
+
+```bash
+$ sfetch --repo jesseduffield/lazygit --latest --dest-dir /tmp
+warning: No signature available; authenticity cannot be proven
+Using checksum-only verification (no signature available)
+Checksum verified OK
+Installed lazygit to /tmp/lazygit
+```
+
+#### Override Flags
+
+| Flag | Description |
+|------|-------------|
+| `--skip-sig` | Skip signature verification (existing) |
+| `--skip-checksum` | Skip checksum verification |
+| `--insecure` | Skip ALL verification (dangerous) |
+
+```bash
+# Download without any verification (NOT recommended)
+sfetch --repo owner/tool --latest --insecure --dest-dir /tmp
+```
+
 ---
 
 **Found a repo that doesn't work?** Open an issue with:

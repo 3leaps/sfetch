@@ -38,15 +38,16 @@ export PGP_KEY_ID=security@fulmenhq.dev  # or your-subkey-id!
    ```
    Produces: `SHA256SUMS`, `SHA256SUMS.minisig`, `SHA256SUMS.asc`
 
-3. **Export public keys**
+3. **Export public keys** (auto-validates before copying)
    ```bash
-   make release-export-minisign-key   # → sfetch-minisign.pub
+   make release-export-minisign-key   # → sfetch-minisign.pub (validates it's not secret key!)
    make release-export-key            # → sfetch-release-signing-key.asc
    ```
 
-4. **Verify exported PGP key is public-only**
+4. **Verify exported keys are public-only**
    ```bash
-   make verify-release-key
+   make verify-release-key                                    # PGP key
+   make verify-minisign-pubkey FILE=dist/release/sfetch-minisign.pub  # minisign key (optional, done in step 3)
    ```
 
 5. **Copy release notes**

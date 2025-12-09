@@ -20,6 +20,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jedisct1/go-minisign"
 )
@@ -30,6 +31,569 @@ const (
 )
 
 var version = "dev"
+
+// Verification workflows
+const (
+	workflowA        = "A"        // Checksum-level signature (SHA256SUMS.minisig)
+	workflowB        = "B"        // Per-asset signature (asset.tar.gz.minisig)
+	workflowC        = "C"        // Checksum-only (no signature available)
+	workflowInsecure = "insecure" // No verification (--insecure flag)
+)
+
+// Trust levels for provenance records
+const (
+	trustHigh   = "high"   // Signature + checksum verified
+	trustMedium = "medium" // Signature only (no checksum)
+	trustLow    = "low"    // Checksum only (no signature)
+	trustNone   = "none"   // No verification (--insecure)
+)
+
+// Minisign key format constants
+// Public key: "RW" + 54 base64 chars = 56 total (42 bytes: 2 algo + 8 keyid + 32 pubkey)
+// Secret key (unencrypted): 212 chars, starts with "RWQAAEIy"
+// Secret key (encrypted):   212 chars, starts with "RWRTY0Iy"
+// Signature: 140+ chars (4 lines total)
+const (
+	minisignPubkeyLen    = 56
+	minisignSecretkeyLen = 212
+)
+
+// minisignPubkeyRegex matches a valid minisign public key line (with or without comment header)
+var minisignPubkeyRegex = regexp.MustCompile(`^RW[A-Za-z0-9+/]{54}$`)
+
+// minisignSecretkeyPrefixes are known prefixes for secret key files
+var minisignSecretkeyPrefixes = []string{
+	"RWQAAEIy", // unencrypted secret key
+	"RWRTY0Iy", // encrypted secret key
+}
+
+// ProvenanceRecord captures verification actions for audit/compliance.
+// Schema: schemas/provenance.schema.json
+type ProvenanceRecord struct {
+	Schema        string           `json:"$schema"`
+	Version       string           `json:"version"`
+	Timestamp     string           `json:"timestamp"`
+	SfetchVersion string           `json:"sfetchVersion"`
+	Source        ProvenanceSource `json:"source"`
+	Asset         ProvenanceAsset  `json:"asset"`
+	Verification  ProvenanceVerify `json:"verification"`
+	TrustLevel    string           `json:"trustLevel"`
+	Warnings      []string         `json:"warnings,omitempty"`
+	Flags         ProvenanceFlags  `json:"flags,omitempty"`
+}
+
+type ProvenanceSource struct {
+	Type       string             `json:"type"`
+	Repository string             `json:"repository,omitempty"`
+	Release    *ProvenanceRelease `json:"release,omitempty"`
+}
+
+type ProvenanceRelease struct {
+	Tag string `json:"tag"`
+	URL string `json:"url"`
+}
+
+type ProvenanceAsset struct {
+	Name             string          `json:"name"`
+	Size             int64           `json:"size"`
+	URL              string          `json:"url"`
+	ComputedChecksum *ProvenanceHash `json:"computedChecksum,omitempty"`
+}
+
+type ProvenanceHash struct {
+	Algorithm string `json:"algorithm"`
+	Value     string `json:"value"`
+}
+
+type ProvenanceVerify struct {
+	Workflow  string              `json:"workflow"`
+	Signature ProvenanceSigStatus `json:"signature"`
+	Checksum  ProvenanceCSStatus  `json:"checksum"`
+}
+
+type ProvenanceSigStatus struct {
+	Available bool   `json:"available"`
+	Format    string `json:"format,omitempty"`
+	File      string `json:"file,omitempty"`
+	KeySource string `json:"keySource,omitempty"`
+	Verified  bool   `json:"verified"`
+	Skipped   bool   `json:"skipped"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+type ProvenanceCSStatus struct {
+	Available bool   `json:"available"`
+	Algorithm string `json:"algorithm,omitempty"`
+	File      string `json:"file,omitempty"`
+	Type      string `json:"type,omitempty"`
+	Verified  bool   `json:"verified"`
+	Skipped   bool   `json:"skipped"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+type ProvenanceFlags struct {
+	SkipSig         bool `json:"skipSig,omitempty"`
+	SkipChecksum    bool `json:"skipChecksum,omitempty"`
+	Insecure        bool `json:"insecure,omitempty"`
+	RequireMinisign bool `json:"requireMinisign,omitempty"`
+	PreferPerAsset  bool `json:"preferPerAsset,omitempty"`
+	DryRun          bool `json:"dryRun,omitempty"`
+}
+
+// VerificationAssessment captures what verification is available for a release.
+// This is computed before any downloads to enable --dry-run and informed decisions.
+type VerificationAssessment struct {
+	// Asset selection
+	SelectedAsset *Asset
+
+	// Signature availability
+	SignatureAvailable  bool
+	SignatureFormat     string // minisign, pgp, ed25519, or ""
+	SignatureFile       string // filename of signature
+	SignatureIsChecksum bool   // true if sig is over checksum file (Workflow A)
+	ChecksumFileForSig  string // checksum file name when SignatureIsChecksum is true
+
+	// Checksum availability
+	ChecksumAvailable bool
+	ChecksumFile      string // filename of checksum file
+	ChecksumType      string // "consolidated" (SHA256SUMS) or "per-asset" (.sha256)
+	ChecksumAlgorithm string // sha256, sha512
+
+	// Computed workflow and trust
+	Workflow   string // A, B, C, or insecure
+	TrustLevel string // high, medium, low, none
+
+	// Warnings generated during assessment
+	Warnings []string
+}
+
+// assessRelease analyzes a release to determine what verification is available.
+// This does NOT download anything - it only inspects the asset list.
+func assessRelease(rel *Release, cfg *RepoConfig, selectedAsset *Asset, flags assessmentFlags) *VerificationAssessment {
+	assessment := &VerificationAssessment{
+		SelectedAsset: selectedAsset,
+		Warnings:      []string{},
+	}
+
+	// Handle --insecure flag first
+	if flags.insecure {
+		assessment.Workflow = workflowInsecure
+		assessment.TrustLevel = trustNone
+		assessment.Warnings = append(assessment.Warnings, "No verification performed (--insecure flag)")
+		return assessment
+	}
+
+	baseName := trimKnownExtension(selectedAsset.Name, cfg.ArchiveExtensions)
+	ctx := templateContext{
+		AssetName:  selectedAsset.Name,
+		BaseName:   baseName,
+		BinaryName: cfg.BinaryName,
+		GOOS:       runtime.GOOS,
+		GOARCH:     runtime.GOARCH,
+	}
+
+	// Check for checksum-level signature (Workflow A)
+	checksumSigAsset, checksumFileName := findChecksumSignature(rel.Assets, cfg)
+	if checksumSigAsset != nil && !flags.skipSig && !flags.preferPerAsset {
+		assessment.SignatureAvailable = true
+		assessment.SignatureFile = checksumSigAsset.Name
+		assessment.SignatureFormat = signatureFormatFromExtension(checksumSigAsset.Name, cfg.SignatureFormats)
+		assessment.SignatureIsChecksum = true
+		assessment.ChecksumFileForSig = checksumFileName
+
+		// The checksum file is implicitly available if we have a sig over it
+		assessment.ChecksumAvailable = true
+		assessment.ChecksumFile = checksumFileName
+		assessment.ChecksumType = "consolidated"
+		assessment.ChecksumAlgorithm = cfg.HashAlgo
+
+		assessment.Workflow = workflowA
+		if flags.skipChecksum {
+			assessment.TrustLevel = trustMedium
+			assessment.Warnings = append(assessment.Warnings, "Checksum verification skipped (--skip-checksum flag)")
+		} else {
+			assessment.TrustLevel = trustHigh
+		}
+		return assessment
+	}
+
+	// Check for per-asset signature (Workflow B)
+	perAssetSig := findPerAssetSignature(rel.Assets, ctx, cfg)
+	if perAssetSig != nil && !flags.skipSig {
+		assessment.SignatureAvailable = true
+		assessment.SignatureFile = perAssetSig.Name
+		assessment.SignatureFormat = signatureFormatFromExtension(perAssetSig.Name, cfg.SignatureFormats)
+		assessment.SignatureIsChecksum = false
+
+		// Check for checksum file (optional in Workflow B)
+		checksumAsset := findChecksumFile(rel.Assets, ctx, cfg)
+		if checksumAsset != nil && !flags.skipChecksum {
+			assessment.ChecksumAvailable = true
+			assessment.ChecksumFile = checksumAsset.Name
+			assessment.ChecksumType = detectChecksumType(checksumAsset.Name)
+			assessment.ChecksumAlgorithm = cfg.HashAlgo
+			assessment.TrustLevel = trustHigh
+		} else {
+			assessment.TrustLevel = trustMedium
+			if flags.skipChecksum {
+				assessment.Warnings = append(assessment.Warnings, "Checksum verification skipped (--skip-checksum flag)")
+			} else {
+				assessment.Warnings = append(assessment.Warnings, "No checksum file found; using signature for integrity")
+			}
+		}
+
+		assessment.Workflow = workflowB
+		return assessment
+	}
+
+	// No signature available - check for checksum-only (Workflow C)
+	checksumAsset := findChecksumFile(rel.Assets, ctx, cfg)
+	if checksumAsset != nil && !flags.skipChecksum {
+		assessment.ChecksumAvailable = true
+		assessment.ChecksumFile = checksumAsset.Name
+		assessment.ChecksumType = detectChecksumType(checksumAsset.Name)
+		assessment.ChecksumAlgorithm = cfg.HashAlgo
+
+		assessment.Workflow = workflowC
+		assessment.TrustLevel = trustLow
+		assessment.Warnings = append(assessment.Warnings, "No signature available; authenticity cannot be proven")
+
+		if flags.skipSig {
+			// User explicitly skipped sig, but there wasn't one anyway
+			assessment.Warnings = append(assessment.Warnings, "Note: --skip-sig had no effect (no signature found)")
+		}
+		return assessment
+	}
+
+	// Nothing available
+	assessment.Workflow = ""
+	assessment.TrustLevel = trustNone
+	assessment.Warnings = append(assessment.Warnings, "No verification available (no signature or checksum found)")
+
+	return assessment
+}
+
+// assessmentFlags holds CLI flags that affect assessment behavior
+type assessmentFlags struct {
+	skipSig         bool
+	skipChecksum    bool
+	insecure        bool
+	preferPerAsset  bool
+	requireMinisign bool
+	dryRun          bool
+}
+
+// findPerAssetSignature looks for a signature file for the specific asset (Workflow B).
+func findPerAssetSignature(assets []Asset, ctx templateContext, cfg *RepoConfig) *Asset {
+	// Try template-based matching first
+	for _, tpl := range cfg.SignatureCandidates {
+		name := renderTemplate(tpl, ctx)
+		if name == "" {
+			continue
+		}
+		for i := range assets {
+			if assets[i].Name == name {
+				return &assets[i]
+			}
+		}
+	}
+	return nil
+}
+
+// findChecksumFile looks for a checksum file in the release assets.
+func findChecksumFile(assets []Asset, ctx templateContext, cfg *RepoConfig) *Asset {
+	// Try template-based matching first
+	for _, tpl := range cfg.ChecksumCandidates {
+		name := renderTemplate(tpl, ctx)
+		if name == "" {
+			continue
+		}
+		for i := range assets {
+			if assets[i].Name == name {
+				return &assets[i]
+			}
+		}
+	}
+	return nil
+}
+
+// detectChecksumType determines if a checksum file is consolidated or per-asset.
+func detectChecksumType(filename string) string {
+	lower := strings.ToLower(filename)
+	// Per-asset checksums end with .sha256, .sha512, etc.
+	if strings.HasSuffix(lower, ".sha256") || strings.HasSuffix(lower, ".sha512") ||
+		strings.HasSuffix(lower, ".sha256.txt") || strings.HasSuffix(lower, ".sha512.txt") {
+		return "per-asset"
+	}
+	// Everything else is consolidated (SHA256SUMS, checksums.txt, etc.)
+	return "consolidated"
+}
+
+// formatDryRunOutput generates human-readable dry-run output.
+func formatDryRunOutput(repo string, rel *Release, assessment *VerificationAssessment) string {
+	var sb strings.Builder
+
+	sb.WriteString("\nsfetch dry-run assessment\n")
+	sb.WriteString("─────────────────────────\n")
+	sb.WriteString(fmt.Sprintf("Repository:  %s\n", repo))
+	sb.WriteString(fmt.Sprintf("Release:     %s\n", rel.TagName))
+
+	if assessment.SelectedAsset != nil {
+		size := formatSize(assessment.SelectedAsset.Size)
+		sb.WriteString(fmt.Sprintf("Asset:       %s (%s)\n", assessment.SelectedAsset.Name, size))
+	}
+
+	sb.WriteString("\nVerification available:\n")
+
+	// Signature info
+	if assessment.SignatureAvailable {
+		sigType := assessment.SignatureFormat
+		if assessment.SignatureIsChecksum {
+			sb.WriteString(fmt.Sprintf("  Signature:  %s (%s, checksum-level)\n", assessment.SignatureFile, sigType))
+		} else {
+			sb.WriteString(fmt.Sprintf("  Signature:  %s (%s, per-asset)\n", assessment.SignatureFile, sigType))
+		}
+	} else {
+		sb.WriteString("  Signature:  none\n")
+	}
+
+	// Checksum info
+	if assessment.ChecksumAvailable {
+		sb.WriteString(fmt.Sprintf("  Checksum:   %s (%s, %s)\n",
+			assessment.ChecksumFile, assessment.ChecksumAlgorithm, assessment.ChecksumType))
+	} else {
+		sb.WriteString("  Checksum:   none\n")
+	}
+
+	sb.WriteString("\nVerification plan:\n")
+	sb.WriteString(fmt.Sprintf("  Workflow:   %s\n", describeWorkflow(assessment.Workflow)))
+	sb.WriteString(fmt.Sprintf("  Trust:      %s\n", assessment.TrustLevel))
+
+	if len(assessment.Warnings) > 0 {
+		sb.WriteString("\nWarnings:\n")
+		for _, w := range assessment.Warnings {
+			sb.WriteString(fmt.Sprintf("  - %s\n", w))
+		}
+	}
+
+	return sb.String()
+}
+
+// describeWorkflow returns a human-readable description of a workflow.
+func describeWorkflow(workflow string) string {
+	switch workflow {
+	case workflowA:
+		return "A (checksum-level signature)"
+	case workflowB:
+		return "B (per-asset signature)"
+	case workflowC:
+		return "C (checksum-only)"
+	case workflowInsecure:
+		return "insecure (no verification)"
+	default:
+		return "none (no verification available)"
+	}
+}
+
+// buildProvenanceRecord creates a provenance record from assessment and results.
+func buildProvenanceRecord(repo string, rel *Release, assessment *VerificationAssessment, flags assessmentFlags, computedHash string) *ProvenanceRecord {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	record := &ProvenanceRecord{
+		Schema:        "https://github.com/3leaps/sfetch/schemas/provenance.schema.json",
+		Version:       "1.0.0",
+		Timestamp:     now,
+		SfetchVersion: version,
+		Source: ProvenanceSource{
+			Type:       "github",
+			Repository: repo,
+			Release: &ProvenanceRelease{
+				Tag: rel.TagName,
+				URL: fmt.Sprintf("https://github.com/%s/releases/tag/%s", repo, rel.TagName),
+			},
+		},
+		TrustLevel: assessment.TrustLevel,
+		Warnings:   assessment.Warnings,
+		Flags: ProvenanceFlags{
+			SkipSig:         flags.skipSig,
+			SkipChecksum:    flags.skipChecksum,
+			Insecure:        flags.insecure,
+			RequireMinisign: flags.requireMinisign,
+			PreferPerAsset:  flags.preferPerAsset,
+			DryRun:          flags.dryRun,
+		},
+	}
+
+	if assessment.SelectedAsset != nil {
+		record.Asset = ProvenanceAsset{
+			Name: assessment.SelectedAsset.Name,
+			Size: assessment.SelectedAsset.Size,
+			URL:  assessment.SelectedAsset.BrowserDownloadUrl,
+		}
+		if computedHash != "" {
+			record.Asset.ComputedChecksum = &ProvenanceHash{
+				Algorithm: "sha256",
+				Value:     computedHash,
+			}
+		}
+	}
+
+	// Signature status
+	sigStatus := ProvenanceSigStatus{
+		Available: assessment.SignatureAvailable,
+		Verified:  false,
+		Skipped:   flags.skipSig || flags.insecure,
+	}
+	if assessment.SignatureAvailable {
+		sigStatus.Format = assessment.SignatureFormat
+		sigStatus.File = assessment.SignatureFile
+		if !flags.skipSig && !flags.insecure && assessment.Workflow != workflowC {
+			sigStatus.Verified = true
+		}
+	} else {
+		sigStatus.Reason = "no signature file found in release"
+	}
+	if flags.skipSig {
+		sigStatus.Reason = "--skip-sig flag"
+	}
+	if flags.insecure {
+		sigStatus.Reason = "--insecure flag"
+	}
+
+	// Checksum status
+	csStatus := ProvenanceCSStatus{
+		Available: assessment.ChecksumAvailable,
+		Verified:  false,
+		Skipped:   flags.skipChecksum || flags.insecure,
+	}
+	if assessment.ChecksumAvailable {
+		csStatus.Algorithm = assessment.ChecksumAlgorithm
+		csStatus.File = assessment.ChecksumFile
+		csStatus.Type = assessment.ChecksumType
+		if !flags.skipChecksum && !flags.insecure {
+			csStatus.Verified = true
+		}
+	} else {
+		csStatus.Reason = "no checksum file found in release"
+	}
+	if flags.skipChecksum {
+		csStatus.Reason = "--skip-checksum flag"
+	}
+	if flags.insecure {
+		csStatus.Reason = "--insecure flag"
+	}
+
+	record.Verification = ProvenanceVerify{
+		Workflow:  assessment.Workflow,
+		Signature: sigStatus,
+		Checksum:  csStatus,
+	}
+
+	return record
+}
+
+// outputProvenance writes the provenance record to the specified destination.
+func outputProvenance(record *ProvenanceRecord, toFile string) error {
+	data, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal provenance: %w", err)
+	}
+
+	if toFile != "" {
+		// #nosec G306 -- provenance file is user-specified output
+		if err := os.WriteFile(toFile, data, 0o644); err != nil {
+			return fmt.Errorf("write provenance file: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Provenance record written to %s\n", toFile)
+	} else {
+		fmt.Fprintln(os.Stderr, string(data))
+	}
+	return nil
+}
+
+// ValidateMinisignPubkey checks if a file contains a valid minisign public key.
+// Returns nil if valid, error describing the problem otherwise.
+// Detects: wrong format, secret key, signature file, or other content.
+func ValidateMinisignPubkey(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read file: %w", err)
+	}
+
+	content := strings.TrimSpace(string(data))
+	lines := strings.Split(content, "\n")
+
+	if len(lines) == 0 {
+		return fmt.Errorf("file is empty")
+	}
+
+	// Find the key line (skip optional comment)
+	var keyLine string
+
+	if len(lines) == 1 {
+		// Single line: must be the key itself
+		keyLine = strings.TrimSpace(lines[0])
+	} else if len(lines) == 2 {
+		// Two lines: first should be comment, second is key
+		keyLine = strings.TrimSpace(lines[1])
+	} else if len(lines) >= 4 {
+		// 4+ lines suggests a signature file, not a key
+		return fmt.Errorf("file has %d lines (signature files have 4 lines; public keys have 1-2)", len(lines))
+	} else {
+		// 3 lines is unusual
+		return fmt.Errorf("unexpected format: %d lines (public keys have 1-2 lines)", len(lines))
+	}
+
+	// Check if it starts with RW (minisign prefix)
+	if !strings.HasPrefix(keyLine, "RW") {
+		return fmt.Errorf("not a minisign key: line does not start with 'RW' prefix")
+	}
+
+	// Check for known secret key prefixes FIRST (before length check)
+	for _, prefix := range minisignSecretkeyPrefixes {
+		if strings.HasPrefix(keyLine, prefix) {
+			return fmt.Errorf("DANGER: this is a SECRET KEY (prefix %s), not a public key", prefix)
+		}
+	}
+
+	// Check length to distinguish public vs secret key
+	keyLen := len(keyLine)
+	switch {
+	case keyLen == minisignPubkeyLen:
+		// Correct length for public key - validate base64 charset
+		if !minisignPubkeyRegex.MatchString(keyLine) {
+			return fmt.Errorf("invalid characters in key (expected base64)")
+		}
+		// Valid public key
+		return nil
+
+	case keyLen == minisignSecretkeyLen:
+		return fmt.Errorf("DANGER: this appears to be a SECRET KEY (%d chars), not a public key (56 chars)", keyLen)
+
+	case keyLen > minisignPubkeyLen && keyLen < minisignSecretkeyLen:
+		return fmt.Errorf("invalid key length %d (public=56, secret=212): possibly corrupted or signature", keyLen)
+
+	case keyLen < minisignPubkeyLen:
+		return fmt.Errorf("key too short: %d chars (expected 56 for public key)", keyLen)
+
+	default:
+		return fmt.Errorf("key too long: %d chars (expected 56 for public key, 212 for secret)", keyLen)
+	}
+}
+
+// formatSize formats bytes as human-readable size.
+func formatSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
 
 //go:embed docs/quickstart.txt
 var quickstartDoc string
@@ -178,7 +742,13 @@ func main() {
 	cacheDir := flag.String("cache-dir", "", "cache directory")
 	selfVerify := flag.Bool("self-verify", false, "self-verify mode")
 	skipSig := flag.Bool("skip-sig", false, "skip signature verification (testing only)")
+	skipChecksum := flag.Bool("skip-checksum", false, "skip checksum verification even if available")
+	insecure := flag.Bool("insecure", false, "skip all verification (dangerous - use only for testing)")
+	dryRun := flag.Bool("dry-run", false, "assess release verification without downloading")
+	provenance := flag.Bool("provenance", false, "output provenance record JSON to stderr")
+	provenanceFile := flag.String("provenance-file", "", "write provenance record to file (implies --provenance)")
 	skipToolsCheck := flag.Bool("skip-tools-check", false, "skip preflight tool checks")
+	verifyMinisignPubkey := flag.String("verify-minisign-pubkey", "", "verify file is a valid minisign PUBLIC key (not secret)")
 	jsonOut := flag.Bool("json", false, "JSON output for CI")
 	extendedHelp := flag.Bool("helpextended", false, "print quickstart & examples")
 	versionFlag := flag.Bool("version", false, "print version")
@@ -199,6 +769,12 @@ func main() {
 	_ = *selfVerify // TODO
 	_ = *jsonOut    // TODO
 
+	// Validate flag combinations
+	if *insecure && *requireMinisign {
+		fmt.Fprintln(os.Stderr, "error: --insecure and --require-minisign are mutually exclusive")
+		os.Exit(1)
+	}
+
 	if *versionFlag {
 		fmt.Println("sfetch", version)
 		return
@@ -206,6 +782,16 @@ func main() {
 
 	if *extendedHelp {
 		fmt.Println(strings.TrimSpace(quickstartDoc))
+		return
+	}
+
+	// Handle --verify-minisign-pubkey: validate and exit
+	if *verifyMinisignPubkey != "" {
+		if err := ValidateMinisignPubkey(*verifyMinisignPubkey); err != nil {
+			fmt.Fprintf(os.Stderr, "INVALID: %s: %v\n", *verifyMinisignPubkey, err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "OK: %s is a valid minisign public key\n", *verifyMinisignPubkey)
 		return
 	}
 
@@ -291,8 +877,49 @@ func main() {
 		cfg.ArchiveType = inferred
 	}
 
-	fmt.Fprintf(os.Stderr, "DEBUG repo=%q BinaryName=%q ArchiveType=%q Asset=%q\n",
-		*repo, cfg.BinaryName, cfg.ArchiveType, selected.Name)
+	// Build assessment flags from CLI
+	aflags := assessmentFlags{
+		skipSig:         *skipSig,
+		skipChecksum:    *skipChecksum,
+		insecure:        *insecure,
+		preferPerAsset:  *preferPerAsset,
+		requireMinisign: *requireMinisign,
+	}
+
+	// Assess what verification is available
+	assessment := assessRelease(&rel, cfg, selected, aflags)
+
+	// Handle --dry-run: print assessment and exit
+	if *dryRun {
+		if *provenance || *provenanceFile != "" {
+			// --dry-run + --provenance: JSON output only (no computed checksum since no download)
+			aflags.dryRun = true // Mark as dry-run in flags
+			record := buildProvenanceRecord(*repo, &rel, assessment, aflags, "")
+			if err := outputProvenance(record, *provenanceFile); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			// --dry-run only: human-readable output
+			fmt.Print(formatDryRunOutput(*repo, &rel, assessment))
+		}
+		os.Exit(0)
+	}
+
+	// Handle cases where no verification is available
+	if assessment.Workflow == "" {
+		fmt.Fprintln(os.Stderr, "error: no verification available (no signature or checksum found)")
+		fmt.Fprintln(os.Stderr, "hint: use --insecure to proceed without verification (not recommended)")
+		os.Exit(1)
+	}
+
+	// Print warnings
+	for _, w := range assessment.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+
+	fmt.Fprintf(os.Stderr, "DEBUG repo=%q BinaryName=%q ArchiveType=%q Asset=%q Workflow=%s Trust=%s\n",
+		*repo, cfg.BinaryName, cfg.ArchiveType, selected.Name, assessment.Workflow, assessment.TrustLevel)
 
 	tmpDir, err := os.MkdirTemp("", "sfetch-*")
 	if err != nil {
@@ -307,74 +934,39 @@ func main() {
 		os.Exit(1)
 	}
 
-	baseName := trimKnownExtension(selected.Name, cfg.ArchiveExtensions)
-	ctx := templateContext{
-		AssetName:  selected.Name,
-		BaseName:   baseName,
-		BinaryName: cfg.BinaryName,
-		GOOS:       goos,
-		GOARCH:     goarch,
+	// Handle --require-minisign validation
+	if *requireMinisign && !assessment.SignatureAvailable {
+		fmt.Fprintln(os.Stderr, "error: --require-minisign specified but no .minisig signature found in release")
+		os.Exit(1)
+	}
+	if *requireMinisign && assessment.SignatureFormat != sigFormatMinisign {
+		fmt.Fprintf(os.Stderr, "error: --require-minisign specified but signature %s is %s format, not minisign\n",
+			assessment.SignatureFile, assessment.SignatureFormat)
+		os.Exit(1)
 	}
 
-	// Check for checksum-level signature first (Workflow A: signature over checksum file)
-	checksumSigAsset, checksumFileName := findChecksumSignature(rel.Assets, cfg)
-	// Use checksum-level sig if: (1) it exists AND (2) config prefers it OR --require-minisign forces minisign path
-	// UNLESS --prefer-per-asset is set, which forces Workflow B
-	useChecksumLevelSig := checksumSigAsset != nil && (cfg.preferChecksumSig() || *requireMinisign) && !*preferPerAsset
-
-	// --prefer-per-asset: verify per-asset signatures exist before bypassing Workflow A
-	if *preferPerAsset && checksumSigAsset != nil {
-		fmt.Fprintf(os.Stderr, "Note: --prefer-per-asset specified, bypassing checksum-level signature (%s)\n", checksumSigAsset.Name)
-	}
-
-	// --require-minisign: validate that minisign signature is available and will be used
-	if *requireMinisign {
-		checksumSigIsMinisign := checksumSigAsset != nil &&
-			signatureFormatFromExtension(checksumSigAsset.Name, cfg.SignatureFormats) == sigFormatMinisign
-
-		if checksumSigIsMinisign {
-			// Checksum-level minisign available - force using it
-			useChecksumLevelSig = true
-		} else {
-			// Check for per-asset minisign sig as fallback
-			perAssetMinisig := false
-			for _, candidate := range cfg.SignatureCandidates {
-				if strings.Contains(candidate, ".minisig") {
-					rendered := renderTemplate(candidate, ctx)
-					if findAssetByName(rel.Assets, rendered) != nil {
-						perAssetMinisig = true
-						break
-					}
-				}
-			}
-			if perAssetMinisig {
-				// Force per-asset path (Workflow B) for minisign verification
-				useChecksumLevelSig = false
-			} else {
-				fmt.Fprintln(os.Stderr, "error: --require-minisign specified but no .minisig signature found in release")
-				os.Exit(1)
-			}
-		}
-	}
-
-	var checksumAsset *Asset
 	var sigAsset *Asset
 	var sigPath string
 	var checksumPath string
 	var checksumBytes []byte
 
-	if useChecksumLevelSig {
-		// Workflow A: Verify signature over checksum file, then verify hash
-		fmt.Fprintf(os.Stderr, "Detected checksum-level signature: %s\n", checksumSigAsset.Name)
+	// Execute verification based on assessed workflow
+	switch assessment.Workflow {
+	case workflowInsecure:
+		// No verification - just download and proceed
+		fmt.Fprintln(os.Stderr, "WARNING: --insecure mode - NO VERIFICATION PERFORMED")
 
-		// Find the checksum file
-		checksumAsset = findAssetByName(rel.Assets, checksumFileName)
+	case workflowA:
+		// Workflow A: Verify signature over checksum file, then verify hash
+		fmt.Fprintf(os.Stderr, "Detected checksum-level signature: %s\n", assessment.SignatureFile)
+
+		// Find and download the checksum file
+		checksumAsset := findAssetByName(rel.Assets, assessment.ChecksumFileForSig)
 		if checksumAsset == nil {
-			fmt.Fprintf(os.Stderr, "error: checksum file %s not found\n", checksumFileName)
+			fmt.Fprintf(os.Stderr, "error: checksum file %s not found\n", assessment.ChecksumFileForSig)
 			os.Exit(1)
 		}
 
-		// Download checksum file
 		checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
 		if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -382,8 +974,9 @@ func main() {
 		}
 
 		// Download checksum signature
-		sigPath = filepath.Join(tmpDir, checksumSigAsset.Name)
-		if err := download(checksumSigAsset.BrowserDownloadUrl, sigPath); err != nil {
+		sigAsset = findAssetByName(rel.Assets, assessment.SignatureFile)
+		sigPath = filepath.Join(tmpDir, sigAsset.Name)
+		if err := download(sigAsset.BrowserDownloadUrl, sigPath); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -398,8 +991,7 @@ func main() {
 
 		// Verify checksum file signature (not asset signature)
 		if !*skipSig {
-			sigFormat := signatureFormatFromExtension(checksumSigAsset.Name, cfg.SignatureFormats)
-			switch sigFormat {
+			switch assessment.SignatureFormat {
 			case sigFormatMinisign:
 				minisignKeyPath, err := resolveMinisignKey(*minisignPubKey, *minisignKeyURL, *minisignKeyAsset, rel.Assets, tmpDir)
 				if err != nil {
@@ -425,22 +1017,16 @@ func main() {
 				fmt.Println("PGP checksum signature verified OK")
 
 			default:
-				fmt.Fprintf(os.Stderr, "error: unknown signature format for %s\n", checksumSigAsset.Name)
+				fmt.Fprintf(os.Stderr, "error: unknown signature format for %s\n", assessment.SignatureFile)
 				os.Exit(1)
 			}
-		} else {
-			fmt.Fprintln(os.Stderr, "warning: --skip-sig enabled; signature verification skipped")
 		}
-	} else {
-		// Workflow B: Per-asset signature (original behavior)
-		// Find signature first - it's required
-		sigAsset, err = findSupplementalAsset(rel.Assets, ctx, cfg.SignatureCandidates, [][]string{
-			{strings.ToLower(baseName), "sig"},
-			{strings.ToLower(baseName), "signature"},
-			{"minisig"},
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+
+	case workflowB:
+		// Workflow B: Per-asset signature
+		sigAsset = findAssetByName(rel.Assets, assessment.SignatureFile)
+		if sigAsset == nil {
+			fmt.Fprintf(os.Stderr, "error: signature file %s not found\n", assessment.SignatureFile)
 			os.Exit(1)
 		}
 
@@ -450,21 +1036,9 @@ func main() {
 			os.Exit(1)
 		}
 
-		// In Workflow B (per-asset), the signature directly verifies the asset bytes.
-		// Checksum is optional since the signature provides integrity verification.
-		// This applies to minisign, GPG, and ed25519 per-asset signatures.
-		sigFormat := signatureFormatFromExtension(sigAsset.Name, cfg.SignatureFormats)
-
-		// When --prefer-per-asset is set, skip checksum file entirely (trust the signature)
-		if *preferPerAsset {
-			fmt.Fprintf(os.Stderr, "Skipping checksum verification; using %s per-asset signature for integrity\n", sigFormat)
-		} else {
-			checksumAsset, _ = findSupplementalAsset(rel.Assets, ctx, cfg.ChecksumCandidates, [][]string{
-				{strings.ToLower(baseName), "sha"},
-				{"sha256sum"},
-				{"checksum"},
-			})
-
+		// Load checksum file if available
+		if assessment.ChecksumAvailable && !*skipChecksum {
+			checksumAsset := findAssetByName(rel.Assets, assessment.ChecksumFile)
 			if checksumAsset != nil {
 				checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
 				if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
@@ -477,14 +1051,30 @@ func main() {
 					fmt.Fprintf(os.Stderr, "read checksum: %v\n", err)
 					os.Exit(1)
 				}
-			} else if sigFormat == sigFormatBinary {
-				// Raw ed25519 requires checksum for integrity (signature alone isn't sufficient
-				// without knowing what was signed - could be hash of asset or asset itself)
-				fmt.Fprintf(os.Stderr, "error: no checksum file found for %s (required for raw ed25519 signatures)\n", selected.Name)
-				os.Exit(1)
-			} else {
-				fmt.Fprintf(os.Stderr, "No checksum file found; using %s signature for integrity verification\n", sigFormat)
 			}
+		}
+
+	case workflowC:
+		// Workflow C: Checksum-only (no signature)
+		fmt.Fprintf(os.Stderr, "Using checksum-only verification (no signature available)\n")
+
+		checksumAsset := findAssetByName(rel.Assets, assessment.ChecksumFile)
+		if checksumAsset == nil {
+			fmt.Fprintf(os.Stderr, "error: checksum file %s not found\n", assessment.ChecksumFile)
+			os.Exit(1)
+		}
+
+		checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
+		if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
+		// #nosec G304 -- checksumPath tmp controlled
+		checksumBytes, err = os.ReadFile(checksumPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "read checksum: %v\n", err)
+			os.Exit(1)
 		}
 	}
 
@@ -545,74 +1135,64 @@ func main() {
 	assetPath = cacheAssetPath
 	fmt.Printf("Cached to %s\n", cacheAssetPath)
 
-	// Workflow B: Verify per-asset signature (only if not using checksum-level sig)
-	if !useChecksumLevelSig {
+	// Workflow B: Verify per-asset signature
+	if assessment.Workflow == workflowB && !*skipSig {
 		sigData, err := loadSignature(sigPath)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 
-		// Enforce minisign format when --require-minisign is set
-		if *requireMinisign && sigData.format != sigFormatMinisign {
-			fmt.Fprintf(os.Stderr, "error: --require-minisign specified but signature %s is %s format, not minisign\n", sigAsset.Name, sigData.format)
-			os.Exit(1)
-		}
-
-		if *skipSig {
-			fmt.Fprintln(os.Stderr, "warning: --skip-sig enabled; signature verification skipped")
-		} else {
-			switch sigData.format {
-			case sigFormatPGP:
-				pgpKeyPath, err := resolvePGPKey(*pgpKeyFile, *pgpKeyURL, *pgpKeyAsset, rel.Assets, tmpDir)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(1)
-				}
-				if err := verifyPGPSignature(assetPath, sigPath, pgpKeyPath, *gpgBin); err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(1)
-				}
-				fmt.Println("PGP signature verified OK")
-
-			case sigFormatMinisign:
-				minisignKeyPath, err := resolveMinisignKey(*minisignPubKey, *minisignKeyURL, *minisignKeyAsset, rel.Assets, tmpDir)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(1)
-				}
-				if err := verifyMinisignSignature(assetBytes, sigPath, minisignKeyPath); err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(1)
-				}
-				fmt.Println("Minisign signature verified OK")
-
-			case sigFormatBinary:
-				normalizedKey, err := normalizeHexKey(*key)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(1)
-				}
-				pubKeyBytes, err := hex.DecodeString(normalizedKey)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "invalid ed25519 key provided")
-					os.Exit(1)
-				}
-				if len(pubKeyBytes) != ed25519.PublicKeySize {
-					fmt.Fprintf(os.Stderr, "invalid pubkey size: %d\n", len(pubKeyBytes))
-					os.Exit(1)
-				}
-				pub := ed25519.PublicKey(pubKeyBytes)
-				if !ed25519.Verify(pub, assetBytes, sigData.bytes) {
-					fmt.Fprintln(os.Stderr, "signature verification failed")
-					os.Exit(1)
-				}
-				fmt.Println("Signature verified OK")
-
-			default:
-				fmt.Fprintln(os.Stderr, "error: unsupported signature format")
+		switch sigData.format {
+		case sigFormatPGP:
+			pgpKeyPath, err := resolvePGPKey(*pgpKeyFile, *pgpKeyURL, *pgpKeyAsset, rel.Assets, tmpDir)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
+			if err := verifyPGPSignature(assetPath, sigPath, pgpKeyPath, *gpgBin); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			fmt.Println("PGP signature verified OK")
+
+		case sigFormatMinisign:
+			minisignKeyPath, err := resolveMinisignKey(*minisignPubKey, *minisignKeyURL, *minisignKeyAsset, rel.Assets, tmpDir)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			if err := verifyMinisignSignature(assetBytes, sigPath, minisignKeyPath); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			fmt.Println("Minisign signature verified OK")
+
+		case sigFormatBinary:
+			normalizedKey, err := normalizeHexKey(*key)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			pubKeyBytes, err := hex.DecodeString(normalizedKey)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "invalid ed25519 key provided")
+				os.Exit(1)
+			}
+			if len(pubKeyBytes) != ed25519.PublicKeySize {
+				fmt.Fprintf(os.Stderr, "invalid pubkey size: %d\n", len(pubKeyBytes))
+				os.Exit(1)
+			}
+			pub := ed25519.PublicKey(pubKeyBytes)
+			if !ed25519.Verify(pub, assetBytes, sigData.bytes) {
+				fmt.Fprintln(os.Stderr, "signature verification failed")
+				os.Exit(1)
+			}
+			fmt.Println("Signature verified OK")
+
+		default:
+			fmt.Fprintln(os.Stderr, "error: unsupported signature format")
+			os.Exit(1)
 		}
 	}
 
@@ -671,6 +1251,14 @@ func main() {
 
 	fmt.Printf("Release: %s\n", rel.TagName)
 	fmt.Printf("Installed %s to %s\n", binaryName, finalPath)
+
+	// Output provenance record if requested
+	if *provenance || *provenanceFile != "" {
+		record := buildProvenanceRecord(*repo, &rel, assessment, aflags, actualHash)
+		if err := outputProvenance(record, *provenanceFile); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+		}
+	}
 }
 
 func getConfig(repo string) *RepoConfig {
@@ -1025,16 +1613,6 @@ func titleCase(s string) string {
 	return string(runes)
 }
 
-func findSupplementalAsset(assets []Asset, ctx templateContext, templates []string, fallback [][]string) (*Asset, error) {
-	if asset := findAssetByTemplates(assets, ctx, templates); asset != nil {
-		return asset, nil
-	}
-	if asset := findAssetByKeywords(assets, ctx.AssetName, fallback); asset != nil {
-		return asset, nil
-	}
-	return nil, fmt.Errorf("missing supplemental asset for %s", ctx.AssetName)
-}
-
 // findChecksumSignature looks for a signature over the checksum file (Workflow A).
 // It searches for assets matching the ChecksumSigCandidates patterns.
 // Returns the signature asset and the corresponding checksum asset name, or nil if not found.
@@ -1258,21 +1836,6 @@ func isHTTPURL(value string) bool {
 	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 }
 
-func findAssetByTemplates(assets []Asset, ctx templateContext, templates []string) *Asset {
-	for _, tpl := range templates {
-		name := renderTemplate(tpl, ctx)
-		if name == "" {
-			continue
-		}
-		for i := range assets {
-			if assets[i].Name == name {
-				return &assets[i]
-			}
-		}
-	}
-	return nil
-}
-
 func renderTemplate(tpl string, ctx templateContext) string {
 	replacements := []string{
 		"{{asset}}", ctx.AssetName,
@@ -1286,39 +1849,6 @@ func renderTemplate(tpl string, ctx templateContext) string {
 		"{{Goarch}}", titleCase(ctx.GOARCH),
 	}
 	return strings.NewReplacer(replacements...).Replace(tpl)
-}
-
-func findAssetByKeywords(assets []Asset, skip string, groups [][]string) *Asset {
-	for _, group := range groups {
-		keywords := make([]string, 0, len(group))
-		for _, kw := range group {
-			if kw != "" {
-				keywords = append(keywords, strings.ToLower(kw))
-			}
-		}
-		if len(keywords) == 0 {
-			continue
-		}
-		for i := range assets {
-			if assets[i].Name == skip {
-				continue
-			}
-			nameLower := strings.ToLower(assets[i].Name)
-			if containsAll(nameLower, keywords) {
-				return &assets[i]
-			}
-		}
-	}
-	return nil
-}
-
-func containsAll(haystack string, keywords []string) bool {
-	for _, kw := range keywords {
-		if !strings.Contains(haystack, kw) {
-			return false
-		}
-	}
-	return true
 }
 
 func extractChecksum(data []byte, algo, assetName string) (string, error) {
