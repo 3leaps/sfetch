@@ -33,7 +33,7 @@ PUBLIC_KEY_NAME ?= sfetch-release-signing-key.asc
 MINISIGN_KEY ?=
 MINISIGN_PUB_NAME ?= sfetch-minisign.pub
 
-.PHONY: all build test clean install release fmt fmt-check shell-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script
+.PHONY: all build test clean release-clean install release fmt fmt-check shell-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script
 
 all: build
 
@@ -163,8 +163,15 @@ verify-minisign-pubkey: build
 verify-release-key:
 	./scripts/verify-public-key.sh $(DIST_RELEASE)/$(PUBLIC_KEY_NAME)
 
+# release-upload: Uploads ALL assets with --clobber for idempotency.
+# Re-uploads binaries even though CI built them (same files, ~15MB).
+# This ensures fixes can be applied by simply re-running the target.
 release-upload: release-notes verify-release-key
 	./scripts/upload-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+
+release-clean:
+	rm -rf $(DIST_RELEASE)
+	@echo "Cleaned $(DIST_RELEASE)"
 
 clean:
 	rm -rf bin/ dist/ coverage.out

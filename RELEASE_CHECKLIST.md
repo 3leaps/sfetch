@@ -31,38 +31,45 @@ export PGP_KEY_ID=security@fulmenhq.dev  # or your-subkey-id!
 
 ### Steps
 
-1. **Download artifacts**
+1. **Clean previous release artifacts**
+   ```bash
+   make release-clean
+   ```
+
+2. **Download artifacts**
    ```bash
    RELEASE_TAG=v$(cat VERSION) make release-download
    ```
 
-2. **Sign SHA256SUMS** (generates checksums, signs with minisign + PGP)
+3. **Sign SHA256SUMS** (generates checksums, signs with minisign + PGP)
    ```bash
    RELEASE_TAG=v$(cat VERSION) make release-sign
    ```
    Produces: `SHA256SUMS`, `SHA256SUMS.minisig`, `SHA256SUMS.asc`
 
-3. **Export public keys** (auto-validates before copying)
+4. **Export public keys** (auto-validates before copying)
    ```bash
    make release-export-minisign-key   # → sfetch-minisign.pub (validates it's not secret key!)
    make release-export-key            # → sfetch-release-signing-key.asc
    ```
 
-4. **Verify exported keys are public-only**
+5. **Verify exported keys are public-only**
    ```bash
    make verify-release-key                                    # PGP key
-   make verify-minisign-pubkey FILE=dist/release/sfetch-minisign.pub  # minisign key (optional, done in step 3)
+   make verify-minisign-pubkey FILE=dist/release/sfetch-minisign.pub  # minisign key (optional, done in step 4)
    ```
 
-5. **Copy release notes**
+6. **Copy release notes**
    ```bash
    RELEASE_TAG=v$(cat VERSION) make release-notes
    ```
 
-6. **Upload signatures and keys**
+7. **Upload signatures and keys**
    ```bash
    RELEASE_TAG=v$(cat VERSION) make release-upload
    ```
+   > **Note:** This uploads ALL assets with `--clobber`, including binaries CI already uploaded.
+   > This is intentional for idempotency - rerun safely to fix any mistakes.
 
 ## 3. Post-Release
 
