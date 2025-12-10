@@ -33,7 +33,7 @@ PUBLIC_KEY_NAME ?= sfetch-release-signing-key.asc
 MINISIGN_KEY ?=
 MINISIGN_PUB_NAME ?= sfetch-minisign.pub
 
-.PHONY: all build test clean release-clean install release fmt fmt-check shell-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script
+.PHONY: all build test clean release-clean install release fmt fmt-check shell-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script version-check version-set version-patch version-minor version-major
 
 all: build
 
@@ -185,3 +185,45 @@ else
 	chmod 755 "$(INSTALL_TARGET)"
 	@echo "Installed $(NAME)$(EXT) to $(INSTALL_TARGET). Add it to your PATH if needed."
 endif
+
+# Version management targets
+# Usage: make version-patch  (0.2.0 -> 0.2.1)
+#        make version-minor  (0.2.0 -> 0.3.0)
+#        make version-major  (0.2.0 -> 1.0.0)
+#        make version-set V=1.2.3
+#        make version-check  (show current version)
+
+version-check:
+	@echo "Current version: $(VERSION)"
+
+version-set:
+	@if [ -z "$(V)" ]; then echo "usage: make version-set V=X.Y.Z" >&2; exit 1; fi
+	@echo "$(V)" > VERSION
+	@echo "Version set to $(V)"
+
+version-patch:
+	@current=$(VERSION); \
+	major=$$(echo $$current | cut -d. -f1); \
+	minor=$$(echo $$current | cut -d. -f2); \
+	patch=$$(echo $$current | cut -d. -f3); \
+	newpatch=$$((patch + 1)); \
+	newver="$$major.$$minor.$$newpatch"; \
+	echo "$$newver" > VERSION; \
+	echo "Version bumped: $$current -> $$newver"
+
+version-minor:
+	@current=$(VERSION); \
+	major=$$(echo $$current | cut -d. -f1); \
+	minor=$$(echo $$current | cut -d. -f2); \
+	newminor=$$((minor + 1)); \
+	newver="$$major.$$newminor.0"; \
+	echo "$$newver" > VERSION; \
+	echo "Version bumped: $$current -> $$newver"
+
+version-major:
+	@current=$(VERSION); \
+	major=$$(echo $$current | cut -d. -f1); \
+	newmajor=$$((major + 1)); \
+	newver="$$newmajor.0.0"; \
+	echo "$$newver" > VERSION; \
+	echo "Version bumped: $$current -> $$newver"

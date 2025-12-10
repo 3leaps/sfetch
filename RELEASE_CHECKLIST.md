@@ -81,12 +81,18 @@ export PGP_KEY_ID=security@fulmenhq.dev  # or your-subkey-id!
 
 ## 4. Post-Release Version Bump (optional)
 
-After release, optionally bump VERSION for next development cycle:
+After release, bump VERSION for next development cycle:
 ```bash
-echo "0.3.0" > VERSION
+make version-patch   # 0.2.0 -> 0.2.1 (bugfix prep)
+# or: make version-minor  # 0.2.0 -> 0.3.0 (feature prep)
+# or: make version-major  # 0.2.0 -> 1.0.0 (breaking change prep)
+# or: make version-set V=1.2.3  # explicit version
+
 git add VERSION
-git commit -m "chore: bump version to 0.3.0-dev"
+git commit -m "chore: bump version to $(cat VERSION)-dev"
 ```
+
+Check current version anytime with `make version-check`.
 
 ## Key Rotation Reminder
 
