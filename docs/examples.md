@@ -419,15 +419,15 @@ RW...base64key...
 
 # Known Limitations
 
-1. **Archives only**: Expects `.tar.gz`, `.tgz`, or `.zip`. Raw file downloads (`.sh` scripts) not yet supported.
+1. **Archives only**: Expects `.tar.gz`, `.tgz`, `.zip`, `.tar.xz`, or `.tar.bz2`. Raw file downloads (`.sh` scripts, standalone binaries) not yet supported - sfetch will download and verify the checksum but fail at extraction.
 
 2. **Single binary**: Extracts one file. Multi-binary archives need multiple sfetch calls.
 
 3. **Flat archive structure**: Binary must be at the root of the archive, not in a subdirectory. Archives like ripgrep (`ripgrep-15.1.0-aarch64-apple-darwin/rg`) don't work currently.
 
-4. **GitHub only**: Currently GitHub releases API only. GitLab, generic URLs planned.
+4. **GitHub releases only**: Currently GitHub releases API only. Direct URL downloads (e.g., `raw.githubusercontent.com`, arbitrary URLs) not yet supported. GitLab planned.
 
-5. **Cosign**: Not yet implemented.
+5. **Cosign/Sigstore**: Not yet implemented.
 
 ---
 

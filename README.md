@@ -23,7 +23,7 @@ Auto-selects via heuristics ([docs/pattern-matching.md](docs/pattern-matching.md
 
 ### Signature verification
 
-**Minisign (recommended)** - pure-Go, no external dependencies
+**Minisign** - pure-Go, no external dependencies
 - `--minisign-key <pubkey.pub>` - path to public key file
 - `--minisign-key-url <url>` - download key from URL
 - `--minisign-key-asset <name>` - fetch key from release assets

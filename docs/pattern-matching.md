@@ -85,7 +85,7 @@ Default `SignatureCandidates` (Workflow B):
 ```
 
 **Key flags by format:**
-- Minisign (recommended): `--minisign-key <file>` or auto-detect from release assets
+- Minisign: `--minisign-key <file>` or auto-detect from release assets (pure-Go)
 - PGP: `--pgp-key-file <key.asc>` (uses gpg temp keyring)
 - Raw ed25519: `--key <64-hex-bytes>` (uncommon)
 
