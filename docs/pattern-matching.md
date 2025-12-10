@@ -47,21 +47,47 @@ sfetch uses a scoring heuristics system to automatically select the correct bina
 
 See `docs/repo-config-guide.md` custom.
 
+## Verification Workflows
+
+sfetch supports two verification workflows:
+
+**Workflow A (checksum-level signature)**: Signature over `SHA256SUMS` file
+- Preferred when available (more common, one signature covers all assets)
+- Detected via `ChecksumSigCandidates`: `SHA256SUMS.minisig`, `SHA256SUMS.asc`, etc.
+
+**Workflow B (per-asset signature)**: Signature directly over each asset
+- Used when no checksum-level signature exists
+- Detected via `SignatureCandidates` (see below)
+
+**Workflow C (checksum-only)**: No signature, checksum verification only
+- Fallback when no signatures available
+- Warns: "No signature available; authenticity cannot be proven"
+
 ## Signature/Key Patterns
 
-Default `SignatureCandidates`:
+Default `ChecksumSigCandidates` (Workflow A):
 ```
-{{asset}}.sig
-{{base}}.sig
-{{asset}}.sig.ed25519
-{{base}}.sig.ed25519
+SHA256SUMS.minisig
+SHA256SUMS.asc
+checksums.txt.minisig
+checksums.txt.asc
+```
+
+Default `SignatureCandidates` (Workflow B):
+```
 {{asset}}.minisig
+{{asset}}.sig
+{{asset}}.sig.ed25519
+{{base}}.sig
+{{base}}.sig.ed25519
 {{asset}}.asc
 {{base}}.asc
 ```
 
-- ed25519: `--key 64hex`
-- PGP: `--pgp-key-file pub.asc` (gpg temp keyring)
+**Key flags by format:**
+- Minisign (recommended): `--minisign-key <file>` or auto-detect from release assets
+- PGP: `--pgp-key-file <key.asc>` (uses gpg temp keyring)
+- Raw ed25519: `--key <64-hex-bytes>` (uncommon)
 
 ## Extensibility
 

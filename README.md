@@ -5,7 +5,7 @@ Secure, verifiable, zero-trust downloader for the uncertain world
 ### The one-liner
 **sfetch is the `curl | sh` you can actually trust in 2026.**
 
-A tiny (~3 MB), statically-linked Go binary that downloads release artifacts from GitHub (or any URL) and **refuses to install them unless both checksum and ed25519 signature verify**.
+A tiny (~3 MB), statically-linked Go binary that downloads release artifacts from GitHub and **verifies signatures and checksums automatically** - using minisign, PGP, or raw ed25519.
 
 No runtime dependencies. No package manager required. Works in CI, Docker, and air-gapped environments.
 
@@ -23,18 +23,37 @@ Auto-selects via heuristics ([docs/pattern-matching.md](docs/pattern-matching.md
 
 ### Signature verification
 
-**Minisign (recommended)**
+**Minisign (recommended)** - pure-Go, no external dependencies
 - `--minisign-key <pubkey.pub>` - path to public key file
 - `--minisign-key-url <url>` - download key from URL
 - `--minisign-key-asset <name>` - fetch key from release assets
 - `--require-minisign` - fail if minisign verification unavailable
-- Auto-detects `*minisign*.pub` from release assets when no key flags provided
+- Auto-detects `*.pub` files from release assets when no key flags provided
 
-**Other formats**
-- `--key <64-hex-bytes>` for raw ed25519 signatures (`.sig`) - pure-Go
-- `--pgp-key-file <key.asc>` for PGP signatures (`.asc`) - requires `gpg`
+**PGP** - requires `gpg` binary
+- `--pgp-key-file <key.asc>` - path to ASCII-armored public key
+- `--pgp-key-url <url>` - download key from URL
+- `--pgp-key-asset <name>` - fetch key from release assets
+- Auto-detects `*-signing-key.asc` or `*-release*.asc` from release assets
+
+**Raw ed25519** - pure-Go (uncommon format)
+- `--key <64-hex-bytes>` for `.sig` or `.sig.ed25519` files
 
 See [docs/key-handling.md](docs/key-handling.md) for details. Run `sfetch -helpextended` for examples.
+
+### Verification assessment
+
+**Dry-run mode** - see what verification is available before downloading:
+```bash
+sfetch --repo BurntSushi/ripgrep --latest --dry-run
+```
+
+**Provenance records** - structured JSON for audit trails and CI:
+```bash
+sfetch --repo 3leaps/sfetch --latest --dest-dir /tmp --provenance-file audit.json
+```
+
+See [docs/examples.md](docs/examples.md) for comprehensive real-world examples.
 
 ### Build, versioning & install
 
@@ -138,9 +157,20 @@ RELEASE_TAG=v2025.12.06 make release-upload
 
 Set `RELEASE_TAG` to the tag you're publishing. The scripts in `scripts/` can be used individually if you prefer manual control.
 
-```bash
-# Install the latest goneat (or any signed tool) in one line
-sfetch --repo fulmenhq/goneat --latest --output /usr/local/bin/goneat --pgp-key-file fulmen-release.asc
+### Quick examples
 
-# Or pin exactly
-sfetch --repo fulmenhq/goneat --tag v2025.12.3 --output /usr/local/bin/goneat --pgp-key-file fulmen-release.asc
+```bash
+# Download with auto-detected verification (minisign or PGP key from release assets)
+sfetch --repo 3leaps/sfetch --latest --dest-dir ~/.local/bin
+
+# Dry-run to assess what verification is available
+sfetch --repo BurntSushi/ripgrep --latest --dry-run
+
+# Explicit minisign key
+sfetch --repo jedisct1/minisign --latest --minisign-key /path/to/key.pub --dest-dir /usr/local/bin
+
+# PGP verification
+sfetch --repo fulmenhq/goneat --latest --pgp-key-file fulmen-release.asc --dest-dir /usr/local/bin
+
+# Pin to specific version
+sfetch --repo fulmenhq/goneat --tag v0.3.14 --dest-dir /usr/local/bin
