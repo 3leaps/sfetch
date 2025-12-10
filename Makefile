@@ -99,6 +99,10 @@ yamllint-workflows:
 	@command -v $(YAMLLINT) >/dev/null 2>&1 || { echo "$(YAMLLINT) not found; run 'make prereqs' for install guidance" >&2; exit 1; }
 	$(YAMLLINT) .github/workflows
 
+# Corpus targets are opt-in (not part of quality/precommit) because they
+# require authenticated GitHub API calls. Run manually during release prep:
+#   GITHUB_TOKEN=<token> make corpus        # fast repos, dry-run
+#   GITHUB_TOKEN=<token> make corpus-all    # all repos including slow
 corpus:
 	@mkdir -p $(CORPUS_DEST)
 	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
@@ -122,7 +126,7 @@ corpus-validate:
 
 quality: prereqs fmt-check shell-check lint test gosec-high build-all yamllint-workflows
 
-precommit: quality corpus-validate
+precommit: quality
 
 build:
 	mkdir -p bin
