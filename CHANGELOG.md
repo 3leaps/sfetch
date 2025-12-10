@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2025-12-10
+
+### Added
+- **Self-verify & trust anchors:** `--self-verify` prints deterministic release URLs, expected asset/hash (with offline fallback), platform-specific checksum commands, minisign/PGP commands, embedded pubkey, and warning that a compromised binary could lie. `--show-trust-anchors` exposes the embedded minisign key (JSON/plain). Docs updated in README and docs/security; installer logs post-install hint.
+- **Real-world corpus (opt-in):** Manifest + runner to exercise common release patterns; Make targets `corpus`, `corpus-all`, `corpus-dryrun`; docs section in `docs/examples.md`; guidance in `docs/test-corpus/README.md`. Manifest/schema live in `testdata/` (dry-run by default; opt-in downloads; token optional for rate limits).
+- **Checksum discovery expansion:** Added version-aware templates and additional defaults (`sha256sum.txt`, `SHA256SUMS_64`, `{{binary}}_{{versionNoPrefix}}_checksums.txt`, etc.) to improve checksum detection for real-world repos.
+
+### Changed
+- Help output grouped to include new flags (`--asset-match`, `--self-verify`, `--show-trust-anchors`).
+
 ## [0.2.0] - 2025-12-09
 
 ### Added

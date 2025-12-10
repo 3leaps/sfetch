@@ -55,8 +55,13 @@
         "{{asset}}.sha256.txt",
         "{{base}}.sha256",
         "{{base}}.sha256.txt",
+        "{{binary}}_{{versionNoPrefix}}_checksums.txt",
+        "{{binary}}_{{version}}_checksums.txt",
+        "{{binary}}_checksums.txt",
         "SHA256SUMS",
         "SHA256SUMS.txt",
+        "SHA256SUMS_64",
+        "sha256sum.txt",
         "checksums.txt",
         "CHECKSUMS",
         "CHECKSUMS.txt"

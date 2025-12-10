@@ -33,7 +33,9 @@ PUBLIC_KEY_NAME ?= sfetch-release-signing-key.asc
 MINISIGN_KEY ?=
 MINISIGN_PUB_NAME ?= sfetch-minisign.pub
 
-.PHONY: all build test clean release-clean install release fmt fmt-check shell-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script version-check version-set version-patch version-minor version-major
+.PHONY: all build test clean release-clean install release fmt fmt-check shell-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script version-check version-set version-patch version-minor version-major corpus corpus-all corpus-dryrun corpus-validate
+
+CORPUS_DEST ?= test-corpus
 
 all: build
 
@@ -79,7 +81,10 @@ shell-check:
 
 lint: tools
 	go vet ./...
+	go vet ./scripts
 	staticcheck ./...
+	staticcheck ./scripts
+	go run github.com/santhosh-tekuri/jsonschema/cmd/jv@latest testdata/corpus.schema.json testdata/corpus.json
 
 test:
 	go test -v -race ./...
@@ -94,9 +99,30 @@ yamllint-workflows:
 	@command -v $(YAMLLINT) >/dev/null 2>&1 || { echo "$(YAMLLINT) not found; run 'make prereqs' for install guidance" >&2; exit 1; }
 	$(YAMLLINT) .github/workflows
 
+corpus:
+	@mkdir -p $(CORPUS_DEST)
+	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
+	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --dest $(CORPUS_DEST)
+
+corpus-dryrun:
+	@mkdir -p $(CORPUS_DEST)
+	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
+	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --dest $(CORPUS_DEST)
+
+corpus-all:
+	@mkdir -p $(CORPUS_DEST)
+	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
+	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --include-slow --dest $(CORPUS_DEST)
+
+corpus-validate:
+	@mkdir -p $(CORPUS_DEST)
+	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
+	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --include-slow --dest $(CORPUS_DEST)
+
+
 quality: prereqs fmt-check shell-check lint test gosec-high build-all yamllint-workflows
 
-precommit: quality
+precommit: quality corpus-validate
 
 build:
 	mkdir -p bin

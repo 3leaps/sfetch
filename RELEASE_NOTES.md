@@ -1,5 +1,36 @@
 # Release Notes
 
+## v0.2.1
+
+### Summary
+Self-verify instructions and trust anchors for installed binaries, plus an opt-in real-world corpus runner and expanded checksum pattern coverage.
+
+### Highlights
+
+**Self-verify & trust anchors**
+```bash
+sfetch --self-verify
+sfetch --show-trust-anchors           # plain
+sfetch --show-trust-anchors --json    # JSON
+```
+- Prints deterministic release URLs, expected asset/hash (with offline fallback), platform-specific checksum commands, minisign/PGP commands, embedded minisign pubkey, and a warning that a compromised binary could lie. Dev builds print “no published checksums.”
+- Installer now logs: `To verify this installation later: sfetch --self-verify`.
+- Docs updated: README verification section; docs/security “Verifying Your Installation”.
+
+**Real-world corpus (opt-in)**
+- Manifest + runner (`scripts/run-corpus.go`, `testdata/corpus.json`, schema at `testdata/corpus.schema.json`).
+- Make targets: `make corpus` (fast, dry-run), `make corpus-all` (includes slow), `make corpus-dryrun` (dry-run helper). Default destination: `test-corpus/` (gitignored); override via `CORPUS_DEST`.
+- Docs: `docs/examples.md` corpus section; guidance in `docs/test-corpus/README.md`.
+- Requires network; set `GITHUB_TOKEN` if rate limited.
+
+**Checksum discovery expansion**
+- Added version-aware templates and additional defaults (`sha256sum.txt`, `SHA256SUMS_64`, `{{binary}}_{{versionNoPrefix}}_checksums.txt`, etc.) to improve checksum detection in the corpus.
+
+### Notes
+- Corpus runner is opt-in and not part of default CI; intended for release prep and manual validation.
+
+---
+
 ## v0.2.0
 
 ### Summary

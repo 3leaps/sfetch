@@ -471,6 +471,20 @@ Track real-world repos tested during development:
 | `jedisct1/minisign` | Minisign B | ✅ Works | No checksum file, pure minisign |
 | `fulmenhq/goneat` | GPG A | ✅ Works | Auto-detects key, checksum-level GPG |
 
+### Real-World Corpus
+
+Representative repos and patterns (see `testdata/corpus.json` and `make corpus`):
+
+| Repo | Pattern | Workflow | Command (dry-run) |
+|------|---------|----------|-------------------|
+| `3leaps/sfetch` | Minisign checksum-level | A | `sfetch --repo 3leaps/sfetch --latest --dry-run` |
+| `jedisct1/minisign` | Per-asset minisign | B | `sfetch --repo jedisct1/minisign --latest --dry-run` |
+| `jesseduffield/lazygit` | Checksum-only | C | `sfetch --repo jesseduffield/lazygit --latest --dry-run` |
+| `junegunn/fzf` | Versioned checksums | C | `sfetch --repo junegunn/fzf --latest --dry-run` |
+| `sharkdp/fd` | Unsigned (expected fail without --insecure) | insecure | `sfetch --repo sharkdp/fd --latest --dry-run` |
+
+Run the corpus locally: `GITHUB_TOKEN=<token> make corpus` (fast) or `GITHUB_TOKEN=<token> make corpus-all` (includes slow entries). A token with public repo read is sufficient to avoid GitHub API rate limits.
+
 ### Dogfooding Detail: fulmenhq/goneat v0.3.14
 
 ```bash

@@ -46,3 +46,9 @@ logs/
 # Test private keys (only public keys + fixtures committed)
 testdata/keys/*.key
 testdata/integration/*.key
+
+# Corpus runner output
+test-corpus/
+
+# Scratch/working area
+.scratch/

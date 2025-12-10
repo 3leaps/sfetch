@@ -27,8 +27,30 @@ import (
 
 const (
 	defaultAPIBase  = "https://api.github.com"
-	maxCommandError = 2048
+	defaultCDNBase  = "https://github.com"
+	defaultCacheDir = "~/.cache/sfetch"
+	maxCommandError = 512
 )
+
+func githubToken() string {
+	if tok := strings.TrimSpace(os.Getenv("SFETCH_GITHUB_TOKEN")); tok != "" {
+		return tok
+	}
+	return strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+}
+
+func httpGetWithAuth(url string) (*http.Response, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", fmt.Sprintf("sfetch/%s", version))
+	if tok := githubToken(); tok != "" && strings.Contains(url, "github.com") {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	return client.Do(req)
+}
 
 var (
 	version   = "dev"
@@ -200,11 +222,13 @@ func assessRelease(rel *Release, cfg *RepoConfig, selectedAsset *Asset, flags as
 
 	baseName := trimKnownExtension(selectedAsset.Name, cfg.ArchiveExtensions)
 	ctx := templateContext{
-		AssetName:  selectedAsset.Name,
-		BaseName:   baseName,
-		BinaryName: cfg.BinaryName,
-		GOOS:       runtime.GOOS,
-		GOARCH:     runtime.GOARCH,
+		AssetName:       selectedAsset.Name,
+		BaseName:        baseName,
+		BinaryName:      cfg.BinaryName,
+		GOOS:            runtime.GOOS,
+		GOARCH:          runtime.GOARCH,
+		Version:         rel.TagName,
+		VersionNoPrefix: strings.TrimPrefix(rel.TagName, "v"),
 	}
 
 	// Check for checksum-level signature (Workflow A)
@@ -684,8 +708,13 @@ var defaults = RepoConfig{
 		"{{asset}}.sha256.txt",
 		"{{base}}.sha256",
 		"{{base}}.sha256.txt",
+		"{{binary}}_{{versionNoPrefix}}_checksums.txt",
+		"{{binary}}_{{version}}_checksums.txt",
+		"{{binary}}_checksums.txt",
 		"SHA256SUMS",
 		"SHA256SUMS.txt",
+		"SHA256SUMS_64",
+		"sha256sum.txt",
 		"checksums.txt",
 		"CHECKSUMS",
 		"CHECKSUMS.txt",
@@ -931,8 +960,7 @@ func main() {
 	baseURL := apiBaseURL()
 	url := fmt.Sprintf("%s/repos/%s/releases/%s", baseURL, *repo, releaseID)
 
-	// #nosec G107 -- url GitHub API fmt.Sprintf controlled
-	resp, err := http.Get(url)
+	resp, err := httpGetWithAuth(url)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: fetching release: %v\n", err)
 		os.Exit(1)
@@ -1624,8 +1652,7 @@ func mergeConfig(base RepoConfig, override RepoConfig) RepoConfig {
 }
 
 func download(url, path string) error {
-	// #nosec G107 -- url GitHub API fmt.Sprintf controlled
-	resp, err := http.Get(url)
+	resp, err := httpGetWithAuth(url)
 	if err != nil {
 		return fmt.Errorf("fetch %s: %w", url, err)
 	}
@@ -1651,11 +1678,13 @@ func download(url, path string) error {
 }
 
 type templateContext struct {
-	AssetName  string
-	BaseName   string
-	BinaryName string
-	GOOS       string
-	GOARCH     string
+	AssetName       string
+	BaseName        string
+	BinaryName      string
+	GOOS            string
+	GOARCH          string
+	Version         string
+	VersionNoPrefix string
 }
 
 func selectAsset(rel *Release, cfg *RepoConfig, goos, goarch, assetMatch, assetRegex string) (*Asset, error) {
@@ -1993,7 +2022,7 @@ func resolvePGPKey(localPath, keyURL, keyAsset string, assets []Asset, tmpDir st
 }
 
 func downloadKeyFromURL(src string, tmpDir string) (string, error) {
-	resp, err := http.Get(src)
+	resp, err := httpGetWithAuth(src)
 	if err != nil {
 		return "", fmt.Errorf("fetch key %s: %w", src, err)
 	}
@@ -2121,7 +2150,7 @@ func resolveMinisignKey(localPath, keyURL, keyAsset string, assets []Asset, tmpD
 
 // downloadMinisignKeyFromURL fetches a minisign public key from a URL.
 func downloadMinisignKeyFromURL(src string, tmpDir string) (string, error) {
-	resp, err := http.Get(src)
+	resp, err := httpGetWithAuth(src)
 	if err != nil {
 		return "", fmt.Errorf("fetch minisign key %s: %w", src, err)
 	}
@@ -2157,6 +2186,8 @@ func renderTemplate(tpl string, ctx templateContext) string {
 		"{{goarch}}", ctx.GOARCH,
 		"{{GOARCH}}", strings.ToUpper(ctx.GOARCH),
 		"{{Goarch}}", titleCase(ctx.GOARCH),
+		"{{version}}", ctx.Version,
+		"{{versionNoPrefix}}", ctx.VersionNoPrefix,
 	}
 	return strings.NewReplacer(replacements...).Replace(tpl)
 }
@@ -2349,8 +2380,15 @@ func fetchExpectedHash(ver, assetName string) (string, error) {
 	url := fmt.Sprintf("https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS", ver)
 
 	client := &http.Client{Timeout: 2 * time.Second}
-	// #nosec G107 -- url GitHub releases fmt.Sprintf controlled
-	resp, err := client.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", fmt.Sprintf("sfetch/%s", version))
+	if tok := githubToken(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("network unavailable: %w", err)
 	}

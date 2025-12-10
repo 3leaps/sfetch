@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/3leaps/sfetch/testdata/corpus.schema.json",
+  "title": "sfetch corpus manifest",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["repo", "tag", "expectedWorkflow", "expectSuccess", "tier"],
+    "properties": {
+      "repo": {"type": "string", "minLength": 1},
+      "tag": {"type": "string", "minLength": 1},
+      "assetMatch": {"type": "string"},
+      "assetRegex": {"type": "string"},
+      "expectedWorkflow": {"type": "string", "enum": ["A", "B", "C", "insecure"]},
+      "expectSuccess": {"type": "boolean"},
+      "tier": {"type": "string", "enum": ["fast", "slow"]},
+      "note": {"type": "string"}
+    },
+    "anyOf": [
+      {"required": ["assetMatch"]},
+      {"required": ["assetRegex"]}
+    ],
+    "additionalProperties": false
+  }
+}

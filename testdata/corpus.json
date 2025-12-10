@@ -1,0 +1,83 @@
+[
+  {
+    "repo": "3leaps/sfetch",
+    "tag": "v0.2.0",
+    "assetMatch": "*darwin_arm64*",
+    "expectedWorkflow": "A",
+    "expectSuccess": true,
+    "tier": "fast",
+    "note": "Minisign checksum-level signature"
+  },
+  {
+    "repo": "jedisct1/minisign",
+    "tag": "0.12",
+    "assetMatch": "*macos*.zip",
+    "expectedWorkflow": "B",
+    "expectSuccess": true,
+    "tier": "fast",
+    "note": "Per-asset minisign (.minisig sidecar)"
+  },
+  {
+    "repo": "jesseduffield/lazygit",
+    "tag": "v0.44.1",
+    "assetMatch": "*Darwin_arm64*",
+    "expectedWorkflow": "C",
+    "expectSuccess": true,
+    "tier": "fast",
+    "note": "Checksum-only (checksums.txt)"
+  },
+  {
+    "repo": "junegunn/fzf",
+    "tag": "v0.56.3",
+    "assetMatch": "*darwin_arm64*",
+    "expectedWorkflow": "C",
+    "expectSuccess": true,
+    "tier": "fast",
+    "note": "Versioned checksum file (fzf_X.Y.Z_checksums.txt)"
+  },
+  {
+    "repo": "sharkdp/fd",
+    "tag": "v10.2.0",
+    "assetMatch": "*apple-darwin*",
+    "expectedWorkflow": "insecure",
+    "expectSuccess": false,
+    "tier": "fast",
+    "note": "No checksums/signatures; expect failure unless --insecure"
+  },
+  {
+    "repo": "BurntSushi/ripgrep",
+    "tag": "14.0.3",
+    "assetRegex": "^ripgrep-14\\.0\\.3-aarch64-apple-darwin\\.tar\\.gz$",
+    "expectedWorkflow": "A",
+    "expectSuccess": true,
+    "tier": "fast",
+    "note": "PGP checksums.txt.asc (Workflow A)"
+  },
+  {
+    "repo": "cli/cli",
+    "tag": "v2.53.0",
+    "assetMatch": "gh_*_macOS_arm64*",
+    "expectedWorkflow": "B",
+    "expectSuccess": true,
+    "tier": "fast",
+    "note": "Goreleaser ed25519 per-asset sigs (Workflow B)"
+  },
+  {
+    "repo": "gohugoio/hugo",
+    "tag": "v0.152.2",
+    "assetMatch": "hugo_0.152.2_darwin-universal.tar.gz",
+    "expectedWorkflow": "C",
+    "expectSuccess": true,
+    "tier": "fast",
+    "note": "checksums only (hugo_0.152.2_checksums.txt)"
+  },
+  {
+    "repo": "3leaps/sfetch",
+    "tag": "v0.2.0",
+    "assetMatch": "install-sfetch.sh",
+    "expectedWorkflow": "A",
+    "expectSuccess": true,
+    "tier": "fast",
+    "note": "Installer script (checksums + minisign)"
+  }
+]
