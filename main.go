@@ -30,7 +30,11 @@ const (
 	maxCommandError = 2048
 )
 
-var version = "dev"
+var (
+	version   = "dev"
+	buildTime = "unknown"
+	gitCommit = "unknown"
+)
 
 // Verification workflows
 const (
@@ -609,6 +613,27 @@ type Asset struct {
 	Size               int64  `json:"size"`
 }
 
+// AssetType describes how an asset should be handled after download.
+type AssetType string
+
+const (
+	AssetTypeArchive AssetType = "archive"
+	AssetTypeRaw     AssetType = "raw"
+	AssetTypePackage AssetType = "package"
+	AssetTypeUnknown AssetType = "unknown"
+)
+
+// ArchiveFormat specifies the extraction strategy for archive assets.
+type ArchiveFormat string
+
+const (
+	ArchiveFormatTarGz  ArchiveFormat = "tar.gz"
+	ArchiveFormatTarXz  ArchiveFormat = "tar.xz"
+	ArchiveFormatTarBz2 ArchiveFormat = "tar.bz2"
+	ArchiveFormatTar    ArchiveFormat = "tar"
+	ArchiveFormatZip    ArchiveFormat = "zip"
+)
+
 // SignatureFormats maps file extensions to verification methods.
 // This allows detection of signature type from filename without inspecting content.
 type SignatureFormats struct {
@@ -622,8 +647,10 @@ type SignatureFormats struct {
 type RepoConfig struct {
 	BinaryName            string           `json:"binaryName"`
 	HashAlgo              string           `json:"hashAlgo"`
-	ArchiveType           string           `json:"archiveType"`
+	ArchiveType           string           `json:"archiveType"` // deprecated; derived from AssetType/ArchiveFormat
 	ArchiveExtensions     []string         `json:"archiveExtensions"`
+	AssetType             AssetType        `json:"assetType,omitempty"`
+	ArchiveFormat         ArchiveFormat    `json:"archiveFormat,omitempty"`
 	AssetPatterns         []string         `json:"assetPatterns"`
 	ChecksumCandidates    []string         `json:"checksumCandidates"`
 	ChecksumSigCandidates []string         `json:"checksumSigCandidates"` // Workflow A: sigs over checksum files
@@ -636,7 +663,7 @@ var defaults = RepoConfig{
 	BinaryName:        "sfetch",
 	HashAlgo:          "sha256",
 	ArchiveType:       "tar.gz",
-	ArchiveExtensions: []string{".tar.gz", ".tgz", ".zip"},
+	ArchiveExtensions: []string{".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".tbz2", ".tar", ".zip"},
 	AssetPatterns: []string{
 		"(?i)^{{binary}}[_-]{{osToken}}[_-]{{archToken}}.*",
 		"(?i)^{{binary}}.*{{osToken}}.*{{archToken}}.*",
@@ -695,8 +722,8 @@ func (c *RepoConfig) preferChecksumSig() bool {
 }
 
 // repoConfigs holds overrides for repos that don't follow standard patterns.
-// Most repos work without entries here - BinaryName is inferred from repo name,
-// ArchiveType is inferred from asset extension. Only add entries for edge cases.
+// Most repos work without entries here - BinaryName and asset type are inferred from repo/asset names.
+// Only add entries for edge cases.
 var repoConfigs = map[string]RepoConfig{
 	// Example: repos where binary name differs from repo name
 	// "owner/repo": {BinaryName: "actual-binary-name"},
@@ -725,25 +752,27 @@ func main() {
 	repo := flag.String("repo", "", "GitHub repo owner/repo")
 	tag := flag.String("tag", "", "release tag (mutually exclusive with --latest)")
 	latest := flag.Bool("latest", false, "fetch latest release (mutually exclusive with --tag)")
+	assetMatch := flag.String("asset-match", "", "asset name glob/substring (simpler than regex)")
+	assetRegex := flag.String("asset-regex", "", "asset name regex (advanced override)")
+	assetTypeFlag := flag.String("asset-type", "", "force asset handling type (archive, raw, package)")
+	binaryNameFlag := flag.String("binary-name", "", "binary name to extract (default: inferred from repo name)")
+	destDir := flag.String("dest-dir", "", "destination directory")
 	output := flag.String("output", "", "output path")
-	assetRegex := flag.String("asset-regex", "", "asset name regex (overrides auto-detect)")
-	key := flag.String("key", "", "ed25519 pubkey hex (32 bytes)")
+	cacheDir := flag.String("cache-dir", "", "cache directory")
+	preferPerAsset := flag.Bool("prefer-per-asset", false, "prefer per-asset signatures over checksum-level signatures (Workflow B over A)")
+	requireMinisign := flag.Bool("require-minisign", false, "require minisign signature verification (fail if unavailable)")
+	skipSig := flag.Bool("skip-sig", false, "skip signature verification (testing only)")
+	skipChecksum := flag.Bool("skip-checksum", false, "skip checksum verification even if available")
+	insecure := flag.Bool("insecure", false, "skip all verification (dangerous - use only for testing)")
 	minisignPubKey := flag.String("minisign-key", "", "path to minisign public key file (.pub)")
 	minisignKeyURL := flag.String("minisign-key-url", "", "URL to download minisign public key")
 	minisignKeyAsset := flag.String("minisign-key-asset", "", "release asset name for minisign public key")
-	requireMinisign := flag.Bool("require-minisign", false, "require minisign signature verification (fail if unavailable)")
-	preferPerAsset := flag.Bool("prefer-per-asset", false, "prefer per-asset signatures over checksum-level signatures (Workflow B over A)")
 	pgpKeyFile := flag.String("pgp-key-file", "", "path to ASCII-armored PGP public key")
 	pgpKeyURL := flag.String("pgp-key-url", "", "URL to download ASCII-armored PGP public key")
 	pgpKeyAsset := flag.String("pgp-key-asset", "", "release asset name for ASCII-armored PGP public key")
 	gpgBin := flag.String("gpg-bin", "gpg", "path to gpg executable")
-	binaryNameFlag := flag.String("binary-name", "", "binary name to extract (default: inferred from repo name)")
-	destDir := flag.String("dest-dir", "", "destination directory")
-	cacheDir := flag.String("cache-dir", "", "cache directory")
+	key := flag.String("key", "", "ed25519 pubkey hex (32 bytes)")
 	selfVerify := flag.Bool("self-verify", false, "self-verify mode")
-	skipSig := flag.Bool("skip-sig", false, "skip signature verification (testing only)")
-	skipChecksum := flag.Bool("skip-checksum", false, "skip checksum verification even if available")
-	insecure := flag.Bool("insecure", false, "skip all verification (dangerous - use only for testing)")
 	dryRun := flag.Bool("dry-run", false, "assess release verification without downloading")
 	provenance := flag.Bool("provenance", false, "output provenance record JSON to stderr")
 	provenanceFile := flag.String("provenance-file", "", "write provenance record to file (implies --provenance)")
@@ -752,6 +781,49 @@ func main() {
 	jsonOut := flag.Bool("json", false, "JSON output for CI")
 	extendedHelp := flag.Bool("helpextended", false, "print quickstart & examples")
 	versionFlag := flag.Bool("version", false, "print version")
+	versionExtended := flag.Bool("version-extended", false, "print extended version/build info")
+
+	out := flag.CommandLine.Output()
+	printFlag := func(name string) {
+		if f := flag.Lookup(name); f != nil {
+			def := f.DefValue
+			if def != "" && def != "false" {
+				fmt.Fprintf(out, "  -%s\t%s (default %q)\n", f.Name, f.Usage, def)
+			} else {
+				fmt.Fprintf(out, "  -%s\t%s\n", f.Name, f.Usage)
+			}
+		}
+	}
+
+	flag.Usage = func() {
+		fmt.Fprintf(out, "Usage: sfetch [flags]\n\n")
+
+		fmt.Fprintln(out, "Selection:")
+		for _, name := range []string{"repo", "tag", "latest", "asset-match", "asset-regex", "asset-type", "binary-name", "output", "dest-dir", "cache-dir"} {
+			printFlag(name)
+		}
+
+		fmt.Fprintln(out, "\nVerification:")
+		for _, name := range []string{"minisign-key", "minisign-key-url", "minisign-key-asset", "pgp-key-file", "pgp-key-url", "pgp-key-asset", "gpg-bin", "key", "prefer-per-asset", "require-minisign", "skip-sig", "skip-checksum", "insecure"} {
+			printFlag(name)
+		}
+
+		fmt.Fprintln(out, "\nProvenance & assessment:")
+		for _, name := range []string{"dry-run", "provenance", "provenance-file"} {
+			printFlag(name)
+		}
+
+		fmt.Fprintln(out, "\nTools & validation:")
+		for _, name := range []string{"skip-tools-check", "verify-minisign-pubkey", "json"} {
+			printFlag(name)
+		}
+
+		fmt.Fprintln(out, "\nMeta:")
+		for _, name := range []string{"helpextended", "version", "version-extended"} {
+			printFlag(name)
+		}
+	}
+
 	flag.Parse()
 
 	if *selfVerify {
@@ -777,6 +849,15 @@ func main() {
 
 	if *versionFlag {
 		fmt.Println("sfetch", version)
+		return
+	}
+
+	if *versionExtended {
+		fmt.Printf("sfetch %s\n", version)
+		fmt.Printf("  build time: %s\n", buildTime)
+		fmt.Printf("  git commit: %s\n", gitCommit)
+		fmt.Printf("  go version: %s\n", runtime.Version())
+		fmt.Printf("  platform:   %s/%s\n", runtime.GOOS, runtime.GOARCH)
 		return
 	}
 
@@ -866,15 +947,16 @@ func main() {
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
-	selected, err := selectAsset(&rel, cfg, goos, goarch, *assetRegex)
+	selected, err := selectAsset(&rel, cfg, goos, goarch, *assetMatch, *assetRegex)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	// Infer archive type from selected asset extension
-	if inferred := inferArchiveType(selected.Name); inferred != "" {
-		cfg.ArchiveType = inferred
+	classification, classifyWarnings, err := classifyAsset(selected.Name, cfg, *assetTypeFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 
 	// Build assessment flags from CLI
@@ -888,6 +970,7 @@ func main() {
 
 	// Assess what verification is available
 	assessment := assessRelease(&rel, cfg, selected, aflags)
+	assessment.Warnings = append(classifyWarnings, assessment.Warnings...)
 
 	// Handle --dry-run: print assessment and exit
 	if *dryRun {
@@ -918,8 +1001,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}
 
-	fmt.Fprintf(os.Stderr, "DEBUG repo=%q BinaryName=%q ArchiveType=%q Asset=%q Workflow=%s Trust=%s\n",
-		*repo, cfg.BinaryName, cfg.ArchiveType, selected.Name, assessment.Workflow, assessment.TrustLevel)
+	fmt.Fprintf(os.Stderr, "DEBUG repo=%q BinaryName=%q AssetType=%q ArchiveFormat=%q Asset=%q Workflow=%s Trust=%s\n",
+		*repo, cfg.BinaryName, classification.Type, classification.ArchiveFormat, selected.Name, assessment.Workflow, assessment.TrustLevel)
 
 	tmpDir, err := os.MkdirTemp("", "sfetch-*")
 	if err != nil {
@@ -1197,35 +1280,69 @@ func main() {
 	}
 
 	binaryName := cfg.BinaryName
-	extractDir := filepath.Join(tmpDir, "extract")
-	if err := // #nosec G301 -- extractDir tmpdir controlled
-		os.Mkdir(extractDir, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "mkdir extract: %v\n", err)
-		os.Exit(1)
+	installName := binaryName
+	var binaryPath string
+
+	switch classification.Type {
+	case AssetTypeArchive:
+		extractDir := filepath.Join(tmpDir, "extract")
+		if err := // #nosec G301 -- extractDir tmpdir controlled
+			os.Mkdir(extractDir, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "mkdir extract: %v\n", err)
+			os.Exit(1)
+		}
+
+		var cmd *exec.Cmd
+		switch classification.ArchiveFormat {
+		case ArchiveFormatZip:
+			// #nosec G204 -- assetPath tmp controlled
+			cmd = exec.Command("unzip", "-q", assetPath, "-d", extractDir)
+		case ArchiveFormatTarXz:
+			// #nosec G204 -- assetPath tmp controlled
+			cmd = exec.Command("tar", "xJf", assetPath, "-C", extractDir)
+		case ArchiveFormatTarBz2:
+			// #nosec G204 -- assetPath tmp controlled
+			cmd = exec.Command("tar", "xjf", assetPath, "-C", extractDir)
+		case ArchiveFormatTar:
+			// #nosec G204 -- assetPath tmp controlled
+			cmd = exec.Command("tar", "xf", assetPath, "-C", extractDir)
+		case ArchiveFormatTarGz:
+			fallthrough
+		default:
+			// #nosec G204 -- assetPath tmp controlled
+			cmd = exec.Command("tar", "xzf", assetPath, "-C", extractDir)
+		}
+
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "extract archive: %v\n", err)
+			os.Exit(1)
+		}
+
+		binaryPath = filepath.Join(extractDir, binaryName)
+		if _, err := os.Stat(binaryPath); err != nil {
+			fmt.Fprintf(os.Stderr, "binary %s not found in archive\n", binaryName)
+			os.Exit(1)
+		}
+
+		if err := // #nosec G302 -- binaryPath extracted tmp chmod +x safe
+			os.Chmod(binaryPath, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "chmod: %v\n", err)
+			os.Exit(1)
+		}
+
+	case AssetTypePackage:
+		installName = selected.Name
+		binaryPath = assetPath
+	case AssetTypeRaw:
+		installName = selected.Name
+		binaryPath = assetPath
+	default:
+		installName = selected.Name
+		binaryPath = assetPath
 	}
 
-	var cmd *exec.Cmd
-	if cfg.ArchiveType == "zip" {
-		// #nosec G204 -- assetPath tmp controlled
-		cmd = exec.Command("unzip", "-q", assetPath, "-d", extractDir)
-	} else {
-		// #nosec G204 -- assetPath tmp controlled
-		cmd = exec.Command("tar", "xzf", assetPath, "-C", extractDir)
-	}
-	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "extract archive: %v\n", err)
-		os.Exit(1)
-	}
-
-	binaryPath := filepath.Join(extractDir, binaryName)
-	if _, err := os.Stat(binaryPath); err != nil {
-		fmt.Fprintf(os.Stderr, "binary %s not found in archive\n", binaryName)
-		os.Exit(1)
-	}
-
-	if err := // #nosec G302 -- binaryPath extracted tmp chmod +x safe
-		os.Chmod(binaryPath, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "chmod: %v\n", err)
+	if binaryPath == "" {
+		fmt.Fprintln(os.Stderr, "error: could not resolve binary path")
 		os.Exit(1)
 	}
 
@@ -1233,9 +1350,9 @@ func main() {
 	if *output != "" {
 		finalPath = *output
 	} else if *destDir != "" {
-		finalPath = filepath.Join(*destDir, binaryName)
+		finalPath = filepath.Join(*destDir, installName)
 	} else {
-		finalPath = binaryName
+		finalPath = installName
 	}
 
 	if err := // #nosec G301 -- Dir(finalPath) user-controlled safe mkdir tmp
@@ -1249,8 +1366,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	if classification.Type == AssetTypeRaw && runtime.GOOS != "windows" && classification.NeedsChmod {
+		if err := // #nosec G302 -- finalPath user-controlled chmod +x optional
+			os.Chmod(finalPath, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "chmod %s: %v\n", finalPath, err)
+			os.Exit(1)
+		}
+	}
+
 	fmt.Printf("Release: %s\n", rel.TagName)
-	fmt.Printf("Installed %s to %s\n", binaryName, finalPath)
+	fmt.Printf("Installed %s to %s\n", installName, finalPath)
 
 	// Output provenance record if requested
 	if *provenance || *provenanceFile != "" {
@@ -1283,22 +1408,150 @@ func inferBinaryName(repo string) string {
 	return repo // fallback to full string if no slash
 }
 
-// inferArchiveType determines archive type from asset filename extension.
-// Returns "zip" for .zip files, "tar.gz" for .tar.gz/.tgz, empty string if unknown.
-func inferArchiveType(assetName string) string {
+type AssetClassification struct {
+	Type          AssetType
+	ArchiveFormat ArchiveFormat
+	IsScript      bool
+	IsPackage     bool
+	NeedsChmod    bool
+}
+
+func classifyAsset(assetName string, cfg *RepoConfig, override string) (AssetClassification, []string, error) {
+	cls := inferAssetClassification(assetName)
+	warnings := []string{}
+
+	// Backward compatibility: legacy archiveType
+	if cfg.ArchiveType != "" && cfg.AssetType == "" && cfg.ArchiveFormat == "" {
+		if fmt := archiveFormatFromString(cfg.ArchiveType); fmt != "" {
+			cls.Type = AssetTypeArchive
+			cls.ArchiveFormat = fmt
+		}
+	}
+
+	// Repo config overrides
+	if cfg.AssetType != "" {
+		cls.Type = cfg.AssetType
+	}
+	if cfg.ArchiveFormat != "" {
+		cls.ArchiveFormat = cfg.ArchiveFormat
+	}
+
+	// CLI override
+	if override != "" {
+		switch strings.ToLower(override) {
+		case string(AssetTypeArchive):
+			cls.Type = AssetTypeArchive
+		case string(AssetTypeRaw):
+			cls.Type = AssetTypeRaw
+		case string(AssetTypePackage):
+			cls.Type = AssetTypePackage
+		default:
+			return cls, warnings, fmt.Errorf("invalid --asset-type %q (allowed: archive, raw, package)", override)
+		}
+	}
+
+	// Fill archive format when needed
+	if cls.Type == AssetTypeArchive && cls.ArchiveFormat == "" {
+		cls.ArchiveFormat = inferArchiveFormat(assetName)
+	}
+
+	if cls.Type == AssetTypeArchive && cls.ArchiveFormat == "" {
+		return cls, warnings, fmt.Errorf("could not determine archive format for %s", assetName)
+	}
+
+	if cls.Type == AssetTypeUnknown {
+		warnings = append(warnings, fmt.Sprintf("asset %s has unknown type; treating as raw", assetName))
+		cls.Type = AssetTypeRaw
+	}
+
+	if cls.Type == AssetTypePackage {
+		warnings = append(warnings, fmt.Sprintf("asset %s looks like a package; sfetch does not install packages", assetName))
+	}
+
+	return cls, warnings, nil
+}
+
+func inferAssetClassification(assetName string) AssetClassification {
 	lower := strings.ToLower(assetName)
+	cls := AssetClassification{}
+
+	// Archive detection first
+	if fmt := inferArchiveFormat(lower); fmt != "" {
+		cls.Type = AssetTypeArchive
+		cls.ArchiveFormat = fmt
+		return cls
+	}
+
+	// Packages
+	if isPackageExtension(lower) {
+		cls.Type = AssetTypePackage
+		cls.IsPackage = true
+		return cls
+	}
+
+	cls.Type = AssetTypeRaw
+	cls.IsScript = isScriptExtension(lower)
+
+	ext := filepath.Ext(lower)
+	if cls.IsScript || ext == "" {
+		cls.NeedsChmod = true
+	}
+
+	return cls
+}
+
+func inferArchiveFormat(assetName string) ArchiveFormat {
 	switch {
-	case strings.HasSuffix(lower, ".zip"):
-		return "zip"
-	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"):
-		return "tar.gz"
-	case strings.HasSuffix(lower, ".tar.xz"):
-		return "tar.xz"
-	case strings.HasSuffix(lower, ".tar.bz2"):
-		return "tar.bz2"
+	case strings.HasSuffix(assetName, ".tar.gz"), strings.HasSuffix(assetName, ".tgz"):
+		return ArchiveFormatTarGz
+	case strings.HasSuffix(assetName, ".tar.xz"), strings.HasSuffix(assetName, ".txz"):
+		return ArchiveFormatTarXz
+	case strings.HasSuffix(assetName, ".tar.bz2"), strings.HasSuffix(assetName, ".tbz2"):
+		return ArchiveFormatTarBz2
+	case strings.HasSuffix(assetName, ".tar"):
+		return ArchiveFormatTar
+	case strings.HasSuffix(assetName, ".zip"):
+		return ArchiveFormatZip
 	default:
 		return ""
 	}
+}
+
+func archiveFormatFromString(s string) ArchiveFormat {
+	switch strings.ToLower(s) {
+	case "tar.gz", "tgz":
+		return ArchiveFormatTarGz
+	case "tar.xz", "txz":
+		return ArchiveFormatTarXz
+	case "tar.bz2", "tbz2":
+		return ArchiveFormatTarBz2
+	case "tar":
+		return ArchiveFormatTar
+	case "zip":
+		return ArchiveFormatZip
+	default:
+		return ""
+	}
+}
+
+func isScriptExtension(name string) bool {
+	scriptExts := []string{".sh", ".bash", ".zsh", ".py", ".rb", ".pl", ".ps1", ".bat", ".cmd"}
+	for _, ext := range scriptExts {
+		if strings.HasSuffix(name, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+func isPackageExtension(name string) bool {
+	pkgExts := []string{".deb", ".rpm", ".pkg", ".msi"}
+	for _, ext := range pkgExts {
+		if strings.HasSuffix(name, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeConfig(base RepoConfig, override RepoConfig) RepoConfig {
@@ -1311,6 +1564,12 @@ func mergeConfig(base RepoConfig, override RepoConfig) RepoConfig {
 	}
 	if override.ArchiveType != "" {
 		cfg.ArchiveType = override.ArchiveType
+	}
+	if override.AssetType != "" {
+		cfg.AssetType = override.AssetType
+	}
+	if override.ArchiveFormat != "" {
+		cfg.ArchiveFormat = override.ArchiveFormat
 	}
 	if len(override.ArchiveExtensions) > 0 {
 		cfg.ArchiveExtensions = append([]string(nil), override.ArchiveExtensions...)
@@ -1379,7 +1638,11 @@ type templateContext struct {
 	GOARCH     string
 }
 
-func selectAsset(rel *Release, cfg *RepoConfig, goos, goarch, assetRegex string) (*Asset, error) {
+func selectAsset(rel *Release, cfg *RepoConfig, goos, goarch, assetMatch, assetRegex string) (*Asset, error) {
+	if assetMatch != "" {
+		return matchWithMatch(rel.Assets, assetMatch)
+	}
+
 	if assetRegex != "" {
 		re, err := regexp.Compile(assetRegex)
 		if err != nil {
@@ -1409,6 +1672,33 @@ func matchWithRegex(assets []Asset, re *regexp.Regexp) (*Asset, error) {
 	}
 	if selected == nil {
 		return nil, fmt.Errorf("no asset matches provided regex")
+	}
+	return selected, nil
+}
+
+func matchWithMatch(assets []Asset, pattern string) (*Asset, error) {
+	var selected *Asset
+	p := strings.ToLower(pattern)
+	isGlob := strings.ContainsAny(pattern, "*?[")
+	for i := range assets {
+		name := strings.ToLower(assets[i].Name)
+		match := false
+		if isGlob {
+			if ok, err := filepath.Match(p, name); err == nil && ok {
+				match = true
+			}
+		} else if strings.Contains(name, p) {
+			match = true
+		}
+		if match {
+			if selected != nil {
+				return nil, fmt.Errorf("multiple assets match pattern: %s and %s", selected.Name, assets[i].Name)
+			}
+			selected = &assets[i]
+		}
+	}
+	if selected == nil {
+		return nil, fmt.Errorf("no asset matches provided pattern")
 	}
 	return selected, nil
 }

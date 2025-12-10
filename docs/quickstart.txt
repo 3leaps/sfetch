@@ -5,18 +5,23 @@ Install a signed release from GitHub in three steps:
 
 1. Choose the release selector:
    - `-latest` for the newest tag
-   - `-tag v2025.12.3` to pin a specific version
+   - `-tag v0.2.0` to pin a specific version
 
-2. Provide the verification material:
+2. Select the asset (optional override):
+   - `-asset-match "install-sfetch.sh"` (glob/substring)
+   - `-asset-regex "tool-.*-darwin-amd64.tar.gz$"` (advanced)
+
+3. Provide the verification material:
    - PGP signatures (`*.asc`): `-pgp-key-file fulmen-release.asc`
    - Raw ed25519 signatures (`*.sig`): `-key <64-hex-bytes>`
 
-3. Choose install destination:
+4. Choose install destination:
    - `-output /usr/local/bin/tool` to clobber a path
    - `-dest-dir ./bin` to place the extracted binary there
 
-Example (goneat):
+Examples:
   sfetch -repo fulmenhq/goneat -latest -dest-dir ./bin -pgp-key-file fulmen-release.asc
+  sfetch -repo 3leaps/sfetch -latest -asset-match "install-sfetch.sh" -dest-dir /tmp
 
 PGP key lookup order:
  1. `-pgp-key-file /path/to/key.asc` (if it starts with http/https, the file is downloaded first)

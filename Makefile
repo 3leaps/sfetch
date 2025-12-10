@@ -1,9 +1,15 @@
 -include buildconfig.mk
 
-VERSION ?= dev
+# Read version from VERSION file, fallback to dev
+VERSION ?= $(shell cat VERSION 2>/dev/null || echo "dev")
+BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 NAME ?= sfetch
 MAIN ?= ./main.go
 YAMLLINT ?= yamllint
+
+# LDFLAGS for version injection
+LDFLAGS := -s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME) -X main.gitCommit=$(GIT_COMMIT)
 
 # Defaults
 GOOS ?= $(shell go env GOOS)
@@ -95,17 +101,17 @@ precommit: quality
 build:
 	mkdir -p bin
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build \
-		-ldflags="-s -w -X main.version=$(VERSION)" \
+		-ldflags="$(LDFLAGS)" \
 		-trimpath \
 		-o $(BUILD_ARTIFACT) $(MAIN)
 
 build-all:
 	mkdir -p dist/release
-	GOOS=darwin GOARCH=amd64   CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o dist/release/$(NAME)-darwin-amd64   $(MAIN)
-	GOOS=darwin GOARCH=arm64   CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o dist/release/$(NAME)-darwin-arm64   $(MAIN)
-	GOOS=linux  GOARCH=amd64   CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o dist/release/$(NAME)-linux-amd64     $(MAIN)
-	GOOS=linux  GOARCH=arm64   CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o dist/release/$(NAME)-linux-arm64     $(MAIN)
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o dist/release/$(NAME)-windows-amd64.exe $(MAIN)
+	GOOS=darwin GOARCH=amd64  CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o dist/release/$(NAME)-darwin-amd64     $(MAIN)
+	GOOS=darwin GOARCH=arm64  CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o dist/release/$(NAME)-darwin-arm64     $(MAIN)
+	GOOS=linux  GOARCH=amd64  CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o dist/release/$(NAME)-linux-amd64      $(MAIN)
+	GOOS=linux  GOARCH=arm64  CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o dist/release/$(NAME)-linux-arm64      $(MAIN)
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o dist/release/$(NAME)-windows-amd64.exe $(MAIN)
 
 release: build-all
 	# TODO: GitHub release automation

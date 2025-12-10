@@ -81,10 +81,10 @@ export PGP_KEY_ID=security@yourorg.dev  # Optional
 
 ```bash
 # 1. Download CI-built artifacts
-RELEASE_TAG=v2025.12.06 make release-download
+RELEASE_TAG=v0.2.0 make release-download
 
 # 2. Generate SHA256SUMS and sign it
-RELEASE_TAG=v2025.12.06 make release-sign
+RELEASE_TAG=v0.2.0 make release-sign
 # Produces: SHA256SUMS, SHA256SUMS.minisig, SHA256SUMS.asc (if PGP_KEY_ID set)
 
 # 3. Export public keys for the release
@@ -95,10 +95,10 @@ make release-export-key  # PGP, requires PGP_KEY_ID
 make verify-release-key
 
 # 5. Copy release notes
-RELEASE_TAG=v2025.12.06 make release-notes
+RELEASE_TAG=v0.2.0 make release-notes
 
 # 6. Upload to GitHub
-RELEASE_TAG=v2025.12.06 make release-upload
+RELEASE_TAG=v0.2.0 make release-upload
 ```
 
 ### Verification Test
@@ -108,15 +108,15 @@ After signing, verify locally before upload:
 ```bash
 # Test minisign verification (explicit key)
 sfetch --minisign-key dist/release/sfetch-minisign.pub \
-       --repo yourorg/sfetch --tag v2025.12.06 --dest-dir /tmp/test
+       --repo yourorg/sfetch --tag v0.2.0 --dest-dir /tmp/test
 
 # Test minisign verification (strict mode - requires minisign, auto-detects key)
 sfetch --require-minisign \
-       --repo yourorg/sfetch --tag v2025.12.06 --dest-dir /tmp/test
+       --repo yourorg/sfetch --tag v0.2.0 --dest-dir /tmp/test
 
 # Test PGP verification
 sfetch --pgp-key-file dist/release/sfetch-release-signing-key.asc \
-       --repo yourorg/sfetch --tag v2025.12.06 --dest-dir /tmp/test
+       --repo yourorg/sfetch --tag v0.2.0 --dest-dir /tmp/test
 ```
 
 ## Key Security

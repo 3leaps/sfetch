@@ -3,11 +3,13 @@
 All notable changes will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [CalVer: YYYY.MM.DD](https://calver.org/).
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+> **Note**: Versions prior to 0.2.0 used CalVer (vYYYY.MM.DD). See [ADR-0001](docs/adr/adr-0001-semver-versioning.md) for migration details.
 
 ## [Unreleased]
 
-## [v2025.12.09] - 2025-12-09
+## [0.2.0] - 2025-12-09
 
 ### Added
 - **Verification Assessment & Provenance**: Structured JSON provenance records for audit trails and CI integration.
@@ -18,6 +20,13 @@ and this project adheres to [CalVer: YYYY.MM.DD](https://calver.org/).
 - **Workflow C (checksum-only)**: Support for repos that publish checksums without signatures.
   - Per-asset checksums (`.sha256`, `.sha512`) and consolidated (`checksums.txt`, `SHA256SUMS`).
   - Warning emitted when no signature available.
+- **Asset classification & raw installs**:
+  - New `AssetType`/`ArchiveFormat` fields with expanded archive defaults (`.tar.xz`, `.tar.bz2`, `.tar`, aliases).
+  - Raw scripts and standalone binaries skip extraction; chmod on macOS/Linux; package installers (`.deb/.rpm/.pkg/.msi`) tagged and warned.
+  - Flag: `--asset-type` override; Schema: `schemas/repo-config.schema.json` updated for new fields.
+- **Asset selection overrides**:
+  - `--asset-match`: Glob/substring asset selection (user-friendly).
+  - `--asset-regex`: Advanced regex selection retained.
 - **Override flags**:
   - `--skip-checksum`: Skip checksum verification even if available.
   - `--insecure`: Skip ALL verification (dangerous - use only for testing).
@@ -36,16 +45,20 @@ and this project adheres to [CalVer: YYYY.MM.DD](https://calver.org/).
 - **Documentation**: Comprehensive `docs/examples.md` with real-world examples and pattern matching transparency.
 - **Integration tests**: Full minisign verification tests with testdata fixtures.
 - **Unit tests**: `TestValidateMinisignPubkey` covering public key validation (rejects secret keys, signatures).
+- **Versioning**: Adopted Semantic Versioning; `VERSION` file as single source of truth.
 
 ### Changed
 - Verification workflow detection now prefers checksum-level signatures (Workflow A) over per-asset (Workflow B) by default.
 - Minisign verification uses pure-Go `github.com/jedisct1/go-minisign` library (no external dependencies).
 - `RepoConfig` struct now includes `SignatureFormats` for extension-based signature type detection.
+- CI workflow validates `VERSION` file matches git tag at release time.
 
 ### Fixed
 - Minisign per-asset signatures (Workflow B) now correctly skip checksum verification when checksum file unavailable.
 
-## [v2025.12.06.1] - 2025-12-06
+## [0.1.1] - 2025-12-06
+
+_Formerly v2025.12.06.1_
 
 ### Fixed
 - Install script EXIT trap error due to `local` variable scoping.
@@ -56,29 +69,15 @@ and this project adheres to [CalVer: YYYY.MM.DD](https://calver.org/).
 - README verification examples use `shasum -a 256` (macOS compatible) and temp GPG keyring.
 - Upload script includes minisign files (`SHA256SUMS.minisig`, `sfetch-minisign.pub`).
 
-## [v2025.12.06] - 2025-12-06 [YANKED]
+## [0.1.0] - 2025-12-05
 
-**Note:** This release had a bug in install-sfetch.sh. Use v2025.12.06.1 instead.
+_Formerly v2025.12.05_
 
 ### Added
+- Initial public release.
 - `--minisign-key` flag for pure-Go minisign signature verification.
 - `install-sfetch.sh` bootstrap installer with embedded minisign trust anchor.
 - Dual signing: SHA256SUMS signed with both minisign (.minisig) and PGP (.asc).
-- `shell-check` Makefile target (shellcheck + shfmt) added to precommit.
-- Key rotation checklist in `docs/security/signing-runbook.md`.
-- Pre-pipe verification docs with minisign and GPG options.
-
-### Changed
-- Install script included in SHA256SUMS for unified verification.
-- CI workflow installs shellcheck and shfmt for shell script validation.
-- Release workflow uploads install-sfetch.sh as release asset.
-
-### Removed
-- `bootstrap.sh` (replaced by `install-sfetch.sh` with proper verification).
-
-## [v2025.12.05] - 2025-12-05
-
-### Added
 - Embedded quickstart text printable via `sfetch -helpextended`.
 - `buildconfig.mk` to centralize binary name and install defaults.
 - `--pgp-key-url` / `--pgp-key-asset` flags and auto-detection for `.asc` key assets.

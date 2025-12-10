@@ -3,7 +3,7 @@ title: "sfetch Examples & Pattern Matching"
 description: "Real-world examples and transparent documentation of how sfetch selects assets and verifies signatures"
 author_of_record: Dave Thompson (@3leapsdave)
 status: draft
-last_updated: 2025-12-08
+last_updated: 2025-12-10
 ---
 
 # sfetch Examples & Pattern Matching
@@ -40,7 +40,7 @@ This document provides transparency into how sfetch works. As the tagline says: 
                     ┌──────────▼──────────┐
                     │   Select Asset      │
                     │   (heuristics or    │
-                    │   --asset-regex)    │
+                    │   --asset-match)    │
                     └──────────┬──────────┘
                                │
               ┌────────────────▼────────────────┐
@@ -79,12 +79,15 @@ This document provides transparency into how sfetch works. As the tagline says: 
 
 sfetch uses inference to minimize configuration:
 
-| Property | Inference Rule | Override Flag |
-|----------|----------------|---------------|
+| Property | Inference Rule | Override |
+|----------|----------------|----------|
 | **BinaryName** | Second part of `owner/repo` (e.g., `jedisct1/minisign` → `minisign`) | `--binary-name` |
-| **ArchiveType** | From asset extension (`.zip` → zip, `.tar.gz` → tar.gz) | *automatic* |
+| **AssetType** | Archives: `.tar.gz/.tgz/.tar.xz/.txz/.tar.bz2/.tbz2/.tar/.zip`; Raw: scripts (`.sh/.py/.rb/...`), extensionless binaries; Package-like: `.deb/.rpm/.pkg/.msi` (tagged, treated as raw with warning) | `--asset-type` or repo config `assetType` |
+| **ArchiveFormat** | From archive extension (see above) | repo config `archiveFormat` |
 | **Signature Format** | From sig file extension/content | *automatic* |
 | **Checksum File** | Pattern matching (`SHA256SUMS`, `{{asset}}.sha256`) | *automatic* |
+
+**Asset selection overrides:** Prefer `--asset-match` (glob/substring). Use `--asset-regex` for advanced regex matching.
 
 ---
 
@@ -104,9 +107,9 @@ Checksum-level signing - signature over `SHA256SUMS`.
 
 **Release structure:**
 ```
-sfetch_v2025.12.06_darwin_arm64.tar.gz
-sfetch_v2025.12.06_darwin_amd64.tar.gz
-sfetch_v2025.12.06_linux_amd64.tar.gz
+sfetch_v0.2.0_darwin_arm64.tar.gz
+sfetch_v0.2.0_darwin_amd64.tar.gz
+sfetch_v0.2.0_linux_amd64.tar.gz
 SHA256SUMS                              ← checksums of all assets
 SHA256SUMS.minisig                      ← signature over SHA256SUMS
 sfetch-minisign.pub                     ← public key (auto-detected)
@@ -130,7 +133,7 @@ sfetch --repo 3leaps/sfetch --latest \
 
 **What sfetch does:**
 1. Fetches release from GitHub API
-2. Selects `sfetch_v2025.12.06_darwin_arm64.tar.gz` (platform heuristics)
+2. Selects `sfetch_v0.2.0_darwin_arm64.tar.gz` (platform heuristics)
 3. Finds `SHA256SUMS.minisig` → triggers Workflow A
 4. Auto-detects `sfetch-minisign.pub` from release assets
 5. Downloads `SHA256SUMS` + `SHA256SUMS.minisig`
@@ -166,9 +169,9 @@ sfetch --repo jedisct1/minisign --latest \
   --minisign-key /path/to/jedisct1.pub \
   --dest-dir /usr/local/bin
 
-# With asset regex for specific platform
+# With asset match (glob/substring) for specific platform
 sfetch --repo jedisct1/minisign --latest \
-  --asset-regex "minisign-.*-macos.zip$" \
+  --asset-match "*macos*.zip" \
   --minisign-key /path/to/jedisct1.pub \
   --dest-dir /usr/local/bin
 ```
@@ -268,6 +271,33 @@ sfetch --repo owner/tool --latest \
 **Note:** Unlike minisign, PGP per-asset signatures still require a checksum file because the signature doesn't inherently provide integrity in sfetch's verification model.
 
 ---
+
+# Raw assets (scripts & binaries)
+
+**What changes:**
+- `.sh/.py/.rb/.ps1` scripts and extensionless binaries are treated as raw files (no extraction).
+- Destination filename defaults to the asset name; `--output` still overrides.
+- Scripts/binaries are `chmod +x` on macOS/Linux.
+- Package installers (`.deb/.rpm/.pkg/.msi`) are tagged as packages and installed as raw files with a warning—sfetch does not execute package managers.
+
+**Examples:**
+
+```bash
+# Fetch installer script (no extraction, auto-chmod)
+sfetch --repo 3leaps/sfetch --latest \
+  --asset-match "install-sfetch.sh" \
+  --dest-dir /tmp
+
+# Standalone binary with no extension
+auto_repo="kubernetes/kubectl"
+sfetch --repo "$auto_repo" --tag v1.29.0 \
+  --asset-match "kubectl-v1.29.0-linux-amd64" \
+  --dest-dir /usr/local/bin
+
+# Force handling when extension is ambiguous
+sfetch --repo owner/tool --latest --asset-type archive --dest-dir /tmp
+sfetch --repo owner/tool --latest --asset-type raw --dest-dir /tmp
+```
 
 # Raw ed25519
 
@@ -419,15 +449,15 @@ RW...base64key...
 
 # Known Limitations
 
-1. **Archives only**: Expects `.tar.gz`, `.tgz`, `.zip`, `.tar.xz`, or `.tar.bz2`. Raw file downloads (`.sh` scripts, standalone binaries) not yet supported - sfetch will download and verify the checksum but fail at extraction.
+1. **Single binary install path**: Archives must place the binary at the root (no recursion yet). Raw files/scripts install directly but still assume a single output name.
 
-2. **Single binary**: Extracts one file. Multi-binary archives need multiple sfetch calls.
+2. **Flat archive structure**: Binary must be at the root of the archive, not in a subdirectory. Archives like ripgrep (`ripgrep-15.1.0-aarch64-apple-darwin/rg`) don't work currently.
 
-3. **Flat archive structure**: Binary must be at the root of the archive, not in a subdirectory. Archives like ripgrep (`ripgrep-15.1.0-aarch64-apple-darwin/rg`) don't work currently.
+3. **GitHub releases only**: Currently GitHub releases API only. Direct URL downloads (e.g., `raw.githubusercontent.com`, arbitrary URLs) not yet supported. GitLab planned.
 
-4. **GitHub releases only**: Currently GitHub releases API only. Direct URL downloads (e.g., `raw.githubusercontent.com`, arbitrary URLs) not yet supported. GitLab planned.
+4. **Cosign/Sigstore**: Not yet implemented.
 
-5. **Cosign/Sigstore**: Not yet implemented.
+5. **Package installers**: `.deb/.rpm/.pkg/.msi` are tagged and downloaded as raw files with a warning; sfetch does not run package managers.
 
 ---
 
@@ -541,9 +571,12 @@ Installed lazygit to /tmp/lazygit
 
 | Flag | Description |
 |------|-------------|
+| `--asset-match` | Glob/substring asset selection (user-friendly) |
+| `--asset-regex` | Regex asset selection (advanced) |
 | `--skip-sig` | Skip signature verification (existing) |
 | `--skip-checksum` | Skip checksum verification |
 | `--insecure` | Skip ALL verification (dangerous) |
+| `--asset-type` | Force handling as `archive`, `raw`, or `package` |
 
 ```bash
 # Download without any verification (NOT recommended)

@@ -18,15 +18,25 @@
     },
     "archiveType": {
       "type": "string",
-      "enum": ["tar.gz", "tgz", "zip"],
+      "enum": ["tar.gz", "tgz", "tar.xz", "txz", "tar.bz2", "tbz2", "tar", "zip"],
       "default": "tar.gz",
-      "description": "Primary archive format for this repository"
+      "description": "Deprecated: prefer assetType/archiveFormat overrides"
     },
     "archiveExtensions": {
       "type": "array",
       "items": { "type": "string" },
-      "default": [".tar.gz", ".tgz", ".zip"],
+      "default": [".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".tbz2", ".tar", ".zip"],
       "description": "File extensions recognized as archives"
+    },
+    "assetType": {
+      "type": "string",
+      "enum": ["archive", "raw", "package"],
+      "description": "Override inferred asset handling type"
+    },
+    "archiveFormat": {
+      "type": "string",
+      "enum": ["tar.gz", "tar.xz", "tar.bz2", "tar", "zip"],
+      "description": "Override inferred archive extraction format"
     },
     "assetPatterns": {
       "type": "array",

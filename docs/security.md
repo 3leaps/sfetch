@@ -40,12 +40,12 @@ CI uploads unsigned archives only. Maintainers sign `SHA256SUMS` locally with mi
 export MINISIGN_KEY=/path/to/key.key
 export PGP_KEY_ID=your-key-id  # optional
 
-RELEASE_TAG=v2025.12.06 make release-download
-RELEASE_TAG=v2025.12.06 make release-sign
+RELEASE_TAG=v0.2.0 make release-download
+RELEASE_TAG=v0.2.0 make release-sign
 make release-export-minisign-key
 make release-export-key  # if using PGP
-RELEASE_TAG=v2025.12.06 make release-notes
-RELEASE_TAG=v2025.12.06 make release-upload
+RELEASE_TAG=v0.2.0 make release-notes
+RELEASE_TAG=v0.2.0 make release-upload
 ```
 
 Only `SHA256SUMS` is signed (not individual files). Users verify the signature on `SHA256SUMS`, then verify archive checksums against it. This is standard practice - signing individual files would be redundant.

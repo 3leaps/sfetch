@@ -19,7 +19,7 @@ Yet we still ship 15-line bash bootstrap scripts that do manual `curl → sha256
 See [docs/security.md](docs/security.md).
 
 ### Asset Discovery
-Auto-selects via heuristics ([docs/pattern-matching.md](docs/pattern-matching.md)).
+Auto-selects via heuristics ([docs/pattern-matching.md](docs/pattern-matching.md)) and classifies assets (archives vs raw scripts/binaries vs package-like). Raw files skip extraction; scripts/binaries are chmod’d on macOS/Linux. Use `--asset-match` for glob/substring selection or `--asset-regex` for advanced regex.
 
 ### Signature verification
 
@@ -57,7 +57,7 @@ See [docs/examples.md](docs/examples.md) for comprehensive real-world examples.
 
 ### Build, versioning & install
 
-We use CalVer in `vYYYY.MM.DD` format (e.g., `v2025.12.05`). If multiple releases ship on the same day we append a revision (`v2025.12.05.1`, `v2025.12.05.2`, ...). See `CHANGELOG.md`, `RELEASE_NOTES.md`, and `docs/releases/` for per-release detail.
+sfetch uses [Semantic Versioning](https://semver.org/). See [ADR-0001](docs/adr/adr-0001-semver-versioning.md) for versioning history.
 
 ```bash
 make build             # produces bin/sfetch_${GOOS}_${GOARCH}
@@ -87,7 +87,7 @@ Pass arguments using `bash -s --`:
 curl -sSfL .../install-sfetch.sh | bash -s -- --dir ~/bin
 
 # Install specific version
-curl -sSfL .../install-sfetch.sh | bash -s -- --tag v2025.12.06
+curl -sSfL .../install-sfetch.sh | bash -s -- --tag v0.2.0
 
 # Dry run (download and verify, don't install)
 curl -sSfL .../install-sfetch.sh | bash -s -- --dry-run
@@ -147,12 +147,12 @@ CI uploads unsigned archives. Maintainers sign `SHA256SUMS` locally with minisig
 export MINISIGN_KEY=/path/to/sfetch.key
 export PGP_KEY_ID=security@fulmenhq.dev  # optional
 
-RELEASE_TAG=v2025.12.06 make release-download
-RELEASE_TAG=v2025.12.06 make release-sign
+RELEASE_TAG=v0.2.0 make release-download
+RELEASE_TAG=v0.2.0 make release-sign
 make release-export-minisign-key
 make release-export-key                   # if using PGP
-RELEASE_TAG=v2025.12.06 make release-notes
-RELEASE_TAG=v2025.12.06 make release-upload
+RELEASE_TAG=v0.2.0 make release-notes
+RELEASE_TAG=v0.2.0 make release-upload
 ```
 
 Set `RELEASE_TAG` to the tag you're publishing. The scripts in `scripts/` can be used individually if you prefer manual control.
@@ -162,6 +162,18 @@ Set `RELEASE_TAG` to the tag you're publishing. The scripts in `scripts/` can be
 ```bash
 # Download with auto-detected verification (minisign or PGP key from release assets)
 sfetch --repo 3leaps/sfetch --latest --dest-dir ~/.local/bin
+
+# Download installer script (no extraction, auto-chmod)
+sfetch --repo 3leaps/sfetch --latest --asset-match "install-sfetch.sh" --dest-dir /tmp
+
+# Standalone binary with explicit override for ambiguous extensions
+sfetch --repo owner/tool --latest --asset-type raw --dest-dir /usr/local/bin
+
+# Match by glob/substring instead of regex
+sfetch --repo jedisct1/minisign --latest --asset-match "*macos*.zip" --dest-dir /usr/local/bin
+
+# Advanced: regex match remains available
+sfetch --repo jedisct1/minisign --latest --asset-regex "minisign-.*-macos.zip$" --dest-dir /usr/local/bin
 
 # Dry-run to assess what verification is available
 sfetch --repo BurntSushi/ripgrep --latest --dry-run
@@ -174,3 +186,4 @@ sfetch --repo fulmenhq/goneat --latest --pgp-key-file fulmen-release.asc --dest-
 
 # Pin to specific version
 sfetch --repo fulmenhq/goneat --tag v0.3.14 --dest-dir /usr/local/bin
+```

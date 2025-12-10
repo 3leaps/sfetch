@@ -5,17 +5,21 @@ This document walks maintainers through the build/sign/upload flow for each sfet
 ## 1. Prepare & Tag
 
 - [ ] Ensure `main` is clean and `make precommit` passes
+- [ ] Update `VERSION` file with new semver (e.g., `0.2.0`)
 - [ ] Update `CHANGELOG.md` (move Unreleased to new version section)
 - [ ] Update `RELEASE_NOTES.md`
-- [ ] Create `docs/releases/vYYYY.MM.DD.md`
-- [ ] Commit: `git add -A && git commit -m "docs: add vYYYY.MM.DD release notes"`
+- [ ] Create `docs/releases/vX.Y.Z.md`
+- [ ] Commit: `git add -A && git commit -m "release: prepare vX.Y.Z"`
 - [ ] Push and tag:
   ```bash
   git push origin main
-  git tag vYYYY.MM.DD
-  git push origin vYYYY.MM.DD
+  git tag v$(cat VERSION)
+  git push origin v$(cat VERSION)
   ```
-- [ ] Wait for GitHub Actions release workflow to complete (builds unsigned archives, uploads install-sfetch.sh)
+- [ ] Wait for GitHub Actions release workflow to complete
+  - CI validates VERSION file matches tag
+  - Builds unsigned archives
+  - Uploads install-sfetch.sh
 
 ## 2. Manual Signing (local machine)
 
@@ -29,12 +33,12 @@ export PGP_KEY_ID=security@fulmenhq.dev  # or your-subkey-id!
 
 1. **Download artifacts**
    ```bash
-   RELEASE_TAG=vYYYY.MM.DD make release-download
+   RELEASE_TAG=v$(cat VERSION) make release-download
    ```
 
 2. **Sign SHA256SUMS** (generates checksums, signs with minisign + PGP)
    ```bash
-   RELEASE_TAG=vYYYY.MM.DD make release-sign
+   RELEASE_TAG=v$(cat VERSION) make release-sign
    ```
    Produces: `SHA256SUMS`, `SHA256SUMS.minisig`, `SHA256SUMS.asc`
 
@@ -52,20 +56,30 @@ export PGP_KEY_ID=security@fulmenhq.dev  # or your-subkey-id!
 
 5. **Copy release notes**
    ```bash
-   RELEASE_TAG=vYYYY.MM.DD make release-notes
+   RELEASE_TAG=v$(cat VERSION) make release-notes
    ```
 
 6. **Upload signatures and keys**
    ```bash
-   RELEASE_TAG=vYYYY.MM.DD make release-upload
+   RELEASE_TAG=v$(cat VERSION) make release-upload
    ```
 
 ## 3. Post-Release
 
-- [ ] Verify release: `gh release view vYYYY.MM.DD`
+- [ ] Verify release: `gh release view v$(cat VERSION)`
 - [ ] Test install script: `curl -sSfL .../install-sfetch.sh | bash -s -- --dry-run`
+- [ ] Verify binary version: `sfetch --version` shows correct version
 - [ ] Update downstream package manifests (Homebrew/Scoop) if needed
 - [ ] Announce release
+
+## 4. Post-Release Version Bump (optional)
+
+After release, optionally bump VERSION for next development cycle:
+```bash
+echo "0.3.0" > VERSION
+git add VERSION
+git commit -m "chore: bump version to 0.3.0-dev"
+```
 
 ## Key Rotation Reminder
 
@@ -73,3 +87,11 @@ If rotating signing keys, also update:
 - [ ] `scripts/install-sfetch.sh` - embedded `SFETCH_MINISIGN_PUBKEY`
 - [ ] `README.md` - verification snippet public key
 - [ ] See `docs/security/signing-runbook.md` for full rotation checklist
+
+## Versioning Reference
+
+- **Patch** (0.2.1): Bug fixes, security patches
+- **Minor** (0.3.0): New features, backward-compatible
+- **Major** (1.0.0): Breaking changes
+
+See [ADR-0001](docs/adr/adr-0001-semver-versioning.md) for versioning policy.

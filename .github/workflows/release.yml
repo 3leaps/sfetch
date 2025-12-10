@@ -62,10 +62,20 @@ jobs:
             goarch: amd64
           - goos: windows
             goarch: arm64
-    env:
-      VERSION: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate VERSION matches tag
+        run: |
+          FILE_VERSION=$(cat VERSION)
+          TAG_VERSION=${GITHUB_REF_NAME#v}
+          echo "VERSION file: $FILE_VERSION"
+          echo "Git tag: $TAG_VERSION"
+          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
+            MSG="VERSION ($FILE_VERSION) != tag ($TAG_VERSION)"
+            echo "::error::$MSG"
+            exit 1
+          fi
 
       - uses: actions/setup-go@v5
         with:
@@ -86,7 +96,7 @@ jobs:
 
 
       - name: Build
-        run: make build VERSION=${VERSION}
+        run: make build
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}

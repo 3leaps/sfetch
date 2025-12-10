@@ -342,6 +342,39 @@ func TestSignatureFormatFromExtension(t *testing.T) {
 	}
 }
 
+func TestInferAssetClassification(t *testing.T) {
+	tests := []struct {
+		name     string
+		wantType AssetType
+		wantFmt  ArchiveFormat
+	}{
+		{"sfetch_darwin_arm64.tar.gz", AssetTypeArchive, ArchiveFormatTarGz},
+		{"tool.tgz", AssetTypeArchive, ArchiveFormatTarGz},
+		{"tool.tar.xz", AssetTypeArchive, ArchiveFormatTarXz},
+		{"tool.tar.bz2", AssetTypeArchive, ArchiveFormatTarBz2},
+		{"tool.tar", AssetTypeArchive, ArchiveFormatTar},
+		{"tool.zip", AssetTypeArchive, ArchiveFormatZip},
+		{"install.sh", AssetTypeRaw, ""},
+		{"bootstrap.py", AssetTypeRaw, ""},
+		{"kubectl", AssetTypeRaw, ""},
+		{"terraform.exe", AssetTypeRaw, ""},
+		{"package.deb", AssetTypePackage, ""},
+		{"package.rpm", AssetTypePackage, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cls := inferAssetClassification(tt.name)
+			if cls.Type != tt.wantType {
+				t.Fatalf("Type = %s, want %s", cls.Type, tt.wantType)
+			}
+			if cls.ArchiveFormat != tt.wantFmt {
+				t.Fatalf("ArchiveFormat = %s, want %s", cls.ArchiveFormat, tt.wantFmt)
+			}
+		})
+	}
+}
+
 func TestAutoDetectMinisignKeyAsset(t *testing.T) {
 	tests := []struct {
 		name   string
