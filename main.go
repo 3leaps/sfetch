@@ -65,6 +65,17 @@ const (
 // minisignPubkeyRegex matches a valid minisign public key line (with or without comment header)
 var minisignPubkeyRegex = regexp.MustCompile(`^RW[A-Za-z0-9+/]{54}$`)
 
+// Embedded trust anchors for self-verification and transparency.
+// Users can compare these against keys published at:
+//   - https://github.com/3leaps/sfetch/releases (sfetch-minisign.pub)
+//   - scripts/install-sfetch.sh (SFETCH_MINISIGN_PUBKEY)
+//
+// Changing these keys requires updating both this file and install-sfetch.sh.
+const (
+	EmbeddedMinisignPubkey = "RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
+	EmbeddedMinisignKeyID  = "3leaps/sfetch release signing key"
+)
+
 // minisignSecretkeyPrefixes are known prefixes for secret key files
 var minisignSecretkeyPrefixes = []string{
 	"RWQAAEIy", // unencrypted secret key
@@ -772,7 +783,8 @@ func main() {
 	pgpKeyAsset := flag.String("pgp-key-asset", "", "release asset name for ASCII-armored PGP public key")
 	gpgBin := flag.String("gpg-bin", "gpg", "path to gpg executable")
 	key := flag.String("key", "", "ed25519 pubkey hex (32 bytes)")
-	selfVerify := flag.Bool("self-verify", false, "self-verify mode")
+	selfVerify := flag.Bool("self-verify", false, "print instructions to verify this binary externally")
+	showTrustAnchors := flag.Bool("show-trust-anchors", false, "print embedded public keys (use --json for JSON output)")
 	dryRun := flag.Bool("dry-run", false, "assess release verification without downloading")
 	provenance := flag.Bool("provenance", false, "output provenance record JSON to stderr")
 	provenanceFile := flag.String("provenance-file", "", "write provenance record to file (implies --provenance)")
@@ -814,7 +826,7 @@ func main() {
 		}
 
 		fmt.Fprintln(out, "\nTools & validation:")
-		for _, name := range []string{"skip-tools-check", "verify-minisign-pubkey", "json"} {
+		for _, name := range []string{"skip-tools-check", "verify-minisign-pubkey", "self-verify", "show-trust-anchors", "json"} {
 			printFlag(name)
 		}
 
@@ -826,20 +838,11 @@ func main() {
 
 	flag.Parse()
 
+	// Handle --self-verify: print verification instructions and exit
 	if *selfVerify {
-		*repo = "3leaps/sfetch"
-		*latest = true
-		*output = ""
-		*destDir = ""
+		printSelfVerify(*jsonOut)
+		return
 	}
-
-	_ = *output     // TODO
-	_ = *assetRegex // TODO
-	_ = *key        // TODO
-	_ = *destDir    // TODO
-	_ = *cacheDir   // TODO
-	_ = *selfVerify // TODO
-	_ = *jsonOut    // TODO
 
 	// Validate flag combinations
 	if *insecure && *requireMinisign {
@@ -873,6 +876,23 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Fprintf(os.Stderr, "OK: %s is a valid minisign public key\n", *verifyMinisignPubkey)
+		return
+	}
+
+	// Handle --show-trust-anchors: output embedded keys and exit
+	if *showTrustAnchors {
+		if *jsonOut {
+			trustJSON := map[string]interface{}{
+				"minisign": map[string]string{
+					"pubkey": EmbeddedMinisignPubkey,
+					"keyId":  EmbeddedMinisignKeyID,
+				},
+			}
+			data, _ := json.MarshalIndent(trustJSON, "", "  ")
+			fmt.Println(string(data))
+		} else {
+			fmt.Printf("minisign:%s\n", EmbeddedMinisignPubkey)
+		}
 		return
 	}
 
@@ -2309,4 +2329,224 @@ func trimCommandOutput(out string) string {
 		return clean[:maxCommandError] + "..."
 	}
 	return clean
+}
+
+// selfVerifyAssetName returns the expected asset filename for the current platform.
+func selfVerifyAssetName() string {
+	if runtime.GOOS == "windows" {
+		return fmt.Sprintf("sfetch_%s_%s.zip", runtime.GOOS, runtime.GOARCH)
+	}
+	return fmt.Sprintf("sfetch_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+}
+
+// fetchExpectedHash fetches SHA256SUMS from GitHub and extracts the hash for the given asset.
+// Returns (hash, error). On network failure, returns ("", err) but caller can continue with instructions.
+func fetchExpectedHash(ver, assetName string) (string, error) {
+	if ver == "dev" {
+		return "", fmt.Errorf("dev build, no published checksums")
+	}
+
+	url := fmt.Sprintf("https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS", ver)
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	// #nosec G107 -- url GitHub releases fmt.Sprintf controlled
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("network unavailable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d fetching SHA256SUMS", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read SHA256SUMS: %w", err)
+	}
+
+	// Parse SHA256SUMS format: "<hash>  <filename>" or "<hash> <filename>"
+	lines := strings.Split(string(body), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			hash := fields[0]
+			filename := fields[len(fields)-1]
+			if filename == assetName && len(hash) == 64 {
+				return strings.ToLower(hash), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("asset %s not found in SHA256SUMS", assetName)
+}
+
+// checksumCommand returns the platform-appropriate checksum command.
+func checksumCommand() string {
+	// macOS uses shasum, Linux uses sha256sum
+	if runtime.GOOS == "darwin" {
+		return "shasum -a 256"
+	}
+	return "sha256sum"
+}
+
+// printSelfVerify outputs verification instructions for the running binary.
+func printSelfVerify(jsonOutput bool) {
+	assetName := selfVerifyAssetName()
+	ver := version
+
+	// Attempt to fetch expected hash (optional, may fail on network issues or dev builds)
+	expectedHash, hashErr := fetchExpectedHash(ver, assetName)
+
+	if jsonOutput {
+		printSelfVerifyJSON(ver, assetName, expectedHash, hashErr)
+		return
+	}
+
+	// Header
+	fmt.Printf("\nsfetch %s (%s/%s)\n", ver, runtime.GOOS, runtime.GOARCH)
+	fmt.Printf("Built: %s\n", buildTime)
+	fmt.Printf("Commit: %s\n", gitCommit)
+
+	// Dev build early exit
+	if ver == "dev" {
+		fmt.Println("\nThis is a development build. No published checksums available.")
+		fmt.Println("To verify a release build, install from: https://github.com/3leaps/sfetch/releases")
+		fmt.Println()
+		fmt.Println("Embedded trust anchors:")
+		fmt.Printf("  Minisign pubkey: %s\n", EmbeddedMinisignPubkey)
+		fmt.Printf("  Key ID: %s\n", EmbeddedMinisignKeyID)
+		return
+	}
+
+	// Release URLs
+	fmt.Println()
+	fmt.Println("Release URLs:")
+	fmt.Printf("  SHA256SUMS:         https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS\n", ver)
+	fmt.Printf("  SHA256SUMS.minisig: https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS.minisig\n", ver)
+	fmt.Printf("  SHA256SUMS.asc:     https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS.asc\n", ver)
+
+	// Expected asset
+	fmt.Println()
+	fmt.Printf("Expected asset: %s\n", assetName)
+
+	// Expected hash
+	fmt.Println()
+	if hashErr != nil {
+		fmt.Printf("Expected SHA256: (network unavailable - fetch manually from URLs above)\n")
+	} else {
+		fmt.Printf("Expected SHA256 (fetched from release):\n")
+		fmt.Printf("  %s\n", expectedHash)
+	}
+
+	// Checksum verification commands
+	fmt.Println()
+	fmt.Println("Verify checksum externally:")
+	if runtime.GOOS == "darwin" {
+		fmt.Println("  # macOS")
+		fmt.Println("  shasum -a 256 $(which sfetch)")
+	} else if runtime.GOOS == "windows" {
+		fmt.Println("  # Windows (PowerShell)")
+		fmt.Println("  Get-FileHash (Get-Command sfetch).Source -Algorithm SHA256")
+	} else {
+		fmt.Println("  # Linux")
+		fmt.Println("  sha256sum $(which sfetch)")
+	}
+
+	// Minisign verification
+	fmt.Println()
+	fmt.Println("Verify signature with minisign:")
+	fmt.Printf("  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS -o /tmp/SHA256SUMS\n", ver)
+	fmt.Printf("  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS.minisig -o /tmp/SHA256SUMS.minisig\n", ver)
+	fmt.Printf("  minisign -Vm /tmp/SHA256SUMS -P %s\n", EmbeddedMinisignPubkey)
+
+	// GPG verification
+	fmt.Println()
+	fmt.Println("Verify signature with GPG:")
+	fmt.Printf("  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS -o /tmp/SHA256SUMS\n", ver)
+	fmt.Printf("  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS.asc -o /tmp/SHA256SUMS.asc\n", ver)
+	fmt.Printf("  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/sfetch-release-signing-key.asc | gpg --import\n", ver)
+	fmt.Println("  gpg --verify /tmp/SHA256SUMS.asc /tmp/SHA256SUMS")
+
+	// Trust anchors
+	fmt.Println()
+	fmt.Println("Embedded trust anchors:")
+	fmt.Printf("  Minisign pubkey: %s\n", EmbeddedMinisignPubkey)
+	fmt.Printf("  Key ID: %s\n", EmbeddedMinisignKeyID)
+
+	// Security warning
+	fmt.Println()
+	fmt.Println("WARNING: A compromised binary could lie. Run these commands yourself.")
+}
+
+// SelfVerifyOutput is the JSON structure for --self-verify --json output.
+type SelfVerifyOutput struct {
+	Version     string           `json:"version"`
+	Platform    string           `json:"platform"`
+	BuildTime   string           `json:"buildTime"`
+	GitCommit   string           `json:"gitCommit"`
+	IsDev       bool             `json:"isDev"`
+	Asset       string           `json:"asset,omitempty"`
+	ExpectedSHA string           `json:"expectedSHA256,omitempty"`
+	HashError   string           `json:"hashError,omitempty"`
+	URLs        *SelfVerifyURLs  `json:"urls,omitempty"`
+	TrustAnchor *TrustAnchorInfo `json:"trustAnchor"`
+	Commands    *VerifyCommands  `json:"commands,omitempty"`
+	Warning     string           `json:"warning,omitempty"`
+}
+
+type SelfVerifyURLs struct {
+	SHA256SUMS        string `json:"sha256sums"`
+	SHA256SUMSMinisig string `json:"sha256sumsMinisig"`
+	SHA256SUMSAsc     string `json:"sha256sumsAsc"`
+}
+
+type TrustAnchorInfo struct {
+	MinisignPubkey string `json:"minisignPubkey"`
+	KeyID          string `json:"keyId"`
+}
+
+type VerifyCommands struct {
+	Checksum string `json:"checksum"`
+	Minisign string `json:"minisign"`
+}
+
+func printSelfVerifyJSON(ver, assetName, expectedHash string, hashErr error) {
+	output := SelfVerifyOutput{
+		Version:   ver,
+		Platform:  fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+		BuildTime: buildTime,
+		GitCommit: gitCommit,
+		IsDev:     ver == "dev",
+		TrustAnchor: &TrustAnchorInfo{
+			MinisignPubkey: EmbeddedMinisignPubkey,
+			KeyID:          EmbeddedMinisignKeyID,
+		},
+		Warning: "A compromised binary could lie. Run verification commands yourself.",
+	}
+
+	if ver != "dev" {
+		output.Asset = assetName
+		if hashErr != nil {
+			output.HashError = hashErr.Error()
+		} else {
+			output.ExpectedSHA = expectedHash
+		}
+		output.URLs = &SelfVerifyURLs{
+			SHA256SUMS:        fmt.Sprintf("https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS", ver),
+			SHA256SUMSMinisig: fmt.Sprintf("https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS.minisig", ver),
+			SHA256SUMSAsc:     fmt.Sprintf("https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS.asc", ver),
+		}
+		output.Commands = &VerifyCommands{
+			Checksum: checksumCommand() + " $(which sfetch)",
+			Minisign: fmt.Sprintf("minisign -Vm /tmp/SHA256SUMS -P %s", EmbeddedMinisignPubkey),
+		}
+	}
+
+	data, _ := json.MarshalIndent(output, "", "  ")
+	fmt.Println(string(data))
 }

@@ -52,6 +52,32 @@ Only `SHA256SUMS` is signed (not individual files). Users verify the signature o
 
 See [docs/security/signing-runbook.md](security/signing-runbook.md) for detailed workflow.
 
+## Verifying Your Installation
+
+After installing sfetch, you can verify the binary matches the signed release:
+
+```bash
+sfetch --self-verify
+```
+
+This prints:
+- Version and build info compiled into the binary
+- Release URLs for SHA256SUMS and signature files
+- Expected asset filename and SHA256 hash (fetched from GitHub)
+- Platform-specific commands to verify the checksum externally
+- Commands to verify the signature with minisign or GPG
+- The embedded trust anchor (minisign public key)
+
+**WARNING: A compromised binary could lie. Run these commands yourself.**
+
+The verification commands must be run externally (not by sfetch itself). A binary cannot reliably verify itself.
+
+For machine-readable output:
+```bash
+sfetch --show-trust-anchors        # plain: minisign:<key>
+sfetch --show-trust-anchors --json # JSON with pubkey and keyId
+```
+
 ## Future
 
 - Fuzz sig/checksum.

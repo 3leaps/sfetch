@@ -33,6 +33,9 @@ SFETCH_API="https://api.github.com/repos/${SFETCH_REPO}/releases"
 # Embedded trust anchor - minisign public key for verifying releases
 # This key is pinned here to prevent TOCTOU attacks where an attacker
 # could replace both the release artifacts and the verification key.
+#
+# IMPORTANT: This key must match EmbeddedMinisignPubkey in main.go
+# Update both when rotating keys (see docs/security/signing-runbook.md)
 SFETCH_MINISIGN_PUBKEY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
 
 # -----------------------------------------------------------------------------
@@ -261,6 +264,7 @@ install_binary() {
 	chmod +x "$dest"
 
 	log "Installed ${binary_name} to ${dest}"
+	log "To verify this installation later: sfetch --self-verify"
 
 	# Path advice
 	case ":$PATH:" in

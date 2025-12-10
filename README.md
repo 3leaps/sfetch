@@ -53,6 +53,17 @@ sfetch --repo BurntSushi/ripgrep --latest --dry-run
 sfetch --repo 3leaps/sfetch --latest --dest-dir /tmp --provenance-file audit.json
 ```
 
+**Verify installed binary** - print instructions to verify your sfetch installation:
+```bash
+sfetch --self-verify
+```
+
+For machine-readable trust anchors:
+```bash
+sfetch --show-trust-anchors        # plain: minisign:<key>
+sfetch --show-trust-anchors --json # JSON with pubkey and keyId
+```
+
 See [docs/examples.md](docs/examples.md) for comprehensive real-world examples.
 
 ### Build, versioning & install

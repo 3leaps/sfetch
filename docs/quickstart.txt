@@ -44,4 +44,8 @@ Safety defaults:
 - Signatures are mandatory unless `-skip-sig` (testing only)
 - PGP keys import into a temporary GNUPGHOME and are deleted after verification
 
+Verification:
+  --self-verify        print instructions to verify this binary externally
+  --show-trust-anchors print embedded public keys (use --json for JSON output)
+
 Need more detail? Re-run with `sfetch -help` for flag descriptions.
