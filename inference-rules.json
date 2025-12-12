@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "platformExclusions": {
+    "darwin": [".exe", ".msi"],
+    "linux": [".exe", ".msi", ".dmg", ".pkg"],
+    "windows": [],
+    "freebsd": [".exe", ".msi", ".dmg", ".pkg"]
+  },
+  "platformTokens": {
+    "darwin": ["darwin", "macos", "macosx", "osx", "apple"],
+    "linux": ["linux", "ubuntu", "debian", "alpine", "musl", "musllinux", "gnu"],
+    "windows": ["windows", "win", "win32", "win64"],
+    "freebsd": ["freebsd", "bsd"]
+  },
+  "archTokens": {
+    "amd64": ["amd64", "x86_64", "x64", "64bit", "intel", "x86-64"],
+    "arm64": ["arm64", "aarch64", "arm64e"],
+    "386": ["386", "i386", "i686", "x86", "32bit"],
+    "arm": ["arm", "armv7", "armv7l", "armhf"]
+  },
+  "formatPreference": ["raw", "archive", "package"],
+  "archiveExtensions": [".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".zip", ".7z"]
+}

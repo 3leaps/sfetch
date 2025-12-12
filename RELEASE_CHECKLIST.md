@@ -41,11 +41,12 @@ export PGP_KEY_ID=security@fulmenhq.dev  # or your-subkey-id!
    RELEASE_TAG=v$(cat VERSION) make release-download
    ```
 
-3. **Sign SHA256SUMS** (generates checksums, signs with minisign + PGP)
+3. **Generate & sign checksum manifests** (`SHA256SUMS`, `SHA2-512SUMS`) with minisign + PGP
    ```bash
+   RELEASE_TAG=v$(cat VERSION) make release-checksums
    RELEASE_TAG=v$(cat VERSION) make release-sign
    ```
-   Produces: `SHA256SUMS`, `SHA256SUMS.minisig`, `SHA256SUMS.asc`
+   Produces: `SHA256SUMS`, `SHA2-512SUMS` plus `.minisig`/`.asc`
 
 4. **Export public keys** (auto-validates before copying)
    ```bash

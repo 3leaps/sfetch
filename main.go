@@ -20,6 +20,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jedisct1/go-minisign"
@@ -102,6 +103,21 @@ const (
 var minisignSecretkeyPrefixes = []string{
 	"RWQAAEIy", // unencrypted secret key
 	"RWRTY0Iy", // encrypted secret key
+}
+
+//go:embed inference-rules.json
+var defaultInferenceRulesJSON []byte
+
+// InferenceRules drive tie-breaking for smart asset selection. If rule volume grows,
+// we may externalize user overrides (e.g., ~/.config/sfetch) while keeping embedded
+// defaults auditable and versioned in Git.
+type InferenceRules struct {
+	Version            string              `json:"version"`
+	PlatformExclusions map[string][]string `json:"platformExclusions"`
+	PlatformTokens     map[string][]string `json:"platformTokens"`
+	ArchTokens         map[string][]string `json:"archTokens"`
+	FormatPreference   []string            `json:"formatPreference"`
+	ArchiveExtensions  []string            `json:"archiveExtensions"`
 }
 
 // ProvenanceRecord captures verification actions for audit/compliance.
@@ -708,6 +724,12 @@ var defaults = RepoConfig{
 		"{{asset}}.sha256.txt",
 		"{{base}}.sha256",
 		"{{base}}.sha256.txt",
+		"SHA2-256SUMS",
+		"SHA2-512SUMS",
+		"SHA2-256SUMS.txt",
+		"SHA2-512SUMS.txt",
+		"SHA512SUMS",
+		"SHA512SUMS.txt",
 		"{{binary}}_{{versionNoPrefix}}_checksums.txt",
 		"{{binary}}_{{version}}_checksums.txt",
 		"{{binary}}_checksums.txt",
@@ -721,14 +743,26 @@ var defaults = RepoConfig{
 	},
 	// Workflow A: signatures over checksum files (preferred)
 	ChecksumSigCandidates: []string{
+		"SHA2-256SUMS.minisig",
+		"SHA2-512SUMS.minisig",
 		"SHA256SUMS.minisig",
+		"SHA512SUMS.minisig",
 		"SHA256SUMS.txt.minisig",
 		"checksums.txt.minisig",
 		"CHECKSUMS.minisig",
+		"SHA2-256SUMS.asc",
+		"SHA2-512SUMS.asc",
 		"SHA256SUMS.asc",
+		"SHA512SUMS.asc",
 		"SHA256SUMS.txt.asc",
 		"checksums.txt.asc",
 		"CHECKSUMS.asc",
+		"SHA2-256SUMS.sig",
+		"SHA2-512SUMS.sig",
+		"SHA256SUMS.sig",
+		"SHA512SUMS.sig",
+		"checksums.txt.sig",
+		"CHECKSUMS.sig",
 	},
 	// Workflow B: per-asset signatures
 	SignatureCandidates: []string{
@@ -744,7 +778,7 @@ var defaults = RepoConfig{
 	SignatureFormats: SignatureFormats{
 		Minisign: []string{".minisig"},
 		PGP:      []string{".asc", ".gpg", ".sig.asc"},
-		Ed25519:  []string{".sig", ".sig.ed25519"},
+		Ed25519:  []string{".sig.ed25519"},
 	},
 	PreferChecksumSig: boolPtr(true),
 }
@@ -1689,7 +1723,7 @@ type templateContext struct {
 
 func selectAsset(rel *Release, cfg *RepoConfig, goos, goarch, assetMatch, assetRegex string) (*Asset, error) {
 	if assetMatch != "" {
-		return matchWithMatch(rel.Assets, assetMatch)
+		return matchWithMatch(rel.Assets, assetMatch, cfg, goos, goarch)
 	}
 
 	if assetRegex != "" {
@@ -1697,7 +1731,7 @@ func selectAsset(rel *Release, cfg *RepoConfig, goos, goarch, assetMatch, assetR
 		if err != nil {
 			return nil, fmt.Errorf("invalid --asset-regex: %w", err)
 		}
-		return matchWithRegex(rel.Assets, re)
+		return matchWithRegex(rel.Assets, re, cfg, goos, goarch)
 	}
 
 	if len(cfg.AssetPatterns) > 0 {
@@ -1709,24 +1743,24 @@ func selectAsset(rel *Release, cfg *RepoConfig, goos, goarch, assetMatch, assetR
 	return pickByHeuristics(rel.Assets, cfg, goos, goarch)
 }
 
-func matchWithRegex(assets []Asset, re *regexp.Regexp) (*Asset, error) {
-	var selected *Asset
+func matchWithRegex(assets []Asset, re *regexp.Regexp, cfg *RepoConfig, goos, goarch string) (*Asset, error) {
+	var matches []Asset
 	for i := range assets {
 		if re.MatchString(assets[i].Name) {
-			if selected != nil {
-				return nil, fmt.Errorf("multiple assets match regex: %s and %s", selected.Name, assets[i].Name)
-			}
-			selected = &assets[i]
+			matches = append(matches, assets[i])
 		}
 	}
-	if selected == nil {
+	if len(matches) == 0 {
 		return nil, fmt.Errorf("no asset matches provided regex")
 	}
-	return selected, nil
+	if len(matches) == 1 {
+		return &matches[0], nil
+	}
+	return pickWithInference(matches, cfg, goos, goarch, "regex")
 }
 
-func matchWithMatch(assets []Asset, pattern string) (*Asset, error) {
-	var selected *Asset
+func matchWithMatch(assets []Asset, pattern string, cfg *RepoConfig, goos, goarch string) (*Asset, error) {
+	var matches []Asset
 	p := strings.ToLower(pattern)
 	isGlob := strings.ContainsAny(pattern, "*?[")
 	for i := range assets {
@@ -1740,16 +1774,16 @@ func matchWithMatch(assets []Asset, pattern string) (*Asset, error) {
 			match = true
 		}
 		if match {
-			if selected != nil {
-				return nil, fmt.Errorf("multiple assets match pattern: %s and %s", selected.Name, assets[i].Name)
-			}
-			selected = &assets[i]
+			matches = append(matches, assets[i])
 		}
 	}
-	if selected == nil {
+	if len(matches) == 0 {
 		return nil, fmt.Errorf("no asset matches provided pattern")
 	}
-	return selected, nil
+	if len(matches) == 1 {
+		return &matches[0], nil
+	}
+	return pickWithInference(matches, cfg, goos, goarch, "pattern")
 }
 
 func matchWithPatterns(assets []Asset, cfg *RepoConfig, goos, goarch string) *Asset {
@@ -1759,7 +1793,7 @@ func matchWithPatterns(assets []Asset, cfg *RepoConfig, goos, goarch string) *As
 		if err != nil {
 			continue
 		}
-		match, err := matchWithRegex(assets, re)
+		match, err := matchWithRegex(assets, re, cfg, goos, goarch)
 		if err == nil {
 			return match
 		}
@@ -1767,7 +1801,40 @@ func matchWithPatterns(assets []Asset, cfg *RepoConfig, goos, goarch string) *As
 	return nil
 }
 
+func pickWithInference(candidates []Asset, cfg *RepoConfig, goos, goarch, source string) (*Asset, error) {
+	rules, _ := loadInferenceRules()
+	filtered := filterNonSupplemental(candidates)
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("no asset matches provided %s", source)
+	}
+	if rules != nil {
+		filtered = applyInferenceRules(filtered, rules, goos, goarch, cfg.ArchiveExtensions)
+		if len(filtered) == 1 {
+			return &filtered[0], nil
+		}
+	}
+	if len(filtered) == 1 {
+		return &filtered[0], nil
+	}
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("no asset matches provided %s", source)
+	}
+	return nil, fmt.Errorf("multiple assets tie for selection: %s and %s", filtered[0].Name, filtered[1].Name)
+}
+
 func pickByHeuristics(assets []Asset, cfg *RepoConfig, goos, goarch string) (*Asset, error) {
+	rules, _ := loadInferenceRules()
+	candidates := filterNonSupplemental(assets)
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no asset matches GOOS/GOARCH heuristics")
+	}
+	if rules != nil {
+		candidates = applyInferenceRules(candidates, rules, goos, goarch, cfg.ArchiveExtensions)
+		if len(candidates) == 1 {
+			return &candidates[0], nil
+		}
+	}
+
 	goosAliases := aliasList(goos, goosAliasTable)
 	archAliases := aliasList(goarch, archAliasTable)
 	binaryToken := strings.ToLower(cfg.BinaryName)
@@ -1853,6 +1920,210 @@ func looksLikeSupplemental(name string) bool {
 		return true
 	}
 	return strings.Contains(lower, "sha256") || strings.Contains(lower, "checksum") || strings.Contains(lower, "sig") || strings.Contains(lower, "signature")
+}
+
+func filterNonSupplemental(assets []Asset) []Asset {
+	var filtered []Asset
+	for _, asset := range assets {
+		if looksLikeSupplemental(asset.Name) {
+			continue
+		}
+		filtered = append(filtered, asset)
+	}
+	return filtered
+}
+
+var (
+	inferenceRulesOnce sync.Once
+	inferenceRules     *InferenceRules
+	inferenceRulesErr  error
+)
+
+func loadInferenceRules() (*InferenceRules, error) {
+	inferenceRulesOnce.Do(func() {
+		if len(defaultInferenceRulesJSON) == 0 {
+			return
+		}
+		var rules InferenceRules
+		if err := json.Unmarshal(defaultInferenceRulesJSON, &rules); err != nil {
+			inferenceRulesErr = fmt.Errorf("parse inference rules: %w", err)
+			return
+		}
+		inferenceRules = &rules
+	})
+	return inferenceRules, inferenceRulesErr
+}
+
+func applyInferenceRules(candidates []Asset, rules *InferenceRules, goos, goarch string, cfgArchiveExts []string) []Asset {
+	goosLower := strings.ToLower(goos)
+	goarchLower := strings.ToLower(goarch)
+	archiveExts := mergeExtensions(rules.ArchiveExtensions, cfgArchiveExts)
+
+	candidates = excludeByPlatform(candidates, rules.PlatformExclusions[goosLower])
+	if len(candidates) == 0 {
+		return candidates
+	}
+
+	if platformSpecific := filterByTokens(candidates, rules.PlatformTokens[goosLower]); len(platformSpecific) > 0 {
+		candidates = platformSpecific
+	}
+
+	if len(candidates) > 1 {
+		if archSpecific := filterByTokens(candidates, rules.ArchTokens[goarchLower]); len(archSpecific) > 0 {
+			candidates = archSpecific
+		}
+	}
+
+	if len(candidates) > 1 {
+		candidates = preferRawOverArchive(candidates, archiveExts)
+	}
+
+	if len(candidates) > 1 {
+		candidates = preferFormatPreference(candidates, rules.FormatPreference)
+	}
+
+	return candidates
+}
+
+func excludeByPlatform(assets []Asset, excludedExts []string) []Asset {
+	if len(excludedExts) == 0 {
+		return assets
+	}
+	var out []Asset
+	for _, asset := range assets {
+		lower := strings.ToLower(asset.Name)
+		skip := false
+		for _, ext := range excludedExts {
+			if ext == "" {
+				continue
+			}
+			if strings.HasSuffix(lower, strings.ToLower(ext)) {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			out = append(out, asset)
+		}
+	}
+	return out
+}
+
+func filterByTokens(assets []Asset, tokens []string) []Asset {
+	if len(tokens) == 0 {
+		return nil
+	}
+	var out []Asset
+	for _, asset := range assets {
+		if containsTokenCI(asset.Name, tokens) {
+			out = append(out, asset)
+		}
+	}
+	return out
+}
+
+func preferRawOverArchive(assets []Asset, archiveExts []string) []Asset {
+	baseToAssets := make(map[string][]Asset)
+	for _, asset := range assets {
+		base := trimExtensionCI(asset.Name, archiveExts)
+		baseToAssets[base] = append(baseToAssets[base], asset)
+	}
+
+	var out []Asset
+	for _, group := range baseToAssets {
+		if len(group) == 1 {
+			out = append(out, group[0])
+			continue
+		}
+		var raw []Asset
+		for _, asset := range group {
+			nameLower := strings.ToLower(asset.Name)
+			if !hasArchiveExtension(nameLower, archiveExts) {
+				raw = append(raw, asset)
+			}
+		}
+		if len(raw) > 0 {
+			out = append(out, raw...)
+		} else {
+			out = append(out, group...)
+		}
+	}
+	return out
+}
+
+func preferFormatPreference(assets []Asset, prefs []string) []Asset {
+	if len(prefs) == 0 {
+		return assets
+	}
+	classified := make(map[string][]Asset)
+	for _, asset := range assets {
+		cls := inferAssetClassification(asset.Name)
+		classified[string(cls.Type)] = append(classified[string(cls.Type)], asset)
+	}
+	for _, pref := range prefs {
+		if group := classified[pref]; len(group) > 0 {
+			return group
+		}
+	}
+	return assets
+}
+
+func containsTokenCI(name string, tokens []string) bool {
+	lower := strings.ToLower(name)
+	for _, tok := range tokens {
+		if tok == "" {
+			continue
+		}
+		if strings.Contains(lower, strings.ToLower(tok)) {
+			return true
+		}
+	}
+	return false
+}
+
+func trimExtensionCI(name string, exts []string) string {
+	lower := strings.ToLower(name)
+	for _, ext := range exts {
+		extLower := strings.ToLower(ext)
+		if extLower == "" {
+			continue
+		}
+		if strings.HasSuffix(lower, extLower) {
+			return name[:len(name)-len(extLower)]
+		}
+	}
+	return name
+}
+
+func hasArchiveExtension(name string, exts []string) bool {
+	for _, ext := range exts {
+		if ext == "" {
+			continue
+		}
+		if strings.HasSuffix(name, strings.ToLower(ext)) {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeExtensions(ruleExts, cfgExts []string) []string {
+	seen := make(map[string]struct{})
+	var merged []string
+	for _, arr := range [][]string{ruleExts, cfgExts} {
+		for _, ext := range arr {
+			extLower := strings.ToLower(ext)
+			if extLower == "" {
+				continue
+			}
+			if _, ok := seen[extLower]; ok {
+				continue
+			}
+			seen[extLower] = struct{}{}
+			merged = append(merged, extLower)
+		}
+	}
+	return merged
 }
 
 func containsAny(haystack string, needles []string) bool {
@@ -1962,6 +2233,7 @@ func findChecksumSignature(assets []Asset, cfg *RepoConfig) (*Asset, string) {
 				// Extract the checksum file name by removing the signature extension
 				checksumName := strings.TrimSuffix(candidate, ".minisig")
 				checksumName = strings.TrimSuffix(checksumName, ".asc")
+				checksumName = strings.TrimSuffix(checksumName, ".sig")
 				return &assets[i], checksumName
 			}
 		}
@@ -1973,6 +2245,15 @@ func findChecksumSignature(assets []Asset, cfg *RepoConfig) (*Asset, string) {
 // Returns sigFormatMinisign, sigFormatPGP, sigFormatBinary, or empty string if unknown.
 func signatureFormatFromExtension(filename string, formats SignatureFormats) string {
 	lower := strings.ToLower(filename)
+
+	// Special-case .sig: checksum-level sigs use PGP, per-asset default to ed25519
+	if strings.HasSuffix(lower, ".sig") {
+		if looksLikeChecksumSig(lower) {
+			return sigFormatPGP
+		}
+		return sigFormatBinary
+	}
+
 	for _, ext := range formats.Minisign {
 		if strings.HasSuffix(lower, ext) {
 			return sigFormatMinisign
@@ -1989,6 +2270,11 @@ func signatureFormatFromExtension(filename string, formats SignatureFormats) str
 		}
 	}
 	return ""
+}
+
+func looksLikeChecksumSig(name string) bool {
+	// Heuristic: checksum manifests typically end with "sums" or "checksums"
+	return strings.Contains(name, "sums.sig") || strings.Contains(name, "checksums.sig")
 }
 
 func resolvePGPKey(localPath, keyURL, keyAsset string, assets []Asset, tmpDir string) (string, error) {

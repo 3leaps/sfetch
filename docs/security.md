@@ -34,7 +34,7 @@ Inline `#nosec` comments on 12 sites for line-granular audit.
 
 ## Manual release signing
 
-CI uploads unsigned archives only. Maintainers sign `SHA256SUMS` locally with minisign (primary) and optionally PGP:
+CI uploads unsigned archives only. Maintainers generate and sign checksum manifests (`SHA256SUMS`, `SHA2-512SUMS`) locally with minisign (primary) and optionally PGP:
 
 ```bash
 export MINISIGN_KEY=/path/to/key.key
@@ -48,7 +48,7 @@ RELEASE_TAG=v0.2.0 make release-notes
 RELEASE_TAG=v0.2.0 make release-upload
 ```
 
-Only `SHA256SUMS` is signed (not individual files). Users verify the signature on `SHA256SUMS`, then verify archive checksums against it. This is standard practice - signing individual files would be redundant.
+Only the checksum manifests are signed (not individual files). Users verify the signature on `SHA256SUMS`/`SHA2-512SUMS`, then verify archive checksums against them. This is standard practice - signing individual files would be redundant.
 
 See [docs/security/signing-runbook.md](security/signing-runbook.md) for detailed workflow.
 

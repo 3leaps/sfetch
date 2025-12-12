@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sfetch.dev/schemas/inference-rules.schema.json",
+  "title": "sfetch Inference Rules",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+$",
+      "description": "Schema version (1.x)"
+    },
+    "platformExclusions": {
+      "type": "object",
+      "description": "Extensions to exclude per platform",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "platformTokens": {
+      "type": "object",
+      "description": "Platform name variations",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "archTokens": {
+      "type": "object",
+      "description": "Architecture name variations",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "formatPreference": {
+      "type": "array",
+      "description": "Format preference order (first = highest)",
+      "items": { "type": "string" }
+    },
+    "archiveExtensions": {
+      "type": "array",
+      "description": "Known archive extensions",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["version", "platformExclusions", "formatPreference"],
+  "additionalProperties": false
+}

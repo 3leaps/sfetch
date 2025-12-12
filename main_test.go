@@ -283,6 +283,21 @@ func TestFindChecksumSignature(t *testing.T) {
 			t.Errorf("expected nil, got %s", sigAsset.Name)
 		}
 	})
+
+	t.Run("strips .sig extension", func(t *testing.T) {
+		cfg := defaults
+		assets := []Asset{
+			{Name: "SHA2-256SUMS"},
+			{Name: "SHA2-256SUMS.sig"},
+		}
+		sigAsset, checksumName := findChecksumSignature(assets, &cfg)
+		if sigAsset == nil {
+			t.Fatal("expected to find checksum signature")
+		}
+		if checksumName != "SHA2-256SUMS" {
+			t.Errorf("expected checksum name SHA2-256SUMS, got %s", checksumName)
+		}
+	})
 }
 
 func TestMergeConfigPreferChecksumSig(t *testing.T) {
@@ -329,6 +344,7 @@ func TestSignatureFormatFromExtension(t *testing.T) {
 		{"binary.tar.gz.asc", sigFormatPGP},
 		{"binary.tar.gz.sig", sigFormatBinary},
 		{"binary.tar.gz.sig.ed25519", sigFormatBinary},
+		{"SHA2-256SUMS.sig", sigFormatPGP},
 		{"unknown.txt", ""},
 	}
 
@@ -339,6 +355,36 @@ func TestSignatureFormatFromExtension(t *testing.T) {
 				t.Errorf("signatureFormatFromExtension(%q) = %q, want %q", tt.filename, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestApplyInferenceRulesPlatformExclusion(t *testing.T) {
+	rules := mustLoadInferenceRules(t)
+	assets := []Asset{{Name: "tool"}, {Name: "tool.exe"}}
+	out := applyInferenceRules(assets, rules, "darwin", "amd64", defaults.ArchiveExtensions)
+	if len(out) != 1 || out[0].Name != "tool" {
+		t.Fatalf("expected only tool after darwin exclusions, got %v", out)
+	}
+}
+
+func TestApplyInferenceRulesPreferRawOverArchive(t *testing.T) {
+	rules := mustLoadInferenceRules(t)
+	assets := []Asset{{Name: "yt-dlp_macos"}, {Name: "yt-dlp_macos.zip"}}
+	out := applyInferenceRules(assets, rules, "darwin", "arm64", defaults.ArchiveExtensions)
+	if len(out) != 1 || out[0].Name != "yt-dlp_macos" {
+		t.Fatalf("expected raw binary preferred, got %v", out)
+	}
+}
+
+func TestApplyInferenceRulesPlatformTokensCaseInsensitive(t *testing.T) {
+	rules := mustLoadInferenceRules(t)
+	assets := []Asset{
+		{Name: "gh_2.0.0_macOS_arm64.zip"},
+		{Name: "gh_2.0.0_linux_amd64.tar.gz"},
+	}
+	out := applyInferenceRules(assets, rules, "darwin", "arm64", defaults.ArchiveExtensions)
+	if len(out) != 1 || out[0].Name != "gh_2.0.0_macOS_arm64.zip" {
+		t.Fatalf("expected macOS asset selected, got %v", out)
 	}
 }
 
@@ -457,6 +503,18 @@ func TestAutoDetectMinisignKeyAsset(t *testing.T) {
 			}
 		})
 	}
+}
+
+func mustLoadInferenceRules(t *testing.T) *InferenceRules {
+	t.Helper()
+	rules, err := loadInferenceRules()
+	if err != nil {
+		t.Fatalf("loadInferenceRules: %v", err)
+	}
+	if rules == nil {
+		t.Fatalf("inference rules not loaded")
+	}
+	return rules
 }
 
 func TestAssessRelease(t *testing.T) {
@@ -913,6 +971,28 @@ func TestProvenanceSchemaValidity(t *testing.T) {
 	_, err := c.Compile("schemas/provenance.schema.json")
 	if err != nil {
 		t.Fatalf("provenance schema is not valid JSON Schema 2020-12: %v", err)
+	}
+}
+
+func TestInferenceRulesSchemaValidity(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	if _, err := c.Compile("schemas/inference-rules.schema.json"); err != nil {
+		t.Fatalf("inference rules schema is not valid JSON Schema 2020-12: %v", err)
+	}
+}
+
+func TestInferenceRulesDocumentValidates(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	schema, err := c.Compile("schemas/inference-rules.schema.json")
+	if err != nil {
+		t.Fatalf("compile schema: %v", err)
+	}
+	var doc interface{}
+	if err := json.Unmarshal(defaultInferenceRulesJSON, &doc); err != nil {
+		t.Fatalf("unmarshal inference-rules.json: %v", err)
+	}
+	if err := schema.Validate(doc); err != nil {
+		t.Fatalf("embedded inference-rules.json does not validate: %v", err)
 	}
 }
 

@@ -1,5 +1,65 @@
 # Release Notes
 
+## v0.2.2
+
+### Summary
+Smart asset selection (Phase 1) eliminates the need for `--asset-match` or `--asset-regex` for most repos, plus expanded checksum discovery for non-standard naming patterns.
+
+### Highlights
+
+**Smart Asset Selection**
+
+No more tie-breaking errors! sfetch now automatically selects the right asset:
+
+```bash
+# Before v0.2.2: Failed with "multiple assets tie"
+sfetch --repo yt-dlp/yt-dlp --latest --dest-dir ~/bin
+
+# After v0.2.2: Just works
+sfetch --repo yt-dlp/yt-dlp --latest --dest-dir ~/bin
+# → Selects yt-dlp_macos automatically
+```
+
+How it works:
+- **Platform exclusions:** `.exe` filtered out on darwin/linux
+- **Case-insensitive matching:** `macOS`, `Darwin`, `MACOS` all match
+- **Raw-over-archive:** Prefers `yt-dlp_macos` over `yt-dlp_macos.zip`
+- **Schema-validated rules:** Extensible via `inference-rules.json`
+
+**Checksum Pattern Expansion**
+- Added `SHA2-256SUMS`, `SHA2-512SUMS`, `SHA512SUMS` patterns
+- Signature variants: `.minisig`, `.asc`, `.sig` for all checksum files
+- Supports yt-dlp and similar repos without `--insecure`
+
+**Heuristic `.sig` Handling**
+```
+SHA2-256SUMS.sig  → GPG (checksum-level)
+binary.tar.gz.sig → ed25519 (per-asset)
+```
+
+**Dual-Hash Release Signing**
+- Releases now include both `SHA256SUMS` and `SHA2-512SUMS`
+- Both signed with minisign and PGP
+
+### Proof Points
+
+| Repo | Before | After |
+|------|--------|-------|
+| yt-dlp/yt-dlp | Tie: `yt-dlp` vs `yt-dlp.exe` | `yt-dlp_macos` |
+| cli/cli | Tie: case mismatch | `gh_*_macOS_arm64.zip` |
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+### Details
+- See `CHANGELOG.md` for the complete list.
+- Inference rules schema: `schemas/inference-rules.schema.json`
+
+---
+
 ## v0.2.1
 
 ### Summary

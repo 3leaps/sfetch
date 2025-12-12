@@ -152,13 +152,14 @@ bash install-sfetch.sh
 
 ### Manual signing workflow
 
-CI uploads unsigned archives. Maintainers sign `SHA256SUMS` locally with minisign (primary) and optionally PGP:
+CI uploads unsigned archives. Maintainers generate `SHA256SUMS` and `SHA2-512SUMS` locally, then sign them with minisign (primary) and optionally PGP:
 
 ```bash
 export MINISIGN_KEY=/path/to/sfetch.key
 export PGP_KEY_ID=security@fulmenhq.dev  # optional
 
 RELEASE_TAG=v0.2.0 make release-download
+RELEASE_TAG=v0.2.0 make release-checksums
 RELEASE_TAG=v0.2.0 make release-sign
 make release-export-minisign-key
 make release-export-key                   # if using PGP

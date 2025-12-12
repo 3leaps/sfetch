@@ -33,7 +33,7 @@ PUBLIC_KEY_NAME ?= sfetch-release-signing-key.asc
 MINISIGN_KEY ?=
 MINISIGN_PUB_NAME ?= sfetch-minisign.pub
 
-.PHONY: all build test clean release-clean install release fmt fmt-check shell-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script version-check version-set version-patch version-minor version-major corpus corpus-all corpus-dryrun corpus-validate
+.PHONY: all build test clean release-clean install release fmt fmt-check shell-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-checksums release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script version-check version-set version-patch version-minor version-major corpus corpus-all corpus-dryrun corpus-validate
 
 CORPUS_DEST ?= test-corpus
 
@@ -157,15 +157,18 @@ bootstrap-script:
 	cp scripts/install-sfetch.sh $(DIST_RELEASE)/install-sfetch.sh
 	@echo "✅ Copied install-sfetch.sh to $(DIST_RELEASE)"
 
-release-sha256: bootstrap-script
-	./scripts/generate-sha256sums.sh $(RELEASE_TAG) $(DIST_RELEASE)
+release-checksums: bootstrap-script
+	go run ./scripts/cmd/generate-checksums --dir $(DIST_RELEASE)
+
+# Backwards compatibility alias
+release-sha256: release-checksums
 
 release-notes:
 	@mkdir -p $(DIST_RELEASE)
 	cp RELEASE_NOTES.md $(DIST_RELEASE)/release-notes-$(RELEASE_TAG).md
 	@echo "✅ Release notes copied to $(DIST_RELEASE)"
 
-release-sign: release-sha256
+release-sign: release-checksums
 	MINISIGN_KEY=$(MINISIGN_KEY) PGP_KEY_ID=$(PGP_KEY_ID) ./scripts/sign-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
 release-export-key:

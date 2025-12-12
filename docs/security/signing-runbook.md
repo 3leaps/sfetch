@@ -23,20 +23,20 @@ PGP signatures are provided as a secondary option for users who prefer gpg tooli
 
 ## What Gets Signed
 
-Only `SHA256SUMS` is signed, not individual archive files. This is standard practice:
+Only checksum manifests are signed, not individual archive files. This is standard practice:
 
-1. User downloads archive + `SHA256SUMS` + signature (`SHA256SUMS.minisig` or `SHA256SUMS.asc`)
-2. Verify signature on `SHA256SUMS`
-3. Verify archive checksum against `SHA256SUMS`
+1. User downloads archive + `SHA256SUMS`/`SHA2-512SUMS` + signature (`*.minisig` or `*.asc`)
+2. Verify signature on the checksum file
+3. Verify archive checksum against the signed manifest
 
-This approach means one signature operation per release (one password prompt) while providing the same security guarantees. Signing individual files would be redundant since their checksums are already in the signed `SHA256SUMS`.
+This approach means one signature operation per release (one password prompt) while providing the same security guarantees. Signing individual files would be redundant since their checksums are already in the signed manifests.
 
 ## Signature Formats
 
 | Format | File | Verification | Client Dependency |
 |--------|------|--------------|-------------------|
-| **minisign** | `SHA256SUMS.minisig` | `sfetch --minisign-key <path>` or auto-detect | None (pure-Go) |
-| **PGP** | `SHA256SUMS.asc` | `sfetch --pgp-key-file <path>` or auto-detect | `gpg` binary |
+| **minisign** | `SHA256SUMS.minisig`, `SHA2-512SUMS.minisig` | `sfetch --minisign-key <path>` or auto-detect | None (pure-Go) |
+| **PGP** | `SHA256SUMS.asc`, `SHA2-512SUMS.asc` | `sfetch --pgp-key-file <path>` or auto-detect | `gpg` binary |
 
 **Minisign key flags:**
 - `--minisign-key <path>` - Local file or URL
@@ -83,9 +83,10 @@ export PGP_KEY_ID=security@yourorg.dev  # Optional
 # 1. Download CI-built artifacts
 RELEASE_TAG=v0.2.0 make release-download
 
-# 2. Generate SHA256SUMS and sign it
+# 2. Generate checksum manifests and sign them
+RELEASE_TAG=v0.2.0 make release-checksums
 RELEASE_TAG=v0.2.0 make release-sign
-# Produces: SHA256SUMS, SHA256SUMS.minisig, SHA256SUMS.asc (if PGP_KEY_ID set)
+# Produces: SHA256SUMS, SHA2-512SUMS plus .minisig/.asc (if PGP_KEY_ID set)
 
 # 3. Export public keys for the release
 make release-export-minisign-key

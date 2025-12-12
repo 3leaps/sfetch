@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2025-12-11
+
+### Added
+- **Smart asset selection (Phase 1):** Rule-driven tie-breaking eliminates need for `--asset-match` or `--asset-regex` in most cases.
+  - Platform exclusions: `.exe` filtered on darwin/linux automatically.
+  - Case-insensitive platform/arch token matching: `macOS`, `Darwin`, `MACOS` all match darwin.
+  - Raw-over-archive preference: `yt-dlp_macos` preferred over `yt-dlp_macos.zip`.
+  - Schema-validated rules: `schemas/inference-rules.schema.json` + embedded `inference-rules.json`.
+- **Expanded checksum/signature discovery:** Added `SHA2-256SUMS`, `SHA2-512SUMS`, `SHA512SUMS` patterns and their signature variants (`.minisig`, `.asc`, `.sig`) to support repos like yt-dlp that use non-standard naming.
+- **Heuristic `.sig` handling:** Checksum-level `.sig` files (e.g., `SHA2-256SUMS.sig`) are treated as PGP signatures; per-asset `.sig` files remain ed25519.
+- **SHA2-512SUMS generation:** Release process now generates both `SHA256SUMS` and `SHA2-512SUMS` for dual-hash verification.
+
+### Changed
+- Asset selection flow now applies inference rules before falling back to legacy scoring heuristics.
+- `findChecksumSignature` now strips `.sig` extension in addition to `.minisig` and `.asc`.
+- `signatureFormatFromExtension` uses context-aware heuristic: `*SUMS.sig` → PGP, other `.sig` → ed25519.
+- Replaced shell-based checksum generator (`scripts/generate-sha256sums.sh`) with Go command (`scripts/cmd/generate-checksums`).
+- Signing/upload scripts updated to handle both SHA256SUMS and SHA2-512SUMS.
+
+### Fixed
+- Test `TestInferenceRulesDocumentValidates` now correctly unmarshals JSON before schema validation.
+
 ## [0.2.1] - 2025-12-10
 
 ### Added
