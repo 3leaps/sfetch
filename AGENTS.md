@@ -59,3 +59,19 @@ As a security-focused CLI, prioritize transparency and testability:
 - Skepticism: All sig/checksum logic must be auditable; prefer stdlib crypto.
 
 Keep docs minimal; focus on tests for assurance.
+
+## DO / DO NOT
+
+### DO
+- Follow commit message template for all AI-assisted commits
+- Run `make precommit` before committing changes
+- Test changes thoroughly with `make test`
+- Update documentation for user-facing changes
+- Use semantic versioning for releases
+
+### DO NOT
+- **Push code without maintainer approval** - All changes must be reviewed before pushing to main
+- **Push code except at tag and release merge points** - Only push when creating releases or merging approved release branches
+- Commit directly to main branch - Use feature branches and pull requests
+- Skip security testing for verification-related changes
+- Use `fmt.Print*` in verification logic (use `fmt.Fprintf(os.Stderr, ...)` instead)
