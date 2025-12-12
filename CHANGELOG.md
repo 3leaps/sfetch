@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2025-12-12
+
+### Fixed
+- **Self-update checksum mismatch:** Fixed self-update and fetch failing when SHA2-512SUMS is preferred over SHA256SUMS. Added `detectChecksumAlgorithm()` to infer hash algorithm from checksum filename patterns.
+
 ## [0.2.3] - 2025-12-12
 
 ### Changed

@@ -1,5 +1,27 @@
 # Release Notes
 
+## v0.2.4
+
+### Summary
+Bug fix for self-update failing when SHA2-512SUMS is preferred over SHA256SUMS.
+
+### Highlights
+
+**Fixed self-update checksum mismatch**
+- Self-update and fetch now correctly detect the hash algorithm from the checksum filename.
+- Previously, when SHA2-512SUMS was selected, the code still used sha256 for hashing, causing "checksum not found" errors.
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+### Details
+- See `CHANGELOG.md` for the complete list.
+
+---
+
 ## v0.2.3
 
 ### Summary
