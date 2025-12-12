@@ -7,6 +7,7 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 NAME ?= sfetch
 MAIN ?= ./main.go
 YAMLLINT ?= yamllint
+JQ ?= jq
 
 # LDFLAGS for version injection
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME) -X main.gitCommit=$(GIT_COMMIT)
@@ -33,7 +34,7 @@ PUBLIC_KEY_NAME ?= sfetch-release-signing-key.asc
 MINISIGN_KEY ?=
 MINISIGN_PUB_NAME ?= sfetch-minisign.pub
 
-.PHONY: all build test clean release-clean install release fmt fmt-check shell-check lint tools prereqs bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-checksums release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script version-check version-set version-patch version-minor version-major corpus corpus-all corpus-dryrun corpus-validate
+.PHONY: all build test clean release-clean install release fmt fmt-check shell-check lint tools prereqs prereqs-advise bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-checksums release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script version-check version-set version-patch version-minor version-major corpus corpus-all corpus-dryrun corpus-validate
 
 CORPUS_DEST ?= test-corpus
 
@@ -48,9 +49,18 @@ prereqs: tools
 	@command -v $(YAMLLINT) >/dev/null 2>&1 || { echo "yamllint not found: brew install yamllint / apt install yamllint / pipx install yamllint" >&2; exit 1; }
 	@command -v shfmt >/dev/null 2>&1 || { echo "shfmt not found: brew install shfmt / go install mvdan.cc/sh/v3/cmd/shfmt@latest" >&2; exit 1; }
 	@command -v shellcheck >/dev/null 2>&1 || echo "shellcheck not found (optional): brew install shellcheck / apt install shellcheck"
+	@command -v $(JQ) >/dev/null 2>&1 || echo "$(JQ) not found (optional): brew install jq / apt install jq"
 	@echo "All prerequisites available"
 
-bootstrap: prereqs
+prereqs-advise:
+	@echo "Checking prerequisites (advisory; will not fail)..."
+	@command -v $(YAMLLINT) >/dev/null 2>&1 || echo "yamllint not found: brew install yamllint / apt install yamllint / pipx install yamllint" >&2
+	@command -v shfmt >/dev/null 2>&1 || echo "shfmt not found: brew install shfmt / go install mvdan.cc/sh/v3/cmd/shfmt@latest" >&2
+	@command -v shellcheck >/dev/null 2>&1 || echo "shellcheck not found (optional): brew install shellcheck / apt install shellcheck" >&2
+	@command -v $(JQ) >/dev/null 2>&1 || echo "$(JQ) not found (optional): brew install jq / apt install jq" >&2
+	@echo "Bootstrap checks complete"
+
+bootstrap: tools prereqs-advise
 
 fmt:
 	go fmt ./...

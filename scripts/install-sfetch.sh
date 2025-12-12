@@ -6,17 +6,20 @@
 #   curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
 #
 # Options:
-#   --tag vX.Y.Z     Install specific version (default: latest)
-#   --dir PATH       Install directory (default: ~/.local/bin, or ~/bin on Windows)
-#   --yes            Skip confirmation prompts
-#   --dry-run        Download and verify, but don't install
-#   --help           Show this help
+#   --tag vX.Y.Z         Install specific version (default: latest)
+#   --dir PATH           Install directory (default: ~/.local/bin, or ~/bin on Windows)
+#   --yes                Skip confirmation prompts
+#   --dry-run            Download and verify, but don't install
+#   --allow-checksum-only  Allow install without signature verification (NOT recommended)
+#   --require-signature    Require signature verification (default: true)
+#   --require-minisign     Require minisign verification (default: true)
+#   --help                 Show this help
 #
 # Verification:
-#   The script checks for minisign and gpg to verify SHA256SUMS signatures.
-#   - With minisign: verifies SHA256SUMS.minisig (recommended)
-#   - With gpg: verifies SHA256SUMS.asc
-#   - With neither: verifies checksum only (warns user)
+#   Default: minisign verification is REQUIRED (embedded trust anchor).
+#   - minisign: verifies SHA256SUMS.minisig using pinned key (preferred)
+#   - gpg: optional fallback if fingerprint matches pinned FPR
+#   - checksum-only: only when --allow-checksum-only is passed (warns loudly)
 #
 # Repository: https://github.com/3leaps/sfetch
 #
@@ -37,6 +40,9 @@ SFETCH_API="https://api.github.com/repos/${SFETCH_REPO}/releases"
 # IMPORTANT: This key must match EmbeddedMinisignPubkey in main.go
 # Update both when rotating keys (see docs/security/signing-runbook.md)
 SFETCH_MINISIGN_PUBKEY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
+# Pinned PGP fingerprint (for optional fallback)
+SFETCH_PGP_FPR="94BB7811D4AD49B2310E0C08FA0651DE91B828ED"
+TRUST_LEVEL="unknown"
 
 # -----------------------------------------------------------------------------
 # Utilities
@@ -53,6 +59,47 @@ need_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
         err "required command not found: $1"
     fi
+}
+
+read_release_tag_name() {
+    local release_json_file="$1"
+    local version=""
+
+    # Prefer jq when available (more robust than grep on JSON), but keep a
+    # dependency-free fallback for minimal bootstrap environments.
+    if command -v jq >/dev/null 2>&1; then
+        version=$(jq -r '.tag_name // empty' "$release_json_file" 2>/dev/null || true)
+    fi
+
+    if [ -z "$version" ]; then
+        version=$(grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' "$release_json_file" | head -1 | cut -d'"' -f4 || true)
+    fi
+
+    if [ -z "$version" ]; then
+        err "failed to parse release tag from GitHub API response"
+    fi
+
+    echo "$version"
+}
+
+print_verifier_help() {
+    echo "To verify signatures, install one of:"
+    case "$(uname -s)" in
+        Darwin*)
+            echo "  minisign (recommended): brew install minisign"
+            echo "  gpg (fallback):        brew install gnupg"
+            ;;
+        Linux*)
+            echo "  minisign (recommended): apt install minisign    # Debian/Ubuntu"
+            echo "                          brew install minisign   # if using Homebrew"
+            echo "  gpg (fallback):        apt install gnupg"
+            ;;
+        MINGW* | MSYS* | CYGWIN*)
+            echo "  minisign (recommended): scoop bucket add main && scoop install main/minisign"
+            echo "  gpg (fallback):         scoop install gpg"
+            ;;
+    esac
+    echo "If you cannot install a verifier here, verify on a trusted machine and copy the binary, or pass --allow-checksum-only (NOT recommended; no authenticity)."
 }
 
 # -----------------------------------------------------------------------------
@@ -125,8 +172,6 @@ check_verification_tools() {
                 ;;
         esac
         echo ""
-        echo "Continuing with checksum verification only..."
-        echo ""
     fi
 
     VERIFY_MINISIGN=$has_minisign
@@ -192,10 +237,10 @@ verify_signature() {
     local sums_file="$1"
     local tmpdir="$2"
     local verified=false
+    TRUST_LEVEL="checksum-only"
 
     # Try minisign first (preferred - uses embedded trust anchor)
     if [ "$VERIFY_MINISIGN" = true ] && [ -f "${sums_file}.minisig" ]; then
-        # Write embedded public key to temp file for minisign
         local pubkey_file="${tmpdir}/sfetch-minisign.pub"
         echo "untrusted comment: sfetch release signing key" >"$pubkey_file"
         echo "$SFETCH_MINISIGN_PUBKEY" >>"$pubkey_file"
@@ -204,16 +249,31 @@ verify_signature() {
         if minisign -Vm "$sums_file" -p "$pubkey_file" >/dev/null 2>&1; then
             log "Minisign signature verified"
             verified=true
+            TRUST_LEVEL="high (minisign)"
         else
             err "minisign signature verification failed"
         fi
     fi
 
-    # Try GPG if minisign didn't verify
-    if [ "$verified" = false ] && [ "$VERIFY_GPG" = true ] && [ -f "${sums_file}.asc" ]; then
+    if [ "$verified" = false ] && [ "$REQUIRE_MINISIGN" = true ]; then
+        if [ "$VERIFY_MINISIGN" = false ]; then
+            err "minisign is required; install minisign or pass --allow-checksum-only (not recommended)"
+        fi
+        if [ ! -f "${sums_file}.minisig" ]; then
+            err "SHA256SUMS.minisig missing; cannot verify (pass --allow-checksum-only to override)"
+        fi
+    fi
+
+    # Try GPG if minisign didn't verify and minisign is not required
+    if [ "$verified" = false ] && [ "$REQUIRE_MINISIGN" = false ] && [ "$VERIFY_GPG" = true ] && [ -f "${sums_file}.asc" ]; then
         local gpg_key="${tmpdir}/sfetch-release-signing-key.asc"
         if [ -f "$gpg_key" ]; then
-            log "Verifying signature with gpg..."
+            local fpr
+            fpr=$(gpg --with-colons --import-options show-only --fingerprint "$gpg_key" 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')
+            if [ "$fpr" != "$SFETCH_PGP_FPR" ]; then
+                err "GPG key fingerprint mismatch (expected ${SFETCH_PGP_FPR}, got ${fpr:-unknown})"
+            fi
+            log "Verifying signature with gpg (pinned fingerprint)..."
             local gpg_home
             gpg_home=$(mktemp -d)
             if gpg --batch --no-tty --homedir "$gpg_home" --import "$gpg_key" 2>/dev/null &&
@@ -221,6 +281,7 @@ verify_signature() {
                     --verify "${sums_file}.asc" "$sums_file" 2>/dev/null; then
                 log "GPG signature verified"
                 verified=true
+                TRUST_LEVEL="medium (gpg, pinned key)"
             else
                 err "GPG signature verification failed"
             fi
@@ -231,11 +292,11 @@ verify_signature() {
     fi
 
     if [ "$verified" = false ]; then
-        warn "no signature verified - proceeding with checksum only"
-        echo ""
-        echo "To enable signature verification, install minisign or gpg."
-        echo "See options above or visit: https://github.com/3leaps/sfetch"
-        echo ""
+        if [ "$REQUIRE_SIGNATURE" = true ]; then
+            err "signature verification required; install minisign (recommended) or use --allow-checksum-only to bypass (NOT recommended)"
+        fi
+        warn "no signature verified - proceeding with checksum only (trust: low)"
+        TRUST_LEVEL="low (checksum-only)"
     fi
 }
 
@@ -264,6 +325,7 @@ install_binary() {
     chmod +x "$dest"
 
     log "Installed ${binary_name} to ${dest}"
+    log "Trust: ${TRUST_LEVEL}"
     log "To verify this installation later: sfetch --self-verify"
 
     # Path advice
@@ -290,6 +352,8 @@ main() {
     local install_dir=""
     local dry_run=false
     local yes=false
+    local require_signature=true
+    local require_minisign=true
 
     # Parse arguments
     while [ $# -gt 0 ]; do
@@ -310,6 +374,27 @@ main() {
                 yes=true
                 shift
                 ;;
+            --allow-checksum-only)
+                require_signature=false
+                require_minisign=false
+                shift
+                ;;
+            --require-signature)
+                require_signature=true
+                shift
+                ;;
+            --require-minisign)
+                require_minisign=true
+                shift
+                ;;
+            --no-require-signature)
+                require_signature=false
+                shift
+                ;;
+            --no-require-minisign)
+                require_minisign=false
+                shift
+                ;;
             --help | -h)
                 head -25 "$0" | tail -20
                 exit 0
@@ -319,6 +404,9 @@ main() {
                 ;;
         esac
     done
+
+    REQUIRE_SIGNATURE=$require_signature
+    REQUIRE_MINISIGN=$require_minisign
 
     # Detect platform
     local platform
@@ -336,6 +424,14 @@ main() {
 
     # Check verification tools
     check_verification_tools
+    if [ "$REQUIRE_MINISIGN" = true ] && [ "${VERIFY_MINISIGN:-false}" = false ]; then
+        print_verifier_help
+        err "minisign is required; install minisign or pass --allow-checksum-only (NOT recommended)"
+    fi
+    if [ "$REQUIRE_SIGNATURE" = true ] && [ "${VERIFY_MINISIGN:-false}" = false ] && [ "${VERIFY_GPG:-false}" = false ]; then
+        print_verifier_help
+        err "signature verification required; install minisign (recommended) or gpg, or pass --allow-checksum-only to bypass (NOT recommended)"
+    fi
 
     # Create temp directory (not local - needed for EXIT trap)
     tmpdir=$(mktemp -d)
@@ -354,7 +450,7 @@ main() {
     fetch_json "$release_url" >"$release_json"
 
     local version
-    version=$(grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' "$release_json" | head -1 | cut -d'"' -f4)
+    version=$(read_release_tag_name "$release_json")
     log "Installing sfetch ${version}"
 
     # Determine archive name
@@ -402,11 +498,54 @@ main() {
     local extract_dir="${tmpdir}/extract"
     mkdir -p "$extract_dir"
 
+    # List archive entries to guard against zip-slip/path traversal.
+    # Reject absolute paths, Windows drive-letter paths, and parent-dir traversal segments.
+    # This runs BEFORE extraction so a malicious archive cannot write outside $extract_dir.
+    local entry
+    local list_cmd=()
+
     if [[ "$archive_name" == *.zip ]]; then
         need_cmd unzip
-        unzip -q "${tmpdir}/${archive_name}" -d "$extract_dir"
+        if unzip -Z1 "${tmpdir}/${archive_name}" >/dev/null 2>&1; then
+            list_cmd=(unzip -Z1 "${tmpdir}/${archive_name}")
+        else
+            # Portability: some unzip builds lack `-Z1`; fall back to parsing `unzip -l` output.
+            # We treat this as an internal listing mechanism only; extraction still uses unzip itself.
+            list_cmd=(sh -c "unzip -l \"${tmpdir}/${archive_name}\" | awk 'NR>3 {print \$NF}' | sed '/^$/d'")
+        fi
     else
         need_cmd tar
+        list_cmd=(tar -tzf "${tmpdir}/${archive_name}")
+    fi
+
+    while IFS= read -r entry; do
+        # Normalize any leading "./" segments (tar often prefixes paths).
+        while [[ "$entry" == ./* ]]; do
+            entry="${entry#./}"
+        done
+        if [[ -z "$entry" ]]; then
+            continue
+        fi
+
+        # Absolute paths (POSIX/Windows) and drive-letter paths.
+        if [[ "$entry" == /* ]] || [[ "$entry" == \\* ]] || [[ "$entry" =~ ^[A-Za-z]: ]]; then
+            err "unsafe path in archive entry: $entry"
+        fi
+
+        # Parent directory traversal (POSIX style)
+        if [[ "$entry" == ".." ]] || [[ "$entry" == ../* ]] || [[ "$entry" == */../* ]] || [[ "$entry" == */.. ]]; then
+            err "unsafe path in archive entry: $entry"
+        fi
+
+        # Parent directory traversal (Windows style)
+        if [[ "$entry" == ..\\* ]] || [[ "$entry" == *"\\..\\"* ]] || [[ "$entry" == *"\\.." ]]; then
+            err "unsafe path in archive entry: $entry"
+        fi
+    done < <("${list_cmd[@]}")
+
+    if [[ "$archive_name" == *.zip ]]; then
+        unzip -q "${tmpdir}/${archive_name}" -d "$extract_dir"
+    else
         tar -xzf "${tmpdir}/${archive_name}" -C "$extract_dir"
     fi
 
@@ -421,6 +560,7 @@ main() {
     if [ "$yes" = false ] && [ -t 0 ]; then
         echo ""
         echo "Ready to install sfetch ${version} to ${install_dir}"
+        echo "Verification: ${TRUST_LEVEL}"
         printf "Continue? [Y/n] "
         read -r confirm
         case "$confirm" in

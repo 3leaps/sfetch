@@ -105,12 +105,15 @@ curl -sSfL .../install-sfetch.sh | bash -s -- --dry-run
 
 # Skip confirmation prompt
 curl -sSfL .../install-sfetch.sh | bash -s -- --yes
+
+# Allow checksum-only (NOT recommended; skips signature verification)
+curl -sSfL .../install-sfetch.sh | bash -s -- --allow-checksum-only
 ```
 
 The installer:
 - Detects platform (linux/darwin/windows, amd64/arm64)
-- Verifies signatures using embedded minisign public key (trust anchor)
-- Falls back to GPG if minisign unavailable, warns if neither present
+- Requires minisign verification by default using the embedded trust anchor
+- Optional GPG fallback with pinned fingerprint; checksum-only requires explicit `--allow-checksum-only`
 
 #### Verify before piping to bash
 

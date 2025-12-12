@@ -50,6 +50,8 @@ RELEASE_TAG=v0.2.0 make release-upload
 
 Only the checksum manifests are signed (not individual files). Users verify the signature on `SHA256SUMS`/`SHA2-512SUMS`, then verify archive checksums against them. This is standard practice - signing individual files would be redundant.
 
+Installer hardening: `scripts/install-sfetch.sh` now requires minisign verification by default (embedded trust anchor). GPG fallback is pinned by fingerprint. Checksum-only installs require explicit opt-in (`--allow-checksum-only`) and emit low-trust warnings.
+
 See [docs/security/signing-runbook.md](security/signing-runbook.md) for detailed workflow.
 
 ## Verifying Your Installation
