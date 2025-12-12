@@ -73,9 +73,9 @@ shell-check:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found: brew install shellcheck" >&2; exit 1; }
 	@command -v shfmt >/dev/null 2>&1 || { echo "shfmt not found: brew install shfmt" >&2; exit 1; }
 	shellcheck scripts/*.sh
-	@if ! shfmt -d scripts/*.sh >/dev/null 2>&1; then \
+	@if ! shfmt -d -i 4 -ci scripts/*.sh >/dev/null 2>&1; then \
 		echo "shfmt formatting required for scripts/*.sh - run 'make fmt'"; \
-		shfmt -d scripts/*.sh; \
+		shfmt -d -i 4 -ci scripts/*.sh; \
 		exit 1; \
 	fi
 
