@@ -321,3 +321,125 @@ func TestIntegrationRequireMinisign(t *testing.T) {
 		t.Errorf("expected --require-minisign error in output:\n%s", output.String())
 	}
 }
+
+func TestIntegrationSelfUpdate(t *testing.T) {
+	// Skip if network access not desired (this test hits mock server but could be extended)
+	if os.Getenv("SFETCH_SKIP_NETWORK_TESTS") != "" {
+		t.Skip("skipping network-dependent test")
+	}
+
+	assetBytes, err := os.ReadFile("testdata/integration/sfetch_test_darwin_arm64.tar.gz")
+	if err != nil {
+		t.Fatalf("read asset: %v", err)
+	}
+	shaBytes, err := os.ReadFile("testdata/integration/SHA256SUMS")
+	if err != nil {
+		t.Fatalf("read checksum: %v", err)
+	}
+	minisigBytes, err := os.ReadFile("testdata/integration/SHA256SUMS.minisig")
+	if err != nil {
+		t.Fatalf("read minisig: %v", err)
+	}
+	pubKeyBytes, err := os.ReadFile("testdata/integration/test-minisign.pub")
+	if err != nil {
+		t.Fatalf("read pubkey: %v", err)
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/3leaps/sfetch/releases/latest":
+			base := fmt.Sprintf("http://%s", r.Host)
+			rel := fakeRelease{
+				TagName: "v0.3.0", // Major version jump from v0.2.2
+				Assets: []Asset{
+					{Name: "sfetch-darwin-arm64", BrowserDownloadUrl: base + "/assets/bin"}, // Raw binary for current platform
+					{Name: "SHA256SUMS", BrowserDownloadUrl: base + "/assets/sha"},
+					{Name: "SHA256SUMS.minisig", BrowserDownloadUrl: base + "/assets/sha-minisig"},
+					{Name: "sfetch-minisign.pub", BrowserDownloadUrl: base + "/assets/pubkey"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(&rel); err != nil {
+				t.Fatalf("encode release: %v", err)
+			}
+		case "/assets/bin":
+			_, _ = w.Write(assetBytes)
+		case "/assets/sha":
+			_, _ = w.Write(shaBytes)
+		case "/assets/sha-minisig":
+			_, _ = w.Write(minisigBytes)
+		case "/assets/pubkey":
+			_, _ = w.Write(pubKeyBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	destDir := t.TempDir()
+
+	// Test 1: Dry-run should work and show dev build guard refusal
+	t.Run("dry-run-refuses-dev-build", func(t *testing.T) {
+		cmd := exec.Command("go", "run", ".",
+			"--self-update",
+			"--dry-run",
+		)
+		cmd.Env = append(os.Environ(), "SFETCH_API_BASE="+ts.URL)
+		var output bytes.Buffer
+		cmd.Stdout = &output
+		cmd.Stderr = &output
+		err := cmd.Run()
+		if err == nil {
+			t.Fatalf("expected dry-run to fail due to dev build guard")
+		}
+
+		// Should show dev build guard message
+		if !bytes.Contains(output.Bytes(), []byte("current build is 'dev'")) {
+			t.Errorf("expected dev build guard message in output:\n%s", output.String())
+		}
+	})
+
+	// Test 2: Force flag should allow major version jump in dry-run
+	t.Run("dry-run-force-allows-major-version", func(t *testing.T) {
+		cmd := exec.Command("go", "run", ".",
+			"--self-update",
+			"--self-update-force",
+			"--dry-run",
+		)
+		cmd.Env = append(os.Environ(), "SFETCH_API_BASE="+ts.URL)
+		var output bytes.Buffer
+		cmd.Stdout = &output
+		cmd.Stderr = &output
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("dry-run with force should succeed: %v\noutput:\n%s", err, output.String())
+		}
+
+		// Should show successful assessment
+		if !bytes.Contains(output.Bytes(), []byte("Self-update target:")) {
+			t.Errorf("expected self-update target message in output:\n%s", output.String())
+		}
+	})
+
+	// Test 3: Test path computation with custom dir
+	t.Run("custom-install-dir", func(t *testing.T) {
+		customDir := filepath.Join(destDir, "custom")
+		cmd := exec.Command("go", "run", ".",
+			"--self-update",
+			"--self-update-dir", customDir,
+			"--self-update-force",
+			"--dry-run",
+		)
+		cmd.Env = append(os.Environ(), "SFETCH_API_BASE="+ts.URL)
+		var output bytes.Buffer
+		cmd.Stdout = &output
+		cmd.Stderr = &output
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("dry-run with custom dir should succeed: %v\noutput:\n%s", err, output.String())
+		}
+
+		expectedPath := filepath.Join(customDir, "sfetch")
+		if !bytes.Contains(output.Bytes(), []byte(expectedPath)) {
+			t.Errorf("expected custom path %s in output:\n%s", expectedPath, output.String())
+		}
+	})
+}

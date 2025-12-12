@@ -517,6 +517,36 @@ func mustLoadInferenceRules(t *testing.T) *InferenceRules {
 	return rules
 }
 
+func TestMajorVersionFromTag(t *testing.T) {
+	tests := []struct {
+		tag     string
+		want    int
+		wantErr bool
+	}{
+		{"v1.2.3", 1, false},
+		{"2.0.0", 2, false},
+		{"", 0, true},
+		{"not-a-version", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tag, func(t *testing.T) {
+			got, err := majorVersionFromTag(tt.tag)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q", tt.tag)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("majorVersionFromTag(%q)=%d, want %d", tt.tag, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAssessRelease(t *testing.T) {
 	cfg := &defaults
 

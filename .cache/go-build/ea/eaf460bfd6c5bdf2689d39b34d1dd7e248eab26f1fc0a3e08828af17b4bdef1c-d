@@ -1,0 +1,2 @@
+./generate-checksums.go
+./generate-checksums_test.go

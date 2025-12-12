@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +59,8 @@ var (
 	buildTime = "unknown"
 	gitCommit = "unknown"
 )
+
+const selfUpdateRepo = "3leaps/sfetch"
 
 // Verification workflows
 const (
@@ -838,6 +841,10 @@ func main() {
 	skipSig := flag.Bool("skip-sig", false, "skip signature verification (testing only)")
 	skipChecksum := flag.Bool("skip-checksum", false, "skip checksum verification even if available")
 	insecure := flag.Bool("insecure", false, "skip all verification (dangerous - use only for testing)")
+	selfUpdate := flag.Bool("self-update", false, "update sfetch to the latest release for this platform")
+	selfUpdateYes := flag.Bool("yes", false, "confirm self-update without prompting")
+	selfUpdateForce := flag.Bool("self-update-force", false, "allow major-version jumps and proceed even if target is locked")
+	selfUpdateDir := flag.String("self-update-dir", "", "install path for self-update (default: current binary directory)")
 	minisignPubKey := flag.String("minisign-key", "", "path to minisign public key file (.pub)")
 	minisignKeyURL := flag.String("minisign-key-url", "", "URL to download minisign public key")
 	minisignKeyAsset := flag.String("minisign-key-asset", "", "release asset name for minisign public key")
@@ -959,6 +966,28 @@ func main() {
 		return
 	}
 
+	if *selfUpdate {
+		if *repo != "" && *repo != selfUpdateRepo {
+			fmt.Fprintf(os.Stderr, "warning: ignoring --repo (%s); self-update targets %s\n", *repo, selfUpdateRepo)
+		}
+		*repo = selfUpdateRepo
+
+		targetPath, err := computeSelfUpdatePath(*selfUpdateDir)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if *destDir != "" || *output != "" {
+			fmt.Fprintln(os.Stderr, "warning: ignoring --dest-dir/--output when --self-update is set")
+		}
+		*output = targetPath
+		if !*dryRun && !*selfUpdateYes {
+			fmt.Fprintln(os.Stderr, "--self-update requires --yes to proceed (rerun with --self-update --yes)")
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Self-update target: %s\n", targetPath)
+	}
+
 	if !*skipToolsCheck {
 		goos := runtime.GOOS
 		goarch := runtime.GOARCH
@@ -1017,6 +1046,28 @@ func main() {
 	if err := json.Unmarshal(respBody, &rel); err != nil {
 		fmt.Fprintf(os.Stderr, "error: parsing JSON: %v\n", err)
 		os.Exit(1)
+	}
+
+	if *selfUpdate {
+		if version != "dev" {
+			currentMajor, err := majorVersionFromTag(version)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: parsing current version %q: %v\n", version, err)
+				os.Exit(1)
+			}
+			nextMajor, err := majorVersionFromTag(rel.TagName)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: parsing release tag %q: %v\n", rel.TagName, err)
+				os.Exit(1)
+			}
+			if currentMajor != nextMajor && !*selfUpdateForce {
+				fmt.Fprintf(os.Stderr, "refusing self-update across major versions (%d -> %d); rerun with --self-update-force to proceed\n", currentMajor, nextMajor)
+				os.Exit(1)
+			}
+		} else if !*selfUpdateForce {
+			fmt.Fprintf(os.Stderr, "current build is 'dev'; rerun with --self-update-force to update from dev builds\n")
+			os.Exit(1)
+		}
 	}
 
 	cfg := getConfig(*repo)
@@ -1444,6 +1495,22 @@ func main() {
 	}
 
 	if err := os.Rename(binaryPath, finalPath); err != nil {
+		if *selfUpdate && runtime.GOOS == "windows" {
+			alt := finalPath + ".new"
+			if errAlt := os.Rename(binaryPath, alt); errAlt == nil {
+				fmt.Fprintf(os.Stderr, "target appears locked; new binary written to %s. Close running sfetch and replace manually.\n", alt)
+				fmt.Printf("Release: %s\n", rel.TagName)
+				fmt.Printf("Installed %s to %s\n", installName, alt)
+				return
+			}
+		}
+		if *selfUpdate {
+			if errCopy := copyFile(binaryPath, finalPath); errCopy == nil {
+				fmt.Printf("Release: %s\n", rel.TagName)
+				fmt.Printf("Installed %s to %s\n", installName, finalPath)
+				return
+			}
+		}
 		fmt.Fprintf(os.Stderr, "install to %s: %v\n", finalPath, err)
 		os.Exit(1)
 	}
@@ -2124,6 +2191,69 @@ func mergeExtensions(ruleExts, cfgExts []string) []string {
 		}
 	}
 	return merged
+}
+
+func computeSelfUpdatePath(dir string) (string, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("determine current executable: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(exePath); err == nil {
+		exePath = resolved
+	}
+	targetDir := filepath.Dir(exePath)
+	if dir != "" {
+		targetDir = dir
+	}
+	base := filepath.Base(exePath)
+	return filepath.Join(targetDir, base), nil
+}
+
+func majorVersionFromTag(tag string) (int, error) {
+	t := strings.TrimSpace(tag)
+	t = strings.TrimPrefix(t, "v")
+	if t == "" {
+		return 0, fmt.Errorf("empty version")
+	}
+	parts := strings.Split(t, ".")
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, fmt.Errorf("parse major: %w", err)
+	}
+	return major, nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", src, err)
+	}
+	defer in.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
+	}
+
+	tmp := dst + ".tmp"
+	out, err := os.Create(tmp)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", tmp, err)
+	}
+
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("copy %s: %w", dst, err)
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("close %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename %s: %w", dst, err)
+	}
+	return nil
 }
 
 func containsAny(haystack string, needles []string) bool {
