@@ -263,7 +263,7 @@ func assessRelease(rel *Release, cfg *RepoConfig, selectedAsset *Asset, flags as
 		assessment.ChecksumAvailable = true
 		assessment.ChecksumFile = checksumFileName
 		assessment.ChecksumType = "consolidated"
-		assessment.ChecksumAlgorithm = cfg.HashAlgo
+		assessment.ChecksumAlgorithm = detectChecksumAlgorithm(checksumFileName, cfg.HashAlgo)
 
 		assessment.Workflow = workflowA
 		if flags.skipChecksum {
@@ -289,7 +289,7 @@ func assessRelease(rel *Release, cfg *RepoConfig, selectedAsset *Asset, flags as
 			assessment.ChecksumAvailable = true
 			assessment.ChecksumFile = checksumAsset.Name
 			assessment.ChecksumType = detectChecksumType(checksumAsset.Name)
-			assessment.ChecksumAlgorithm = cfg.HashAlgo
+			assessment.ChecksumAlgorithm = detectChecksumAlgorithm(checksumAsset.Name, cfg.HashAlgo)
 			assessment.TrustLevel = trustHigh
 		} else {
 			assessment.TrustLevel = trustMedium
@@ -310,7 +310,7 @@ func assessRelease(rel *Release, cfg *RepoConfig, selectedAsset *Asset, flags as
 		assessment.ChecksumAvailable = true
 		assessment.ChecksumFile = checksumAsset.Name
 		assessment.ChecksumType = detectChecksumType(checksumAsset.Name)
-		assessment.ChecksumAlgorithm = cfg.HashAlgo
+		assessment.ChecksumAlgorithm = detectChecksumAlgorithm(checksumAsset.Name, cfg.HashAlgo)
 
 		assessment.Workflow = workflowC
 		assessment.TrustLevel = trustLow
@@ -385,6 +385,24 @@ func detectChecksumType(filename string) string {
 	}
 	// Everything else is consolidated (SHA256SUMS, checksums.txt, etc.)
 	return "consolidated"
+}
+
+func detectChecksumAlgorithm(filename, defaultAlgo string) string {
+	lower := strings.ToLower(filename)
+	switch {
+	case strings.Contains(lower, "sha2-512sums"),
+		strings.Contains(lower, "sha512sums"),
+		strings.HasSuffix(lower, ".sha512"),
+		strings.HasSuffix(lower, ".sha512.txt"):
+		return "sha512"
+	case strings.Contains(lower, "sha2-256sums"),
+		strings.Contains(lower, "sha256sums"),
+		strings.HasSuffix(lower, ".sha256"),
+		strings.HasSuffix(lower, ".sha256.txt"):
+		return "sha256"
+	default:
+		return defaultAlgo
+	}
 }
 
 // formatDryRunOutput generates human-readable dry-run output.
@@ -1302,14 +1320,18 @@ func main() {
 	}
 
 	// Compute hash for caching (and verification if checksum file exists)
+	hashAlgo := cfg.HashAlgo
+	if checksumBytes != nil && assessment.ChecksumAlgorithm != "" {
+		hashAlgo = assessment.ChecksumAlgorithm
+	}
 	var h hash.Hash
-	switch cfg.HashAlgo {
+	switch hashAlgo {
 	case "sha256":
 		h = sha256.New()
 	case "sha512":
 		h = sha512.New()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown hash algo %q\n", cfg.HashAlgo)
+		fmt.Fprintf(os.Stderr, "unknown hash algo %q\n", hashAlgo)
 		os.Exit(1)
 	}
 	h.Write(assetBytes)
@@ -1317,7 +1339,7 @@ func main() {
 
 	// Verify checksum if checksum file was found
 	if checksumBytes != nil {
-		expectedHash, err := extractChecksum(checksumBytes, cfg.HashAlgo, selected.Name)
+		expectedHash, err := extractChecksum(checksumBytes, hashAlgo, selected.Name)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)

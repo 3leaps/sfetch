@@ -1443,6 +1443,81 @@ b66cd9d99e70edec01980fe8f8587ce426f556f8bcb102f4a94c3d72b7690d0b  sfetch_darwin_
 	}
 }
 
+func TestExtractChecksumSHA512(t *testing.T) {
+	t.Parallel()
+
+	digest := strings.Repeat("a", 128)
+	content := digest + "  sfetch_darwin_arm64.tar.gz\n"
+	got, err := extractChecksum([]byte(content), "sha512", "sfetch_darwin_arm64.tar.gz")
+	if err != nil {
+		t.Fatalf("extractChecksum sha512: %v", err)
+	}
+	if got != digest {
+		t.Fatalf("got %q, want %q", got, digest)
+	}
+}
+
+func TestDetectChecksumAlgorithm(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		filename    string
+		defaultAlgo string
+		want        string
+	}{
+		{"sha256sums", "SHA256SUMS", "sha256", "sha256"},
+		{"sha2-256sums", "SHA2-256SUMS", "sha512", "sha256"},
+		{"sha512sums", "SHA512SUMS", "sha256", "sha512"},
+		{"sha2-512sums", "SHA2-512SUMS", "sha256", "sha512"},
+		{"per-asset sha256", "thing.tar.gz.sha256", "sha512", "sha256"},
+		{"per-asset sha512", "thing.tar.gz.sha512.txt", "sha256", "sha512"},
+		{"unknown falls back", "CHECKSUMS.txt", "sha256", "sha256"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := detectChecksumAlgorithm(tt.filename, tt.defaultAlgo)
+			if got != tt.want {
+				t.Fatalf("detectChecksumAlgorithm(%q, %q) = %q, want %q", tt.filename, tt.defaultAlgo, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAssessReleasePrefersSHA512ManifestSetsAlgo(t *testing.T) {
+	t.Parallel()
+
+	cfg := defaults
+	cfg.HashAlgo = "sha256"
+	cfg.PreferChecksumSig = boolPtr(true)
+
+	rel := &Release{
+		TagName: "v0.2.4",
+		Assets: []Asset{
+			{Name: "sfetch_darwin_arm64.tar.gz"},
+			{Name: "SHA2-512SUMS"},
+			{Name: "SHA2-512SUMS.minisig"},
+			{Name: "SHA256SUMS"},
+			{Name: "SHA256SUMS.minisig"},
+		},
+	}
+
+	selected := &rel.Assets[0]
+	flags := assessmentFlags{}
+
+	assessment := assessRelease(rel, &cfg, selected, flags)
+	if assessment.Workflow != workflowA {
+		t.Fatalf("workflow = %q, want %q", assessment.Workflow, workflowA)
+	}
+	if assessment.ChecksumFile != "SHA2-512SUMS" {
+		t.Fatalf("checksum file = %q, want %q", assessment.ChecksumFile, "SHA2-512SUMS")
+	}
+	if assessment.ChecksumAlgorithm != "sha512" {
+		t.Fatalf("checksum algorithm = %q, want %q", assessment.ChecksumAlgorithm, "sha512")
+	}
+}
+
 // TestSelfVerifyOutputJSON validates JSON output structure.
 func TestSelfVerifyOutputJSON(t *testing.T) {
 	// Test that the JSON struct marshals correctly
