@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2025-12-12
+
+### Changed
+- **Installer parsing:** Prefer `jq` (if present) for GitHub release JSON parsing; dependency-free fallback retained.
+- **Make bootstrap:** `make bootstrap` now advisory via `prereqs-advise`; `make prereqs` remains strict.
+
+### Fixed
+- **Signing script GPG support:** Added `GPG_HOMEDIR` environment variable support for custom GPG homedirs. Uses `env GNUPGHOME=...` to avoid polluting user's global GPG settings.
+
+### Security
+- Added threat-model comments for pre-extraction path traversal scanning and unzip listing portability in installer.
+
+### Documentation
+- Updated docs to reflect checksum-only opt-in and signature defaults.
+- Added DO/DONOT section to `AGENTS.md` with push approval and release merge policies.
+- Updated `RELEASE_CHECKLIST.md` to document all required environment variables including `GPG_HOMEDIR`.
+
 ## [0.2.2] - 2025-12-12
 
 ### Added

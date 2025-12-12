@@ -1,5 +1,36 @@
 # Release Notes
 
+## v0.2.3
+
+### Summary
+Installer hardening and signing script improvements for custom GPG environments.
+
+### Highlights
+
+**Installer Parsing Improvements**
+- Prefer `jq` (if present) for GitHub release JSON parsing; dependency-free fallback retained
+- Added threat-model comments for pre-extraction path traversal scanning
+- `make bootstrap` now advisory; `make prereqs` remains strict
+
+**Signing Script Fixes**
+- Added `GPG_HOMEDIR` environment variable support for custom GPG homedirs
+- Uses `env GNUPGHOME=...` to avoid polluting user's global GPG settings
+
+**Documentation**
+- Updated docs to reflect checksum-only opt-in and signature defaults
+- Added DO/DONOT section to `AGENTS.md` with push approval policies
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+### Details
+- See `CHANGELOG.md` for the complete list.
+
+---
+
 ## v0.2.2
 
 ### Summary
