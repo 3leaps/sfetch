@@ -41,6 +41,27 @@ binary.tar.gz.sig → ed25519 (per-asset)
 - Releases now include both `SHA256SUMS` and `SHA2-512SUMS`
 - Both signed with minisign and PGP
 
+**Secure Self-Update**
+```bash
+# Update to latest release
+sfetch --self-update --yes
+
+# Update to specific version
+sfetch --self-update --tag v0.2.1 --yes
+
+# Force major version jump
+sfetch --self-update --self-update-force --yes
+
+# Dry run to see what would happen
+sfetch --self-update --dry-run
+```
+
+Security-first design:
+- Uses existing verification pipeline (no insecure path)
+- Major-version guard prevents accidental breaking changes
+- Windows lock handling with `.new` fallback
+- Custom install directory support
+
 ### Proof Points
 
 | Repo | Before | After |

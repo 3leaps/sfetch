@@ -525,8 +525,15 @@ func TestMajorVersionFromTag(t *testing.T) {
 	}{
 		{"v1.2.3", 1, false},
 		{"2.0.0", 2, false},
+		{"v0.2.2", 0, false},
+		{"v0.2.1", 0, false},
+		{"v10.5.1", 10, false},
 		{"", 0, true},
 		{"not-a-version", 0, true},
+		{"v", 0, true},
+		{"v1", 1, false},
+		{"1.2.3.4", 1, false}, // extra parts should be ignored
+		{"vx.y.z", 0, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.tag, func(t *testing.T) {

@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Expanded checksum/signature discovery:** Added `SHA2-256SUMS`, `SHA2-512SUMS`, `SHA512SUMS` patterns and their signature variants (`.minisig`, `.asc`, `.sig`) to support repos like yt-dlp that use non-standard naming.
 - **Heuristic `.sig` handling:** Checksum-level `.sig` files (e.g., `SHA2-256SUMS.sig`) are treated as PGP signatures; per-asset `.sig` files remain ed25519.
 - **SHA2-512SUMS generation:** Release process now generates both `SHA256SUMS` and `SHA2-512SUMS` for dual-hash verification.
+- **Self-update workflow:** Secure self-update capability with `--self-update`, `--self-update-force`, and `--self-update-dir` flags. Uses existing verification pipeline, enforces major-version guard, and provides Windows lock fallback.
 
 ### Changed
 - Asset selection flow now applies inference rules before falling back to legacy scoring heuristics.

@@ -2241,7 +2241,7 @@ func copyFile(src, dst string) error {
 	}
 
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+		_ = out.Close()
 		_ = os.Remove(tmp)
 		return fmt.Errorf("copy %s: %w", dst, err)
 	}
