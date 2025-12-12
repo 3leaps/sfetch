@@ -68,6 +68,9 @@ if [ -n "$PGP_KEY_ID" ]; then
     fi
     has_pgp=true
     echo "PGP signing enabled (key: $PGP_KEY_ID)"
+    if [ -n "${GPG_HOMEDIR:-}" ]; then
+        echo "GPG homedir: $GPG_HOMEDIR"
+    fi
 fi
 
 if [ "$has_minisign" = false ] && [ "$has_pgp" = false ]; then
@@ -88,7 +91,11 @@ for file in "${checksum_files[@]}"; do
 
     if [ "$has_pgp" = true ]; then
         echo "🔏 [PGP] Signing $file"
-        gpg --batch --yes --armor --local-user "$PGP_KEY_ID" --detach-sign -o "$DIR/$file.asc" "$DIR/$file"
+        gpg_cmd=(gpg --batch --yes --armor --local-user "$PGP_KEY_ID" --detach-sign -o "$DIR/$file.asc" "$DIR/$file")
+        if [ -n "${GPG_HOMEDIR:-}" ]; then
+            gpg_cmd+=(--homedir "$GPG_HOMEDIR")
+        fi
+        "${gpg_cmd[@]}"
     fi
 done
 

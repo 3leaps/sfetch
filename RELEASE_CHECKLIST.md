@@ -27,6 +27,7 @@ Set environment variables:
 ```bash
 export MINISIGN_KEY=/path/to/sfetch.key
 export PGP_KEY_ID=security@fulmenhq.dev  # or your-subkey-id!
+export GPG_HOMEDIR=/path/to/custom/gpg/homedir  # optional, defaults to ~/.gnupg
 ```
 
 ### Steps
