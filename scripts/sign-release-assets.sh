@@ -91,11 +91,11 @@ for file in "${checksum_files[@]}"; do
 
     if [ "$has_pgp" = true ]; then
         echo "🔏 [PGP] Signing $file"
-        gpg_cmd=(gpg --batch --yes --armor --local-user "$PGP_KEY_ID" --detach-sign -o "$DIR/$file.asc" "$DIR/$file")
         if [ -n "${GPG_HOMEDIR:-}" ]; then
-            gpg_cmd+=(--homedir "$GPG_HOMEDIR")
+            GNUPGHOME="$GPG_HOMEDIR" gpg --batch --yes --armor --local-user "$PGP_KEY_ID" --detach-sign -o "$DIR/$file.asc" "$DIR/$file"
+        else
+            gpg --batch --yes --armor --local-user "$PGP_KEY_ID" --detach-sign -o "$DIR/$file.asc" "$DIR/$file"
         fi
-        "${gpg_cmd[@]}"
     fi
 done
 
