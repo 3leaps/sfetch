@@ -168,6 +168,8 @@ release-notes:
 	cp RELEASE_NOTES.md $(DIST_RELEASE)/release-notes-$(RELEASE_TAG).md
 	@echo "✅ Release notes copied to $(DIST_RELEASE)"
 
+# Note: GPG_HOMEDIR should be set by user if using custom GPG homedir
+# This is not persisted and only affects the signing operation
 release-sign: release-checksums
 	MINISIGN_KEY=$(MINISIGN_KEY) PGP_KEY_ID=$(PGP_KEY_ID) ./scripts/sign-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
