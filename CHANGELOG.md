@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.2] - 2025-12-11
+## [0.2.2] - 2025-12-12
 
 ### Added
 - **Smart asset selection (Phase 1):** Rule-driven tie-breaking eliminates need for `--asset-match` or `--asset-regex` in most cases.
@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Test `TestInferenceRulesDocumentValidates` now correctly unmarshals JSON before schema validation.
+- Makefile `shell-check` target now uses same shfmt flags (`-i 4 -ci`) as `fmt` target.
 
 ## [0.2.1] - 2025-12-10
 
