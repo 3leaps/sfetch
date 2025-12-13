@@ -47,6 +47,7 @@ all: build
 tools:
 	go install honnef.co/go/tools/cmd/staticcheck@latest
 	go install github.com/securego/gosec/v2/cmd/gosec@latest
+	go install github.com/rhysd/actionlint/cmd/actionlint@latest
 
 prereqs: tools
 	@echo "Checking prerequisites..."
@@ -113,12 +114,18 @@ gosec-high: tools
 	gosec -confidence high -exclude G301,G302,G107,G304 ./...
 
 yamllint-workflows:
-	@command -v $(YAMLLINT) >/dev/null 2>&1 || { echo "$(YAMLLINT) not found (optional): run 'make prereqs' for install guidance" >&2; exit 0; }
-	$(YAMLLINT) .github/workflows
+	@if command -v $(YAMLLINT) >/dev/null 2>&1; then \
+		$(YAMLLINT) .github/workflows; \
+	else \
+		echo "$(YAMLLINT) not found (optional): run 'make prereqs' for install guidance" >&2; \
+	fi
 
 actionlint-workflows:
-	@command -v $(ACTIONLINT) >/dev/null 2>&1 || { echo "$(ACTIONLINT) not found (optional): go install github.com/rhysd/actionlint/cmd/actionlint@latest" >&2; exit 0; }
-	$(ACTIONLINT) .github/workflows/*.yml
+	@if command -v $(ACTIONLINT) >/dev/null 2>&1; then \
+		$(ACTIONLINT) .github/workflows/*.yml; \
+	else \
+		echo "$(ACTIONLINT) not found (optional): run 'make tools' or install via 'go install github.com/rhysd/actionlint/cmd/actionlint@latest'" >&2; \
+	fi
 
 lint-workflows: yamllint-workflows actionlint-workflows
 

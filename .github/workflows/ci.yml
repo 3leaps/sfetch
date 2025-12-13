@@ -25,6 +25,7 @@ jobs:
             sudo apt-get install -y --no-install-recommends \
             yamllint shellcheck minisign
           go install mvdan.cc/sh/v3/cmd/shfmt@latest
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
 
       - name: Quality
         run: make precommit
