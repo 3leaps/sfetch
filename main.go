@@ -35,26 +35,6 @@ const (
 	maxCommandError = 512
 )
 
-func githubToken() string {
-	if tok := strings.TrimSpace(os.Getenv("SFETCH_GITHUB_TOKEN")); tok != "" {
-		return tok
-	}
-	return strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
-}
-
-func httpGetWithAuth(url string) (*http.Response, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", fmt.Sprintf("sfetch/%s", version))
-	if tok := githubToken(); tok != "" && strings.Contains(url, "github.com") {
-		req.Header.Set("Authorization", "Bearer "+tok)
-	}
-	return client.Do(req)
-}
-
 var (
 	version   = "dev"
 	buildTime = "unknown"
