@@ -60,7 +60,7 @@ var (
 	gitCommit = "unknown"
 )
 
-const selfUpdateRepo = "3leaps/sfetch"
+// self-update target is defined via embedded update-target config (see update_target.go).
 
 // Verification workflows
 const (
@@ -851,9 +851,13 @@ type signatureData struct {
 }
 
 func apiBaseURL() string {
+	return apiBaseURLWithDefault(defaultAPIBase)
+}
+
+func apiBaseURLWithDefault(defaultBase string) string {
 	base := strings.TrimSpace(os.Getenv("SFETCH_API_BASE"))
 	if base == "" {
-		return defaultAPIBase
+		base = defaultBase
 	}
 	return strings.TrimRight(base, "/")
 }
@@ -888,6 +892,8 @@ func main() {
 	key := flag.String("key", "", "ed25519 pubkey hex (32 bytes)")
 	selfVerify := flag.Bool("self-verify", false, "print instructions to verify this binary externally")
 	showTrustAnchors := flag.Bool("show-trust-anchors", false, "print embedded public keys (use --json for JSON output)")
+	showUpdateConfig := flag.Bool("show-update-config", false, "print embedded self-update configuration and exit")
+	validateUpdateConfig := flag.Bool("validate-update-config", false, "validate embedded self-update configuration and exit")
 	dryRun := flag.Bool("dry-run", false, "assess release verification without downloading")
 	provenance := flag.Bool("provenance", false, "output provenance record JSON to stderr")
 	provenanceFile := flag.String("provenance-file", "", "write provenance record to file (implies --provenance)")
@@ -999,11 +1005,38 @@ func main() {
 		return
 	}
 
-	if *selfUpdate {
-		if *repo != "" && *repo != selfUpdateRepo {
-			fmt.Fprintf(os.Stderr, "warning: ignoring --repo (%s); self-update targets %s\n", *repo, selfUpdateRepo)
+	if *showUpdateConfig || *validateUpdateConfig {
+		cfg, err := loadEmbeddedUpdateTarget()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		}
-		*repo = selfUpdateRepo
+
+		if *validateUpdateConfig {
+			fmt.Fprintln(os.Stderr, "OK: embedded update configuration is valid")
+			return
+		}
+
+		data, err := json.MarshalIndent(cfg, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: marshal update config: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(data))
+		return
+	}
+
+	if *selfUpdate {
+		ucfg, err := loadEmbeddedUpdateTarget()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
+		if *repo != "" && *repo != ucfg.Repo.ID {
+			fmt.Fprintf(os.Stderr, "warning: ignoring --repo (%s); self-update targets %s\n", *repo, ucfg.Repo.ID)
+		}
+		*repo = ucfg.Repo.ID
 
 		targetPath, err := computeSelfUpdatePath(*selfUpdateDir)
 		if err != nil {
@@ -1054,6 +1087,11 @@ func main() {
 	}
 
 	baseURL := apiBaseURL()
+	if *selfUpdate {
+		if ucfg, err := loadEmbeddedUpdateTarget(); err == nil && strings.TrimSpace(ucfg.Source.APIBase) != "" {
+			baseURL = apiBaseURLWithDefault(ucfg.Source.APIBase)
+		}
+	}
 	url := fmt.Sprintf("%s/repos/%s/releases/%s", baseURL, *repo, releaseID)
 
 	resp, err := httpGetWithAuth(url)
@@ -1100,6 +1138,11 @@ func main() {
 	}
 
 	cfg := getConfig(*repo)
+	if *selfUpdate {
+		if ucfg, err := loadEmbeddedUpdateTarget(); err == nil {
+			cfg = &ucfg.RepoConfig
+		}
+	}
 
 	// Apply CLI override for binary name
 	if *binaryNameFlag != "" {
@@ -1174,9 +1217,6 @@ func main() {
 	for _, w := range assessment.Warnings {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}
-
-	fmt.Fprintf(os.Stderr, "DEBUG repo=%q BinaryName=%q AssetType=%q ArchiveFormat=%q Asset=%q Workflow=%s Trust=%s\n",
-		*repo, cfg.BinaryName, classification.Type, classification.ArchiveFormat, selected.Name, assessment.Workflow, assessment.TrustLevel)
 
 	tmpDir, err := os.MkdirTemp("", "sfetch-*")
 	if err != nil {

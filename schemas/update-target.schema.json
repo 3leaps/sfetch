@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/3leaps/sfetch/schemas/update-target.schema.json",
+  "title": "sfetch Update Target Configuration",
+  "description": "Schema-backed configuration describing how a binary performs a secure self-update (host, repo identity, and repoConfig conventions).",
+  "type": "object",
+  "required": ["schema", "version", "source", "repo", "repoConfig"],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "https://github.com/3leaps/sfetch/schemas/update-target.schema.json"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Config version for forward-compatible evolution."
+    },
+    "source": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Release host type (runtime may support a subset)."
+        },
+        "apiBase": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Base URL for the host API (e.g., https://api.github.com)."
+        },
+        "downloadBase": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Base URL for human/download URLs when relevant (e.g., https://github.com)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "repo": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repository identifier (e.g., owner/repo for GitHub)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "versioning": {
+      "type": "object",
+      "properties": {
+        "comparator": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Version comparator identifier (e.g., semver)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "repoConfig": {
+      "$ref": "https://github.com/3leaps/sfetch/schemas/repo-config.schema.json"
+    }
+  },
+  "additionalProperties": false
+}
+

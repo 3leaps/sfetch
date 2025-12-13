@@ -1005,6 +1005,83 @@ func TestRepoConfigSchemaValidity(t *testing.T) {
 	}
 }
 
+func TestUpdateTargetSchemaValidity(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	repoSchemaBytes, err := os.ReadFile("schemas/repo-config.schema.json")
+	if err != nil {
+		t.Fatalf("read schemas/repo-config.schema.json: %v", err)
+	}
+	var repoSchemaDoc any
+	if err := json.Unmarshal(repoSchemaBytes, &repoSchemaDoc); err != nil {
+		t.Fatalf("unmarshal schemas/repo-config.schema.json: %v", err)
+	}
+	if err := c.AddResource("https://github.com/3leaps/sfetch/schemas/repo-config.schema.json", repoSchemaDoc); err != nil {
+		t.Fatalf("add repo-config schema resource: %v", err)
+	}
+	if _, err := c.Compile("schemas/update-target.schema.json"); err != nil {
+		t.Fatalf("update-target schema is not valid JSON Schema 2020-12: %v", err)
+	}
+}
+
+func TestUpdateTargetConfigValidates(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	repoSchemaBytes, err := os.ReadFile("schemas/repo-config.schema.json")
+	if err != nil {
+		t.Fatalf("read schemas/repo-config.schema.json: %v", err)
+	}
+	var repoSchemaDoc any
+	if err := json.Unmarshal(repoSchemaBytes, &repoSchemaDoc); err != nil {
+		t.Fatalf("unmarshal schemas/repo-config.schema.json: %v", err)
+	}
+	if err := c.AddResource("https://github.com/3leaps/sfetch/schemas/repo-config.schema.json", repoSchemaDoc); err != nil {
+		t.Fatalf("add repo-config schema resource: %v", err)
+	}
+	schema, err := c.Compile("schemas/update-target.schema.json")
+	if err != nil {
+		t.Fatalf("compile schema: %v", err)
+	}
+	raw, err := os.ReadFile("configs/update/sfetch.json")
+	if err != nil {
+		t.Fatalf("read configs/update/sfetch.json: %v", err)
+	}
+	var doc interface{}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("unmarshal configs/update/sfetch.json: %v", err)
+	}
+	if err := schema.Validate(doc); err != nil {
+		t.Fatalf("configs/update/sfetch.json does not validate: %v", err)
+	}
+}
+
+func TestEmbeddedUpdateTargetConfigValidates(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	repoSchemaBytes, err := os.ReadFile("schemas/repo-config.schema.json")
+	if err != nil {
+		t.Fatalf("read schemas/repo-config.schema.json: %v", err)
+	}
+	var repoSchemaDoc any
+	if err := json.Unmarshal(repoSchemaBytes, &repoSchemaDoc); err != nil {
+		t.Fatalf("unmarshal schemas/repo-config.schema.json: %v", err)
+	}
+	if err := c.AddResource("https://github.com/3leaps/sfetch/schemas/repo-config.schema.json", repoSchemaDoc); err != nil {
+		t.Fatalf("add repo-config schema resource: %v", err)
+	}
+	schema, err := c.Compile("schemas/update-target.schema.json")
+	if err != nil {
+		t.Fatalf("compile schema: %v", err)
+	}
+	if len(embeddedUpdateTargetJSON) == 0 {
+		t.Fatal("embeddedUpdateTargetJSON is empty")
+	}
+	var doc interface{}
+	if err := json.Unmarshal(embeddedUpdateTargetJSON, &doc); err != nil {
+		t.Fatalf("unmarshal embedded update config: %v", err)
+	}
+	if err := schema.Validate(doc); err != nil {
+		t.Fatalf("embedded update config does not validate: %v", err)
+	}
+}
+
 // TestProvenanceRecordValidation validates that ProvenanceRecord output conforms to the schema.
 func TestProvenanceRecordValidation(t *testing.T) {
 	c := jsonschema.NewCompiler()
@@ -1241,6 +1318,34 @@ func TestEmbeddedTrustAnchors(t *testing.T) {
 			t.Error("EmbeddedMinisignPubkey does not match key in scripts/install-sfetch.sh")
 		}
 	})
+}
+
+func TestEmbeddedUpdateTargetConfigMatchesFile(t *testing.T) {
+	fileBytes, err := os.ReadFile("configs/update/sfetch.json")
+	if err != nil {
+		t.Fatalf("read configs/update/sfetch.json: %v", err)
+	}
+
+	var a any
+	if err := json.Unmarshal(fileBytes, &a); err != nil {
+		t.Fatalf("unmarshal configs/update/sfetch.json: %v", err)
+	}
+	var b any
+	if err := json.Unmarshal(embeddedUpdateTargetJSON, &b); err != nil {
+		t.Fatalf("unmarshal embedded update config: %v", err)
+	}
+
+	aj, err := json.Marshal(a)
+	if err != nil {
+		t.Fatalf("marshal file JSON: %v", err)
+	}
+	bj, err := json.Marshal(b)
+	if err != nil {
+		t.Fatalf("marshal embedded JSON: %v", err)
+	}
+	if string(aj) != string(bj) {
+		t.Fatal("embedded update config does not match configs/update/sfetch.json")
+	}
 }
 
 // TestSelfVerifyAssetName validates asset name generation for different platforms.
