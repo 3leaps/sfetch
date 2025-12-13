@@ -19,11 +19,11 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/3leaps/sfetch/pkg/update"
 	"github.com/jedisct1/go-minisign"
 )
 
@@ -409,39 +409,7 @@ func detectChecksumAlgorithm(filename, defaultAlgo string) string {
 type SelfUpdateDryRunInfo struct {
 	CurrentVersion string
 	TargetVersion  string
-	Decision       SelfUpdateDecision
-	Message        string
-}
-
-// formatVersionDisplay formats a version string for display, adding "v" prefix if needed.
-func formatVersionDisplay(v string) string {
-	if v == "" || v == "dev" || v == "0.0.0-dev" {
-		return v
-	}
-	if strings.HasPrefix(v, "v") {
-		return v
-	}
-	return "v" + v
-}
-
-// describeSelfUpdateDecision returns a human-readable status for the decision.
-func describeSelfUpdateDecision(d SelfUpdateDecision) string {
-	switch d {
-	case SelfUpdateSkip:
-		return "Already at latest version (no update needed)"
-	case SelfUpdateRefuse:
-		return "Update refused (cross-major version change)"
-	case SelfUpdateProceed:
-		return "Update available"
-	case SelfUpdateReinstall:
-		return "Force reinstall requested"
-	case SelfUpdateDowngrade:
-		return "Downgrade available"
-	case SelfUpdateDevInstall:
-		return "Installing release (replacing dev build)"
-	default:
-		return string(d)
-	}
+	Decision       update.Decision
 }
 
 // formatDryRunOutput generates human-readable dry-run output.
@@ -456,9 +424,9 @@ func formatDryRunOutput(repo string, rel *Release, assessment *VerificationAsses
 	// Self-update version comparison section
 	if selfUpdateInfo != nil {
 		sb.WriteString("\nVersion check:\n")
-		sb.WriteString(fmt.Sprintf("  Current:    %s\n", formatVersionDisplay(selfUpdateInfo.CurrentVersion)))
-		sb.WriteString(fmt.Sprintf("  Target:     %s\n", formatVersionDisplay(selfUpdateInfo.TargetVersion)))
-		sb.WriteString(fmt.Sprintf("  Status:     %s\n", describeSelfUpdateDecision(selfUpdateInfo.Decision)))
+		sb.WriteString(fmt.Sprintf("  Current:    %s\n", update.FormatVersionDisplay(selfUpdateInfo.CurrentVersion)))
+		sb.WriteString(fmt.Sprintf("  Target:     %s\n", update.FormatVersionDisplay(selfUpdateInfo.TargetVersion)))
+		sb.WriteString(fmt.Sprintf("  Status:     %s\n", update.DescribeDecision(selfUpdateInfo.Decision)))
 	}
 
 	if assessment.SelectedAsset != nil {
@@ -1116,16 +1084,16 @@ func main() {
 	if *selfUpdate {
 		// Determine whether to proceed with self-update
 		explicitTag := *tag != ""
-		decision, message, exitCode := shouldSelfUpdate(version, rel.TagName, explicitTag, *selfUpdateForce)
+		decision, message, exitCode := update.DecideSelfUpdate(version, rel.TagName, explicitTag, *selfUpdateForce)
 
 		switch decision {
-		case SelfUpdateSkip:
+		case update.DecisionSkip:
 			fmt.Fprintln(os.Stderr, message)
 			os.Exit(exitCode)
-		case SelfUpdateRefuse:
+		case update.DecisionRefuse:
 			fmt.Fprintln(os.Stderr, message)
 			os.Exit(exitCode)
-		case SelfUpdateProceed, SelfUpdateReinstall, SelfUpdateDowngrade, SelfUpdateDevInstall:
+		case update.DecisionProceed, update.DecisionReinstall, update.DecisionDowngrade, update.DecisionDevInstall:
 			fmt.Fprintln(os.Stderr, message)
 			// Continue with update
 		}
@@ -1172,7 +1140,7 @@ func main() {
 		var selfUpdateInfo *SelfUpdateDryRunInfo
 		if *selfUpdate {
 			explicitTag := *tag != ""
-			decision, _, _ := shouldSelfUpdate(version, rel.TagName, explicitTag, *selfUpdateForce)
+			decision, _, _ := update.DecideSelfUpdate(version, rel.TagName, explicitTag, *selfUpdateForce)
 			selfUpdateInfo = &SelfUpdateDryRunInfo{
 				CurrentVersion: version,
 				TargetVersion:  rel.TagName,
@@ -2284,296 +2252,6 @@ func computeSelfUpdatePath(dir string) (string, error) {
 	}
 	base := filepath.Base(exePath)
 	return filepath.Join(targetDir, base), nil
-}
-
-func majorVersionFromTag(tag string) (int, error) {
-	t := strings.TrimSpace(tag)
-	t = strings.TrimPrefix(t, "v")
-	if t == "" {
-		return 0, fmt.Errorf("empty version")
-	}
-	parts := strings.Split(t, ".")
-	major, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return 0, fmt.Errorf("parse major: %w", err)
-	}
-	return major, nil
-}
-
-// normalizeVersion strips the leading "v" prefix and validates that the version
-// is semver-like (at least MAJOR.MINOR, optionally with PATCH, prerelease, and/or build metadata).
-// Returns the normalized version string and a boolean indicating whether comparison is possible.
-// "dev", empty strings, and non-semver formats return ("", false).
-func normalizeVersion(v string) (string, bool) {
-	trimmed := strings.TrimSpace(v)
-	if trimmed == "" || trimmed == "dev" || trimmed == "0.0.0-dev" {
-		return "", false
-	}
-
-	// Strip leading "v" prefix
-	normalized := strings.TrimPrefix(trimmed, "v")
-
-	// Validate it looks like semver (at least MAJOR.MINOR)
-	parts := strings.Split(normalized, ".")
-	if len(parts) < 2 {
-		return "", false
-	}
-
-	// Check that MAJOR and MINOR are numeric
-	for i := 0; i < 2; i++ {
-		if _, err := strconv.Atoi(parts[i]); err != nil {
-			return "", false
-		}
-	}
-
-	// If PATCH is present, validate it (may have prerelease suffix like "-rc1")
-	if len(parts) >= 3 {
-		patchPart := parts[2]
-		// Strip prerelease/build metadata for validation
-		if idx := strings.IndexAny(patchPart, "-+"); idx >= 0 {
-			patchPart = patchPart[:idx]
-		}
-		if patchPart != "" {
-			if _, err := strconv.Atoi(patchPart); err != nil {
-				return "", false
-			}
-		}
-	}
-
-	return normalized, true
-}
-
-type semverParts struct {
-	major      int
-	minor      int
-	patch      int
-	prerelease []string
-}
-
-func parseSemver(normalized string) (semverParts, error) {
-	var out semverParts
-
-	base := normalized
-	if idx := strings.IndexByte(base, '+'); idx >= 0 {
-		base = base[:idx]
-	}
-
-	var prerelease string
-	if idx := strings.IndexByte(base, '-'); idx >= 0 {
-		prerelease = base[idx+1:]
-		base = base[:idx]
-	}
-
-	parts := strings.Split(base, ".")
-	if len(parts) < 2 {
-		return semverParts{}, fmt.Errorf("invalid semver format")
-	}
-
-	var err error
-	out.major, err = strconv.Atoi(parts[0])
-	if err != nil {
-		return semverParts{}, fmt.Errorf("parse major %q: %w", parts[0], err)
-	}
-	out.minor, err = strconv.Atoi(parts[1])
-	if err != nil {
-		return semverParts{}, fmt.Errorf("parse minor %q: %w", parts[1], err)
-	}
-	out.patch = 0
-	if len(parts) >= 3 && parts[2] != "" {
-		out.patch, err = strconv.Atoi(parts[2])
-		if err != nil {
-			return semverParts{}, fmt.Errorf("parse patch %q: %w", parts[2], err)
-		}
-	}
-
-	if prerelease != "" {
-		out.prerelease = strings.Split(prerelease, ".")
-	}
-
-	return out, nil
-}
-
-func comparePrerelease(a, b []string) int {
-	// Per semver: absence of prerelease > presence of prerelease.
-	if len(a) == 0 && len(b) == 0 {
-		return 0
-	}
-	if len(a) == 0 {
-		return 1
-	}
-	if len(b) == 0 {
-		return -1
-	}
-
-	// Compare dot-separated identifiers; numeric identifiers sort numerically and are lower than non-numeric.
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	for i := 0; i < n; i++ {
-		ai, bi := a[i], b[i]
-		aNum, aErr := strconv.Atoi(ai)
-		bNum, bErr := strconv.Atoi(bi)
-		aIsNum := aErr == nil
-		bIsNum := bErr == nil
-
-		switch {
-		case aIsNum && bIsNum:
-			if aNum < bNum {
-				return -1
-			}
-			if aNum > bNum {
-				return 1
-			}
-		case aIsNum && !bIsNum:
-			return -1
-		case !aIsNum && bIsNum:
-			return 1
-		default:
-			if ai < bi {
-				return -1
-			}
-			if ai > bi {
-				return 1
-			}
-		}
-	}
-
-	// If all matched so far, shorter list has lower precedence.
-	if len(a) < len(b) {
-		return -1
-	}
-	if len(a) > len(b) {
-		return 1
-	}
-	return 0
-}
-
-// compareSemver compares two normalized semver-like strings.
-// Returns -1 if a < b, 0 if a == b, 1 if a > b.
-// Supports MAJOR.MINOR[.PATCH] with optional prerelease/build metadata; build metadata is ignored.
-// Returns an error if either version cannot be parsed.
-func compareSemver(a, b string) (int, error) {
-	av, err := parseSemver(a)
-	if err != nil {
-		return 0, err
-	}
-	bv, err := parseSemver(b)
-	if err != nil {
-		return 0, err
-	}
-
-	switch {
-	case av.major < bv.major:
-		return -1, nil
-	case av.major > bv.major:
-		return 1, nil
-	case av.minor < bv.minor:
-		return -1, nil
-	case av.minor > bv.minor:
-		return 1, nil
-	case av.patch < bv.patch:
-		return -1, nil
-	case av.patch > bv.patch:
-		return 1, nil
-	}
-
-	return comparePrerelease(av.prerelease, bv.prerelease), nil
-}
-
-// SelfUpdateDecision represents the outcome of shouldSelfUpdate.
-type SelfUpdateDecision string
-
-const (
-	SelfUpdateProceed    SelfUpdateDecision = "proceed"    // Proceed with update
-	SelfUpdateSkip       SelfUpdateDecision = "skip"       // Skip, already at target version
-	SelfUpdateRefuse     SelfUpdateDecision = "refuse"     // Refuse (e.g., cross-major without force)
-	SelfUpdateReinstall  SelfUpdateDecision = "reinstall"  // Force reinstall same version
-	SelfUpdateDowngrade  SelfUpdateDecision = "downgrade"  // Explicit downgrade with --tag
-	SelfUpdateDevInstall SelfUpdateDecision = "devinstall" // Installing release from dev build
-)
-
-// shouldSelfUpdate determines whether a self-update should proceed.
-// Parameters:
-//   - current: the running binary's version (e.g., "0.2.5" or "dev")
-//   - target: the target release version (e.g., "0.2.6")
-//   - explicitTag: true if user specified --tag (allows downgrades)
-//   - force: true if --self-update-force was specified
-//
-// Returns:
-//   - decision: one of the SelfUpdateDecision constants
-//   - message: human-readable message for the user
-//   - exitCode: suggested exit code (0 for success/skip, 1 for errors)
-func shouldSelfUpdate(current, target string, explicitTag, force bool) (SelfUpdateDecision, string, int) {
-	currentNorm, currentOK := normalizeVersion(current)
-	targetNorm, targetOK := normalizeVersion(target)
-
-	// Handle dev builds
-	if !currentOK {
-		if current == "dev" || current == "0.0.0-dev" || current == "" {
-			msg := fmt.Sprintf("Installing sfetch %s (replacing dev build)", formatVersionDisplay(target))
-			return SelfUpdateDevInstall, msg, 0
-		}
-		// Unknown current version format - proceed with warning
-		msg := fmt.Sprintf("Version comparison skipped (current=%q, target=%s). Proceeding with verified install.", current, formatVersionDisplay(target))
-		return SelfUpdateProceed, msg, 0
-	}
-
-	// Handle unparseable target (unexpected tag format)
-	if !targetOK {
-		msg := fmt.Sprintf("Version comparison skipped (current=%s, target=%q). Proceeding with verified install.", formatVersionDisplay(currentNorm), target)
-		return SelfUpdateProceed, msg, 0
-	}
-
-	// Compare versions
-	cmp, err := compareSemver(currentNorm, targetNorm)
-	if err != nil {
-		// Comparison failed - proceed with warning
-		msg := fmt.Sprintf("Version comparison failed: %v. Proceeding with verified install.", err)
-		return SelfUpdateProceed, msg, 0
-	}
-
-	// Check for major version change
-	currentMajor, _ := majorVersionFromTag(currentNorm)
-	targetMajor, _ := majorVersionFromTag(targetNorm)
-
-	switch cmp {
-	case 0: // Same version
-		if force {
-			msg := fmt.Sprintf("Reinstalling sfetch %s...", formatVersionDisplay(targetNorm))
-			return SelfUpdateReinstall, msg, 0
-		}
-		msg := fmt.Sprintf("Already at latest version (%s). Use --self-update-force to reinstall.", formatVersionDisplay(targetNorm))
-		return SelfUpdateSkip, msg, 0
-
-	case -1: // current < target (upgrade)
-		if currentMajor != targetMajor && !force {
-			msg := fmt.Sprintf("Refusing self-update across major versions (%s → %s); rerun with --self-update-force to proceed.",
-				formatVersionDisplay(currentNorm), formatVersionDisplay(targetNorm))
-			return SelfUpdateRefuse, msg, 1
-		}
-		msg := fmt.Sprintf("Updating sfetch: %s → %s", formatVersionDisplay(currentNorm), formatVersionDisplay(targetNorm))
-		return SelfUpdateProceed, msg, 0
-
-	case 1: // current > target (downgrade)
-		if !explicitTag {
-			// This shouldn't normally happen (latest should be >= current),
-			// but handle gracefully
-			msg := fmt.Sprintf("Already at version %s (target %s is older). Use --tag to downgrade.",
-				formatVersionDisplay(currentNorm), formatVersionDisplay(targetNorm))
-			return SelfUpdateSkip, msg, 0
-		}
-		if currentMajor != targetMajor && !force {
-			msg := fmt.Sprintf("Refusing downgrade across major versions (%s → %s); rerun with --self-update-force to proceed.",
-				formatVersionDisplay(currentNorm), formatVersionDisplay(targetNorm))
-			return SelfUpdateRefuse, msg, 1
-		}
-		msg := fmt.Sprintf("Downgrading sfetch: %s → %s", formatVersionDisplay(currentNorm), formatVersionDisplay(targetNorm))
-		return SelfUpdateDowngrade, msg, 0
-	}
-
-	// Should not reach here
-	return SelfUpdateProceed, "", 0
 }
 
 func copyFile(src, dst string) error {
