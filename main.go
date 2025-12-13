@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -26,7 +25,6 @@ import (
 	"time"
 
 	"github.com/3leaps/sfetch/pkg/update"
-	"github.com/jedisct1/go-minisign"
 )
 
 const (
@@ -2238,60 +2236,6 @@ func titleCase(s string) string {
 	return string(runes)
 }
 
-// findChecksumSignature looks for a signature over the checksum file (Workflow A).
-// It searches for assets matching the ChecksumSigCandidates patterns.
-// Returns the signature asset and the corresponding checksum asset name, or nil if not found.
-func findChecksumSignature(assets []Asset, cfg *RepoConfig) (*Asset, string) {
-	for _, candidate := range cfg.ChecksumSigCandidates {
-		for i := range assets {
-			if assets[i].Name == candidate {
-				// Extract the checksum file name by removing the signature extension
-				checksumName := strings.TrimSuffix(candidate, ".minisig")
-				checksumName = strings.TrimSuffix(checksumName, ".asc")
-				checksumName = strings.TrimSuffix(checksumName, ".sig")
-				return &assets[i], checksumName
-			}
-		}
-	}
-	return nil, ""
-}
-
-// signatureFormatFromExtension determines the signature verification method from file extension.
-// Returns sigFormatMinisign, sigFormatPGP, sigFormatBinary, or empty string if unknown.
-func signatureFormatFromExtension(filename string, formats SignatureFormats) string {
-	lower := strings.ToLower(filename)
-
-	// Special-case .sig: checksum-level sigs use PGP, per-asset default to ed25519
-	if strings.HasSuffix(lower, ".sig") {
-		if looksLikeChecksumSig(lower) {
-			return sigFormatPGP
-		}
-		return sigFormatBinary
-	}
-
-	for _, ext := range formats.Minisign {
-		if strings.HasSuffix(lower, ext) {
-			return sigFormatMinisign
-		}
-	}
-	for _, ext := range formats.PGP {
-		if strings.HasSuffix(lower, ext) {
-			return sigFormatPGP
-		}
-	}
-	for _, ext := range formats.Ed25519 {
-		if strings.HasSuffix(lower, ext) {
-			return sigFormatBinary
-		}
-	}
-	return ""
-}
-
-func looksLikeChecksumSig(name string) bool {
-	// Heuristic: checksum manifests typically end with "sums" or "checksums"
-	return strings.Contains(name, "sums.sig") || strings.Contains(name, "checksums.sig")
-}
-
 func resolvePGPKey(localPath, keyURL, keyAsset string, assets []Asset, tmpDir string) (string, error) {
 	if localPath != "" {
 		if isHTTPURL(localPath) {
@@ -2491,176 +2435,6 @@ func renderTemplate(tpl string, ctx templateContext) string {
 		"{{versionNoPrefix}}", ctx.VersionNoPrefix,
 	}
 	return strings.NewReplacer(replacements...).Replace(tpl)
-}
-
-func extractChecksum(data []byte, algo, assetName string) (string, error) {
-	text := strings.TrimSpace(string(data))
-	if text == "" {
-		return "", fmt.Errorf("checksum file is empty")
-	}
-	digestLen := expectedDigestLength(algo)
-	if isHexDigest(text, digestLen) {
-		return strings.ToLower(text), nil
-	}
-
-	lines := strings.Split(text, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		digest := fields[0]
-		if !isHexDigest(digest, digestLen) {
-			continue
-		}
-		candidate := filepath.Base(fields[len(fields)-1])
-		if candidate == assetName {
-			return strings.ToLower(digest), nil
-		}
-	}
-
-	return "", fmt.Errorf("checksum for %s not found", assetName)
-}
-
-func isHexDigest(value string, expectedLen int) bool {
-	if expectedLen > 0 && len(value) != expectedLen {
-		return false
-	}
-	if len(value)%2 != 0 {
-		return false
-	}
-	for _, ch := range value {
-		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') && (ch < 'A' || ch > 'F') {
-			return false
-		}
-	}
-	return true
-}
-
-func expectedDigestLength(algo string) int {
-	switch strings.ToLower(algo) {
-	case "sha256":
-		return 64
-	case "sha512":
-		return 128
-	default:
-		return 0
-	}
-}
-
-func normalizeHexKey(input string) (string, error) {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" {
-		return "", fmt.Errorf("error: --key is required to verify ed25519 signatures")
-	}
-	upper := strings.ToUpper(trimmed)
-	if strings.Contains(upper, "BEGIN") || strings.Contains(upper, "PRIVATE") {
-		return "", fmt.Errorf("ed25519 keys must be provided as 64-character hex strings, not PEM/PGP blobs")
-	}
-	expectedLen := ed25519.PublicKeySize * 2
-	if len(trimmed) != expectedLen {
-		return "", fmt.Errorf("ed25519 key must be %d hex characters", expectedLen)
-	}
-	if !isHexDigest(trimmed, expectedLen) {
-		return "", fmt.Errorf("ed25519 key must contain only hexadecimal characters")
-	}
-	return strings.ToLower(trimmed), nil
-}
-
-func loadSignature(path string) (signatureData, error) {
-	// #nosec G304 -- path sig tmp controlled
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return signatureData{}, fmt.Errorf("read sig: %w", err)
-	}
-	trimmed := strings.TrimSpace(string(data))
-	if strings.HasPrefix(trimmed, "-----BEGIN PGP SIGNATURE-----") {
-		return signatureData{format: sigFormatPGP}, nil
-	}
-	// Check for minisign format (starts with "untrusted comment:")
-	// Actual parsing is done by minisign library during verification
-	if strings.HasPrefix(trimmed, "untrusted comment:") {
-		return signatureData{format: sigFormatMinisign}, nil
-	}
-	if len(data) == ed25519.SignatureSize {
-		return signatureData{format: sigFormatBinary, bytes: data}, nil
-	}
-	decoded, err := hex.DecodeString(trimmed)
-	if err == nil && len(decoded) == ed25519.SignatureSize {
-		return signatureData{format: sigFormatBinary, bytes: decoded}, nil
-	}
-	return signatureData{}, fmt.Errorf("unsupported signature format in %s", path)
-}
-
-// verifyMinisignSignature verifies a minisign signature using the github.com/jedisct1/go-minisign library.
-// sigPath is the path to the .minisig file, pubKeyPath is the path to the .pub file.
-// contentToVerify is the bytes that were signed (either asset bytes or checksum file bytes).
-func verifyMinisignSignature(contentToVerify []byte, sigPath, pubKeyPath string) error {
-	pubKey, err := minisign.NewPublicKeyFromFile(pubKeyPath)
-	if err != nil {
-		return fmt.Errorf("read minisign pubkey: %w", err)
-	}
-
-	sig, err := minisign.NewSignatureFromFile(sigPath)
-	if err != nil {
-		return fmt.Errorf("read minisign signature: %w", err)
-	}
-
-	valid, err := pubKey.Verify(contentToVerify, sig)
-	if err != nil {
-		return fmt.Errorf("minisign: verification error: %w", err)
-	}
-	if !valid {
-		return fmt.Errorf("minisign: signature verification failed")
-	}
-
-	return nil
-}
-
-func verifyPGPSignature(assetPath, sigPath, pubKeyPath, gpgBin string) error {
-	home, err := os.MkdirTemp("", "sfetch-gpg-")
-	if err != nil {
-		return fmt.Errorf("create gpg home: %w", err)
-	}
-	defer os.RemoveAll(home)
-
-	importArgs := []string{"--batch", "--no-tty", "--homedir", home, "--import", pubKeyPath}
-	if err := runCommand(gpgBin, importArgs...); err != nil {
-		return fmt.Errorf("import pgp key: %w", err)
-	}
-
-	verifyArgs := []string{"--batch", "--no-tty", "--homedir", home, "--trust-model", "always", "--verify", sigPath, assetPath}
-	if err := runCommand(gpgBin, verifyArgs...); err != nil {
-		return fmt.Errorf("verify pgp signature: %w", err)
-	}
-
-	return nil
-}
-
-func runCommand(bin string, args ...string) error {
-	cmd := exec.Command(bin, args...)
-	var combined bytes.Buffer
-	cmd.Stdout = &combined
-	cmd.Stderr = &combined
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s %s: %s", bin, strings.Join(args, " "), trimCommandOutput(combined.String()))
-	}
-	return nil
-}
-
-func trimCommandOutput(out string) string {
-	clean := strings.TrimSpace(out)
-	if clean == "" {
-		return "command failed"
-	}
-	if len(clean) > maxCommandError {
-		return clean[:maxCommandError] + "..."
-	}
-	return clean
 }
 
 // selfVerifyAssetName returns the expected asset filename for the current platform.
