@@ -90,6 +90,61 @@ jobs:
           sfetch --repo owner/repo --latest --dest-dir "$BIN_DIR"
 ```
 
+### Non-root container users
+
+Some container images run as a non-root user by default (e.g., UID 1001). When using GitHub Actions with such containers, you may need to specify the user to match workspace ownership:
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/your-org/your-tools:v1.0
+      # Match the GitHub-hosted runner workspace ownership (UID 1001)
+      options: --user 1001
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          BIN_DIR="$HOME/.local/bin"
+          mkdir -p "$BIN_DIR"
+          curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash -s -- --yes --dir "$BIN_DIR"
+          export PATH="$BIN_DIR:$PATH"
+          sfetch --repo owner/repo --latest --dest-dir "$BIN_DIR"
+```
+
+If you need to install system packages (e.g., `apt-get install`), you may temporarily need root access:
+
+```yaml
+container:
+  image: ghcr.io/your-org/your-tools:v1.0
+  # Run as root to install packages; consider baking dependencies into the image instead
+  options: --user 0
+```
+
+**Best practice:** Bake required tools (like `minisign`) into your container image rather than installing at runtime. This improves build speed and avoids permission issues.
+
+### Shell compatibility in containers
+
+Some minimal container images (e.g., `ubuntu:24.04`) use `/bin/sh` as the default shell, which may not support bash-specific features like `pipefail`. If you use `set -euo pipefail`, explicitly specify bash:
+
+```yaml
+- name: Install tools
+  shell: bash
+  run: |
+    set -euo pipefail
+    # ... your commands
+```
+
+Or use POSIX-compatible options only:
+
+```yaml
+- name: Install tools
+  run: |
+    set -eu
+    # ... your commands
+```
+
 ## GitLab CI Example
 
 ```yaml
