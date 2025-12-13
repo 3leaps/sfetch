@@ -21,7 +21,7 @@ jobs:
 
       - name: Install tools
         run: |
-          sudo apt-get update && sudo apt-get install -y yamllint shellcheck
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends yamllint shellcheck minisign
           go install mvdan.cc/sh/v3/cmd/shfmt@latest
 
       - name: Quality
