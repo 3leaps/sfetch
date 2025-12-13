@@ -40,6 +40,7 @@ jobs:
       image: ubuntu:24.04
     steps:
       - name: Install prerequisites
+        shell: bash
         run: |
           set -euo pipefail
           apt-get update && \
@@ -47,6 +48,7 @@ jobs:
             ca-certificates curl minisign
 
       - name: Install sfetch (curl | bash)
+        shell: bash
         run: |
           set -euo pipefail
           BIN_DIR="$HOME/.local/bin"
@@ -61,6 +63,7 @@ jobs:
           sfetch --self-verify
 
       - name: Install goneat (verified)
+        shell: bash
         run: |
           set -euo pipefail
           BIN_DIR="$HOME/.local/bin"
