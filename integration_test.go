@@ -378,8 +378,8 @@ func TestIntegrationSelfUpdate(t *testing.T) {
 
 	destDir := t.TempDir()
 
-	// Test 1: Dry-run should work and show dev build guard refusal
-	t.Run("dry-run-refuses-dev-build", func(t *testing.T) {
+	// Test 1: Dry-run from dev build should succeed and show install message
+	t.Run("dry-run-dev-build-proceeds", func(t *testing.T) {
 		cmd := exec.Command("go", "run", ".",
 			"--self-update",
 			"--dry-run",
@@ -389,13 +389,13 @@ func TestIntegrationSelfUpdate(t *testing.T) {
 		cmd.Stdout = &output
 		cmd.Stderr = &output
 		err := cmd.Run()
-		if err == nil {
-			t.Fatalf("expected dry-run to fail due to dev build guard")
+		if err != nil {
+			t.Fatalf("expected dry-run from dev build to succeed: %v\noutput:\n%s", err, output.String())
 		}
 
-		// Should show dev build guard message
-		if !bytes.Contains(output.Bytes(), []byte("current build is 'dev'")) {
-			t.Errorf("expected dev build guard message in output:\n%s", output.String())
+		// Should show dev install message (replacing dev build)
+		if !bytes.Contains(output.Bytes(), []byte("dev")) {
+			t.Errorf("expected dev build mention in output:\n%s", output.String())
 		}
 	})
 

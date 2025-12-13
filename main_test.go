@@ -1729,3 +1729,292 @@ func TestProvenanceSchemaRejectsInvalid(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeVersion(t *testing.T) {
+	tests := []struct {
+		input  string
+		want   string
+		wantOK bool
+	}{
+		// Valid versions
+		{"v0.2.5", "0.2.5", true},
+		{"0.2.5", "0.2.5", true},
+		{"v1.0.0", "1.0.0", true},
+		{"1.0.0", "1.0.0", true},
+		{"v10.20.30", "10.20.30", true},
+		{"v0.1", "0.1", true},                       // MAJOR.MINOR only
+		{"1.2", "1.2", true},                        // MAJOR.MINOR only
+		{"v0.2.5-rc1", "0.2.5-rc1", true},           // prerelease
+		{"v1.0.0+build123", "1.0.0+build123", true}, // build metadata
+
+		// Invalid/dev versions
+		{"dev", "", false},
+		{"0.0.0-dev", "", false},
+		{"", "", false},
+		{"   ", "", false},
+		{"v", "", false},
+		{"vx.y.z", "", false},
+		{"not-a-version", "", false},
+		{"1", "", false},           // single number is not semver
+		{"v1", "", false},          // single number is not semver
+		{"abc.def.ghi", "", false}, // non-numeric
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, ok := normalizeVersion(tt.input)
+			if ok != tt.wantOK {
+				t.Errorf("normalizeVersion(%q) ok = %v, want %v", tt.input, ok, tt.wantOK)
+			}
+			if got != tt.want {
+				t.Errorf("normalizeVersion(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCompareSemver(t *testing.T) {
+	tests := []struct {
+		a       string
+		b       string
+		want    int
+		wantErr bool
+	}{
+		// Equal versions
+		{"0.2.5", "0.2.5", 0, false},
+		{"1.0.0", "1.0.0", 0, false},
+		{"10.20.30", "10.20.30", 0, false},
+
+		// a < b (upgrade)
+		{"0.2.4", "0.2.5", -1, false},
+		{"0.2.5", "0.3.0", -1, false},
+		{"0.2.5", "1.0.0", -1, false},
+		{"1.0.0", "1.0.1", -1, false},
+		{"1.0.0", "1.1.0", -1, false},
+		{"1.0.0", "2.0.0", -1, false},
+
+		// a > b (downgrade)
+		{"0.2.5", "0.2.4", 1, false},
+		{"0.3.0", "0.2.5", 1, false},
+		{"1.0.0", "0.2.5", 1, false},
+		{"1.0.1", "1.0.0", 1, false},
+		{"1.1.0", "1.0.0", 1, false},
+		{"2.0.0", "1.0.0", 1, false},
+
+		// With MAJOR.MINOR only (missing PATCH defaults to 0)
+		{"1.0", "1.0.0", 0, false},
+		{"1.0", "1.0.1", -1, false},
+		{"1.1", "1.0.0", 1, false},
+
+		// With prerelease (semver precedence: prerelease < stable)
+		{"0.2.5-rc1", "0.2.5", -1, false},
+		{"0.2.5", "0.2.5-beta", 1, false},
+		{"0.2.5-rc1", "0.2.5-rc2", -1, false},
+		{"0.2.5-rc.10", "0.2.5-rc.2", 1, false},
+
+		// Invalid inputs
+		{"invalid", "0.2.5", 0, true},
+		{"0.2.5", "invalid", 0, true},
+		{"1", "1.0.0", 0, true}, // single number invalid
+	}
+
+	for _, tt := range tests {
+		name := tt.a + "_vs_" + tt.b
+		t.Run(name, func(t *testing.T) {
+			got, err := compareSemver(tt.a, tt.b)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("compareSemver(%q, %q) expected error, got nil", tt.a, tt.b)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("compareSemver(%q, %q) unexpected error: %v", tt.a, tt.b, err)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("compareSemver(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestShouldSelfUpdate(t *testing.T) {
+	tests := []struct {
+		name        string
+		current     string
+		target      string
+		explicitTag bool
+		force       bool
+		wantDec     SelfUpdateDecision
+		wantExit    int
+	}{
+		// Same version - skip by default
+		{
+			name:     "same version skips",
+			current:  "0.2.5",
+			target:   "v0.2.5",
+			wantDec:  SelfUpdateSkip,
+			wantExit: 0,
+		},
+		{
+			name:     "same version with force reinstalls",
+			current:  "0.2.5",
+			target:   "v0.2.5",
+			force:    true,
+			wantDec:  SelfUpdateReinstall,
+			wantExit: 0,
+		},
+
+		// Upgrade available
+		{
+			name:     "upgrade available proceeds",
+			current:  "0.2.4",
+			target:   "v0.2.5",
+			wantDec:  SelfUpdateProceed,
+			wantExit: 0,
+		},
+		{
+			name:     "major upgrade refused without force",
+			current:  "0.2.5",
+			target:   "v1.0.0",
+			wantDec:  SelfUpdateRefuse,
+			wantExit: 1,
+		},
+		{
+			name:     "major upgrade allowed with force",
+			current:  "0.2.5",
+			target:   "v1.0.0",
+			force:    true,
+			wantDec:  SelfUpdateProceed,
+			wantExit: 0,
+		},
+
+		// Downgrade with explicit tag
+		{
+			name:        "downgrade with tag proceeds",
+			current:     "0.2.5",
+			target:      "v0.2.3",
+			explicitTag: true,
+			wantDec:     SelfUpdateDowngrade,
+			wantExit:    0,
+		},
+		{
+			name:        "downgrade without tag skips",
+			current:     "0.2.5",
+			target:      "v0.2.3",
+			explicitTag: false,
+			wantDec:     SelfUpdateSkip,
+			wantExit:    0,
+		},
+		{
+			name:        "major downgrade refused without force",
+			current:     "1.0.0",
+			target:      "v0.2.5",
+			explicitTag: true,
+			wantDec:     SelfUpdateRefuse,
+			wantExit:    1,
+		},
+		{
+			name:        "major downgrade allowed with force",
+			current:     "1.0.0",
+			target:      "v0.2.5",
+			explicitTag: true,
+			force:       true,
+			wantDec:     SelfUpdateDowngrade,
+			wantExit:    0,
+		},
+
+		// Dev builds
+		{
+			name:     "dev build proceeds",
+			current:  "dev",
+			target:   "v0.2.5",
+			wantDec:  SelfUpdateDevInstall,
+			wantExit: 0,
+		},
+		{
+			name:     "0.0.0-dev build proceeds",
+			current:  "0.0.0-dev",
+			target:   "v0.2.5",
+			wantDec:  SelfUpdateDevInstall,
+			wantExit: 0,
+		},
+		{
+			name:     "empty version proceeds",
+			current:  "",
+			target:   "v0.2.5",
+			wantDec:  SelfUpdateDevInstall,
+			wantExit: 0,
+		},
+
+		// Unparseable target
+		{
+			name:     "unparseable target proceeds with warning",
+			current:  "0.2.5",
+			target:   "not-a-version",
+			wantDec:  SelfUpdateProceed,
+			wantExit: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dec, msg, exitCode := shouldSelfUpdate(tt.current, tt.target, tt.explicitTag, tt.force)
+			if dec != tt.wantDec {
+				t.Errorf("decision = %v, want %v (msg: %s)", dec, tt.wantDec, msg)
+			}
+			if exitCode != tt.wantExit {
+				t.Errorf("exitCode = %d, want %d", exitCode, tt.wantExit)
+			}
+			if msg == "" {
+				t.Error("message should not be empty")
+			}
+		})
+	}
+}
+
+func TestFormatVersionDisplay(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"0.2.5", "v0.2.5"},
+		{"v0.2.5", "v0.2.5"},       // already has v prefix
+		{"dev", "dev"},             // dev unchanged
+		{"", ""},                   // empty unchanged
+		{"0.0.0-dev", "0.0.0-dev"}, // special dev version unchanged
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := formatVersionDisplay(tt.input)
+			if got != tt.want {
+				t.Errorf("formatVersionDisplay(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDescribeSelfUpdateDecision(t *testing.T) {
+	tests := []struct {
+		decision     SelfUpdateDecision
+		wantContains string
+	}{
+		{SelfUpdateSkip, "latest"},
+		{SelfUpdateRefuse, "refused"},
+		{SelfUpdateProceed, "available"},
+		{SelfUpdateReinstall, "reinstall"},
+		{SelfUpdateDowngrade, "Downgrade"},
+		{SelfUpdateDevInstall, "dev"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.decision), func(t *testing.T) {
+			got := describeSelfUpdateDecision(tt.decision)
+			if !strings.Contains(strings.ToLower(got), strings.ToLower(tt.wantContains)) {
+				t.Errorf("describeSelfUpdateDecision(%v) = %q, want to contain %q", tt.decision, got, tt.wantContains)
+			}
+		})
+	}
+}
