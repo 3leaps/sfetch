@@ -21,6 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - (TBD)
 
+## [0.2.6] - TBD
+
+### Fixed
+- **Cross-device installs/caching (EXDEV):** When `--dest-dir` or `--cache-dir` is on a different filesystem than the temp directory (common in containerized CI), sfetch now falls back to copy when `rename(2)` fails with “invalid cross-device link”.
+
+### Changed
+- Refactored internals to improve auditability and testability (moved logic into `internal/*` and introduced an injectable CLI entrypoint); CLI behavior is intended to be unchanged.
+
+### Documentation
+- Added CI/CD usage guide: `docs/cicd-usage-guide.md`.
+
 ## [0.2.5] - 2025-12-13
 
 ### Added

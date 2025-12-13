@@ -1,5 +1,29 @@
 # Release Notes
 
+## v0.2.6
+
+### Summary
+Improved reliability in containerized CI by handling cross-device installs/caching automatically, plus internal refactoring to improve auditability (no intended CLI behavior changes).
+
+### Highlights
+
+**Cross-device install/caching fix (EXDEV)**
+- When `--dest-dir` or `--cache-dir` is on a different filesystem than the temp directory (common with container mounts), sfetch now falls back to a copy operation when `rename(2)` fails with “invalid cross-device link”.
+
+**CI/CD documentation**
+- New guide: `docs/cicd-usage-guide.md` (GitHub Actions, GitLab CI, container runners).
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+### Details
+- See `CHANGELOG.md` for the complete list.
+
+---
+
 ## v0.2.5
 
 ### Summary
@@ -50,37 +74,6 @@ Bug fix for self-update failing when SHA2-512SUMS is preferred over SHA256SUMS.
 **Fixed self-update checksum mismatch**
 - Self-update and fetch now correctly detect the hash algorithm from the checksum filename.
 - Previously, when SHA2-512SUMS was selected, the code still used sha256 for hashing, causing "checksum not found" errors.
-
-### Install
-
-```bash
-curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
-```
-
-### Details
-- See `CHANGELOG.md` for the complete list.
-
----
-
-## v0.2.3
-
-### Summary
-Installer hardening and signing script improvements for custom GPG environments.
-
-### Highlights
-
-**Installer Parsing Improvements**
-- Prefer `jq` (if present) for GitHub release JSON parsing; dependency-free fallback retained
-- Added threat-model comments for pre-extraction path traversal scanning
-- `make bootstrap` now advisory; `make prereqs` remains strict
-
-**Signing Script Fixes**
-- Added `GPG_HOMEDIR` environment variable support for custom GPG homedirs
-- Uses `env GNUPGHOME=...` to avoid polluting user's global GPG settings
-
-**Documentation**
-- Updated docs to reflect checksum-only opt-in and signature defaults
-- Added DO/DONOT section to `AGENTS.md` with push approval policies
 
 ### Install
 
