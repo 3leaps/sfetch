@@ -31,4 +31,4 @@ jobs:
         run: make precommit
 
       - name: Test install script
-        run: bash scripts/install-sfetch.sh --dry-run --tag v2025.12.05
+        run: bash scripts/install-sfetch.sh --dry-run
