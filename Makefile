@@ -8,6 +8,7 @@ NAME ?= sfetch
 MAIN ?= .
 YAMLLINT ?= yamllint
 JQ ?= jq
+ACTIONLINT ?= actionlint
 
 # LDFLAGS for version injection
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME) -X main.gitCommit=$(GIT_COMMIT)
@@ -53,6 +54,7 @@ prereqs: tools
 	@command -v shfmt >/dev/null 2>&1 || { echo "shfmt not found: brew install shfmt / go install mvdan.cc/sh/v3/cmd/shfmt@latest" >&2; exit 1; }
 	@command -v shellcheck >/dev/null 2>&1 || echo "shellcheck not found (optional): brew install shellcheck / apt install shellcheck"
 	@command -v $(JQ) >/dev/null 2>&1 || echo "$(JQ) not found (optional): brew install jq / apt install jq"
+	@command -v $(ACTIONLINT) >/dev/null 2>&1 || echo "$(ACTIONLINT) not found (optional): go install github.com/rhysd/actionlint/cmd/actionlint@latest"
 	@echo "All prerequisites available"
 
 prereqs-advise:
@@ -61,6 +63,7 @@ prereqs-advise:
 	@command -v shfmt >/dev/null 2>&1 || echo "shfmt not found: brew install shfmt / go install mvdan.cc/sh/v3/cmd/shfmt@latest" >&2
 	@command -v shellcheck >/dev/null 2>&1 || echo "shellcheck not found (optional): brew install shellcheck / apt install shellcheck" >&2
 	@command -v $(JQ) >/dev/null 2>&1 || echo "$(JQ) not found (optional): brew install jq / apt install jq" >&2
+	@command -v $(ACTIONLINT) >/dev/null 2>&1 || echo "$(ACTIONLINT) not found (optional): go install github.com/rhysd/actionlint/cmd/actionlint@latest" >&2
 	@echo "Bootstrap checks complete"
 
 bootstrap: tools prereqs-advise
@@ -98,6 +101,7 @@ lint: tools
 	staticcheck ./...
 	staticcheck ./scripts
 	go run github.com/santhosh-tekuri/jsonschema/cmd/jv@latest testdata/corpus.schema.json testdata/corpus.json
+	@$(MAKE) lint-workflows
 
 test:
 	go test -v -race ./...
@@ -109,8 +113,14 @@ gosec-high: tools
 	gosec -confidence high -exclude G301,G302,G107,G304 ./...
 
 yamllint-workflows:
-	@command -v $(YAMLLINT) >/dev/null 2>&1 || { echo "$(YAMLLINT) not found; run 'make prereqs' for install guidance" >&2; exit 1; }
+	@command -v $(YAMLLINT) >/dev/null 2>&1 || { echo "$(YAMLLINT) not found (optional): run 'make prereqs' for install guidance" >&2; exit 0; }
 	$(YAMLLINT) .github/workflows
+
+actionlint-workflows:
+	@command -v $(ACTIONLINT) >/dev/null 2>&1 || { echo "$(ACTIONLINT) not found (optional): go install github.com/rhysd/actionlint/cmd/actionlint@latest" >&2; exit 0; }
+	$(ACTIONLINT) .github/workflows/*.yml
+
+lint-workflows: yamllint-workflows actionlint-workflows
 
 # Corpus targets are opt-in (not part of quality/precommit) because they
 # require authenticated GitHub API calls. Run manually during release prep:
