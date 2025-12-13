@@ -31,7 +31,10 @@ BUILD_ARTIFACT := bin/$(NAME)_$(GOOS)_$(GOARCH)$(EXT)
 DIST_RELEASE := dist/release
 RELEASE_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo v$(VERSION))
 PUBLIC_KEY_NAME ?= sfetch-release-signing-key.asc
-MINISIGN_KEY ?=
+SFETCH_MINISIGN_KEY ?=
+SFETCH_MINISIGN_PUB ?=
+SFETCH_PGP_KEY_ID ?=
+SFETCH_GPG_HOMEDIR ?=
 MINISIGN_PUB_NAME ?= sfetch-minisign.pub
 
 .PHONY: all build test clean release-clean install release fmt fmt-check shell-check lint tools prereqs prereqs-advise bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-checksums release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script version-check version-set version-patch version-minor version-major corpus corpus-all corpus-dryrun corpus-validate
@@ -178,26 +181,30 @@ release-notes:
 	cp RELEASE_NOTES.md $(DIST_RELEASE)/release-notes-$(RELEASE_TAG).md
 	@echo "✅ Release notes copied to $(DIST_RELEASE)"
 
-# Note: GPG_HOMEDIR should be set by user if using custom GPG homedir
+# Note: SFETCH_GPG_HOMEDIR should be set by user if using custom GPG homedir
 # This is not persisted and only affects the signing operation
 release-sign: release-checksums
-	MINISIGN_KEY=$(MINISIGN_KEY) PGP_KEY_ID=$(PGP_KEY_ID) ./scripts/sign-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+	SFETCH_MINISIGN_KEY=$(SFETCH_MINISIGN_KEY) SFETCH_PGP_KEY_ID=$(SFETCH_PGP_KEY_ID) SFETCH_GPG_HOMEDIR=$(SFETCH_GPG_HOMEDIR) ./scripts/sign-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
 release-export-key:
-	./scripts/export-release-key.sh $(PGP_KEY_ID) $(DIST_RELEASE)
+	SFETCH_GPG_HOMEDIR=$(SFETCH_GPG_HOMEDIR) ./scripts/export-release-key.sh $(SFETCH_PGP_KEY_ID) $(DIST_RELEASE)
 
 release-export-minisign-key: build
-	@if [ -z "$(MINISIGN_KEY)" ]; then echo "MINISIGN_KEY not set" >&2; exit 1; fi
+	@if [ -z "$(SFETCH_MINISIGN_KEY)" ] && [ -z "$(SFETCH_MINISIGN_PUB)" ]; then echo "SFETCH_MINISIGN_KEY or SFETCH_MINISIGN_PUB not set" >&2; exit 1; fi
 	@mkdir -p $(DIST_RELEASE)
-	@# Extract public key path from secret key (replace .key with .pub)
-	@pubkey="$$(echo "$(MINISIGN_KEY)" | sed 's/\.key$$/.pub/')"; \
+	@# Use explicit pub path if set, otherwise derive from secret key path
+	@if [ -n "$(SFETCH_MINISIGN_PUB)" ]; then \
+		pubkey="$(SFETCH_MINISIGN_PUB)"; \
+	else \
+		pubkey="$$(echo "$(SFETCH_MINISIGN_KEY)" | sed 's/\.key$$/.pub/')"; \
+	fi; \
 	if [ -f "$$pubkey" ]; then \
 		echo "Verifying $$pubkey is a valid minisign public key..."; \
 		./$(BUILD_ARTIFACT) --verify-minisign-pubkey "$$pubkey" || exit 1; \
 		cp "$$pubkey" "$(DIST_RELEASE)/$(MINISIGN_PUB_NAME)"; \
 		echo "✅ Copied minisign public key to $(DIST_RELEASE)/$(MINISIGN_PUB_NAME)"; \
 	else \
-		echo "error: public key $$pubkey not found (expected alongside secret key)" >&2; \
+		echo "error: public key $$pubkey not found" >&2; \
 		exit 1; \
 	fi
 

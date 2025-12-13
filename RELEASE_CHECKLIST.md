@@ -25,9 +25,11 @@ This document walks maintainers through the build/sign/upload flow for each sfet
 
 Set environment variables:
 ```bash
-export MINISIGN_KEY=/path/to/sfetch.key
-export PGP_KEY_ID=security@fulmenhq.dev  # or your-subkey-id!
-export GPG_HOMEDIR=/path/to/custom/gpg/homedir  # optional, defaults to ~/.gnupg
+export RELEASE_TAG=v$(cat VERSION)
+export SFETCH_MINISIGN_KEY=/path/to/sfetch.key
+export SFETCH_MINISIGN_PUB=/path/to/sfetch.pub
+export SFETCH_PGP_KEY_ID="security@fulmenhq.dev"        # or your-subkey-id!
+export SFETCH_GPG_HOMEDIR=/path/to/custom/gpg/homedir   # optional, defaults to ~/.gnupg
 ```
 
 ### Steps
@@ -39,13 +41,13 @@ export GPG_HOMEDIR=/path/to/custom/gpg/homedir  # optional, defaults to ~/.gnupg
 
 2. **Download artifacts**
    ```bash
-   RELEASE_TAG=v$(cat VERSION) make release-download
+   make release-download
    ```
 
 3. **Generate & sign checksum manifests** (`SHA256SUMS`, `SHA2-512SUMS`) with minisign + PGP
    ```bash
-   RELEASE_TAG=v$(cat VERSION) make release-checksums
-   RELEASE_TAG=v$(cat VERSION) make release-sign
+   make release-checksums
+   make release-sign
    ```
    Produces: `SHA256SUMS`, `SHA2-512SUMS` plus `.minisig`/`.asc`
 
@@ -63,12 +65,12 @@ export GPG_HOMEDIR=/path/to/custom/gpg/homedir  # optional, defaults to ~/.gnupg
 
 6. **Copy release notes**
    ```bash
-   RELEASE_TAG=v$(cat VERSION) make release-notes
+   make release-notes
    ```
 
 7. **Upload signatures and keys**
    ```bash
-   RELEASE_TAG=v$(cat VERSION) make release-upload
+   make release-upload
    ```
    > **Note:** This uploads ALL assets with `--clobber`, including binaries CI already uploaded.
    > This is intentional for idempotency - rerun safely to fix any mistakes.

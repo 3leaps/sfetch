@@ -10,7 +10,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- (TBD)
+
+### Changed
+- (TBD)
+
+### Fixed
+- (TBD)
+
+### Security
+- (TBD)
+
+## [0.2.5] - 2025-12-13
+
+### Added
 - **Self-update version check:** `--self-update` now skips reinstall when already at the target version; `--self-update-force` reinstalls; `--tag` allows explicit downgrades (major-version guard still applies).
+- **Embedded self-update config:** Self-update uses an embedded, schema-backed update target config (`configs/update/sfetch.json`), with `--show-update-config` and `--validate-update-config`.
+- **Update library (initial):** New `pkg/update` package exposes self-update decision logic for reuse.
+- **Dry-run version info:** `--self-update --dry-run` now shows version comparison (current/target/status).
+
+### Changed
+- Build now targets the package (not `./main.go`) so multi-file `main` builds work (`Makefile` `MAIN ?= .`).
+- **Signing env vars standardized:** All signing-related environment variables now use an `SFETCH_` prefix for CI/scripting consistency:
+  - `MINISIGN_KEY` → `SFETCH_MINISIGN_KEY`
+  - `PGP_KEY_ID` → `SFETCH_PGP_KEY_ID`
+  - `GPG_HOMEDIR` → `SFETCH_GPG_HOMEDIR`
+  - Added `SFETCH_MINISIGN_PUB` for explicit public key path.
+- Dev builds no longer require `--self-update-force` to proceed (easier exit path for developers).
 
 ## [0.2.4] - 2025-12-12
 
