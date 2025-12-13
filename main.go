@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"hash"
@@ -668,51 +669,54 @@ func apiBaseURLWithDefault(defaultBase string) string {
 	return strings.TrimRight(base, "/")
 }
 
-func main() {
-	repo := flag.String("repo", "", "GitHub repo owner/repo")
-	tag := flag.String("tag", "", "release tag (mutually exclusive with --latest)")
-	latest := flag.Bool("latest", false, "fetch latest release (mutually exclusive with --tag)")
-	assetMatch := flag.String("asset-match", "", "asset name glob/substring (simpler than regex)")
-	assetRegex := flag.String("asset-regex", "", "asset name regex (advanced override)")
-	assetTypeFlag := flag.String("asset-type", "", "force asset handling type (archive, raw, package)")
-	binaryNameFlag := flag.String("binary-name", "", "binary name to extract (default: inferred from repo name)")
-	destDir := flag.String("dest-dir", "", "destination directory")
-	output := flag.String("output", "", "output path")
-	cacheDir := flag.String("cache-dir", "", "cache directory")
-	preferPerAsset := flag.Bool("prefer-per-asset", false, "prefer per-asset signatures over checksum-level signatures (Workflow B over A)")
-	requireMinisign := flag.Bool("require-minisign", false, "require minisign signature verification (fail if unavailable)")
-	skipSig := flag.Bool("skip-sig", false, "skip signature verification (testing only)")
-	skipChecksum := flag.Bool("skip-checksum", false, "skip checksum verification even if available")
-	insecure := flag.Bool("insecure", false, "skip all verification (dangerous - use only for testing)")
-	selfUpdate := flag.Bool("self-update", false, "update sfetch to the latest release for this platform")
-	selfUpdateYes := flag.Bool("yes", false, "confirm self-update without prompting")
-	selfUpdateForce := flag.Bool("self-update-force", false, "allow major-version jumps and proceed even if target is locked")
-	selfUpdateDir := flag.String("self-update-dir", "", "install path for self-update (default: current binary directory)")
-	minisignPubKey := flag.String("minisign-key", "", "path to minisign public key file (.pub)")
-	minisignKeyURL := flag.String("minisign-key-url", "", "URL to download minisign public key")
-	minisignKeyAsset := flag.String("minisign-key-asset", "", "release asset name for minisign public key")
-	pgpKeyFile := flag.String("pgp-key-file", "", "path to ASCII-armored PGP public key")
-	pgpKeyURL := flag.String("pgp-key-url", "", "URL to download ASCII-armored PGP public key")
-	pgpKeyAsset := flag.String("pgp-key-asset", "", "release asset name for ASCII-armored PGP public key")
-	gpgBin := flag.String("gpg-bin", "gpg", "path to gpg executable")
-	key := flag.String("key", "", "ed25519 pubkey hex (32 bytes)")
-	selfVerify := flag.Bool("self-verify", false, "print instructions to verify this binary externally")
-	showTrustAnchors := flag.Bool("show-trust-anchors", false, "print embedded public keys (use --json for JSON output)")
-	showUpdateConfig := flag.Bool("show-update-config", false, "print embedded self-update configuration and exit")
-	validateUpdateConfig := flag.Bool("validate-update-config", false, "validate embedded self-update configuration and exit")
-	dryRun := flag.Bool("dry-run", false, "assess release verification without downloading")
-	provenance := flag.Bool("provenance", false, "output provenance record JSON to stderr")
-	provenanceFile := flag.String("provenance-file", "", "write provenance record to file (implies --provenance)")
-	skipToolsCheck := flag.Bool("skip-tools-check", false, "skip preflight tool checks")
-	verifyMinisignPubkey := flag.String("verify-minisign-pubkey", "", "verify file is a valid minisign PUBLIC key (not secret)")
-	jsonOut := flag.Bool("json", false, "JSON output for CI")
-	extendedHelp := flag.Bool("helpextended", false, "print quickstart & examples")
-	versionFlag := flag.Bool("version", false, "print version")
-	versionExtended := flag.Bool("version-extended", false, "print extended version/build info")
+func run(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("sfetch", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
 
-	out := flag.CommandLine.Output()
+	repo := fs.String("repo", "", "GitHub repo owner/repo")
+	tag := fs.String("tag", "", "release tag (mutually exclusive with --latest)")
+	latest := fs.Bool("latest", false, "fetch latest release (mutually exclusive with --tag)")
+	assetMatch := fs.String("asset-match", "", "asset name glob/substring (simpler than regex)")
+	assetRegex := fs.String("asset-regex", "", "asset name regex (advanced override)")
+	assetTypeFlag := fs.String("asset-type", "", "force asset handling type (archive, raw, package)")
+	binaryNameFlag := fs.String("binary-name", "", "binary name to extract (default: inferred from repo name)")
+	destDir := fs.String("dest-dir", "", "destination directory")
+	output := fs.String("output", "", "output path")
+	cacheDir := fs.String("cache-dir", "", "cache directory")
+	preferPerAsset := fs.Bool("prefer-per-asset", false, "prefer per-asset signatures over checksum-level signatures (Workflow B over A)")
+	requireMinisign := fs.Bool("require-minisign", false, "require minisign signature verification (fail if unavailable)")
+	skipSig := fs.Bool("skip-sig", false, "skip signature verification (testing only)")
+	skipChecksum := fs.Bool("skip-checksum", false, "skip checksum verification even if available")
+	insecure := fs.Bool("insecure", false, "skip all verification (dangerous - use only for testing)")
+	selfUpdate := fs.Bool("self-update", false, "update sfetch to the latest release for this platform")
+	selfUpdateYes := fs.Bool("yes", false, "confirm self-update without prompting")
+	selfUpdateForce := fs.Bool("self-update-force", false, "allow major-version jumps and proceed even if target is locked")
+	selfUpdateDir := fs.String("self-update-dir", "", "install path for self-update (default: current binary directory)")
+	minisignPubKey := fs.String("minisign-key", "", "path to minisign public key file (.pub)")
+	minisignKeyURL := fs.String("minisign-key-url", "", "URL to download minisign public key")
+	minisignKeyAsset := fs.String("minisign-key-asset", "", "release asset name for minisign public key")
+	pgpKeyFile := fs.String("pgp-key-file", "", "path to ASCII-armored PGP public key")
+	pgpKeyURL := fs.String("pgp-key-url", "", "URL to download ASCII-armored PGP public key")
+	pgpKeyAsset := fs.String("pgp-key-asset", "", "release asset name for ASCII-armored PGP public key")
+	gpgBin := fs.String("gpg-bin", "gpg", "path to gpg executable")
+	key := fs.String("key", "", "ed25519 pubkey hex (32 bytes)")
+	selfVerify := fs.Bool("self-verify", false, "print instructions to verify this binary externally")
+	showTrustAnchors := fs.Bool("show-trust-anchors", false, "print embedded public keys (use --json for JSON output)")
+	showUpdateConfig := fs.Bool("show-update-config", false, "print embedded self-update configuration and exit")
+	validateUpdateConfig := fs.Bool("validate-update-config", false, "validate embedded self-update configuration and exit")
+	dryRun := fs.Bool("dry-run", false, "assess release verification without downloading")
+	provenance := fs.Bool("provenance", false, "output provenance record JSON to stderr")
+	provenanceFile := fs.String("provenance-file", "", "write provenance record to file (implies --provenance)")
+	skipToolsCheck := fs.Bool("skip-tools-check", false, "skip preflight tool checks")
+	verifyMinisignPubkey := fs.String("verify-minisign-pubkey", "", "verify file is a valid minisign PUBLIC key (not secret)")
+	jsonOut := fs.Bool("json", false, "JSON output for CI")
+	extendedHelp := fs.Bool("helpextended", false, "print quickstart & examples")
+	versionFlag := fs.Bool("version", false, "print version")
+	versionExtended := fs.Bool("version-extended", false, "print extended version/build info")
+
+	out := stdout
 	printFlag := func(name string) {
-		if f := flag.Lookup(name); f != nil {
+		if f := fs.Lookup(name); f != nil {
 			def := f.DefValue
 			if def != "" && def != "false" {
 				fmt.Fprintf(out, "  -%s\t%s (default %q)\n", f.Name, f.Usage, def)
@@ -722,7 +726,7 @@ func main() {
 		}
 	}
 
-	flag.Usage = func() {
+	fs.Usage = func() {
 		fmt.Fprintf(out, "Usage: sfetch [flags]\n\n")
 
 		fmt.Fprintln(out, "Selection:")
@@ -741,7 +745,7 @@ func main() {
 		}
 
 		fmt.Fprintln(out, "\nTools & validation:")
-		for _, name := range []string{"skip-tools-check", "verify-minisign-pubkey", "self-verify", "show-trust-anchors", "json"} {
+		for _, name := range []string{"skip-tools-check", "verify-minisign-pubkey", "self-verify", "show-trust-anchors", "show-update-config", "validate-update-config", "json"} {
 			printFlag(name)
 		}
 
@@ -751,47 +755,55 @@ func main() {
 		}
 	}
 
-	flag.Parse()
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.Usage()
+			return 0
+		}
+		fmt.Fprintln(stderr, err)
+		fs.Usage()
+		return 2
+	}
 
 	// Handle --self-verify: print verification instructions and exit
 	if *selfVerify {
 		printSelfVerify(*jsonOut)
-		return
+		return 0
 	}
 
 	// Validate flag combinations
 	if *insecure && *requireMinisign {
-		fmt.Fprintln(os.Stderr, "error: --insecure and --require-minisign are mutually exclusive")
-		os.Exit(1)
+		fmt.Fprintln(stderr, "error: --insecure and --require-minisign are mutually exclusive")
+		return 1
 	}
 
 	if *versionFlag {
-		fmt.Println("sfetch", version)
-		return
+		fmt.Fprintln(stdout, "sfetch", version)
+		return 0
 	}
 
 	if *versionExtended {
-		fmt.Printf("sfetch %s\n", version)
-		fmt.Printf("  build time: %s\n", buildTime)
-		fmt.Printf("  git commit: %s\n", gitCommit)
-		fmt.Printf("  go version: %s\n", runtime.Version())
-		fmt.Printf("  platform:   %s/%s\n", runtime.GOOS, runtime.GOARCH)
-		return
+		fmt.Fprintf(stdout, "sfetch %s\n", version)
+		fmt.Fprintf(stdout, "  build time: %s\n", buildTime)
+		fmt.Fprintf(stdout, "  git commit: %s\n", gitCommit)
+		fmt.Fprintf(stdout, "  go version: %s\n", runtime.Version())
+		fmt.Fprintf(stdout, "  platform:   %s/%s\n", runtime.GOOS, runtime.GOARCH)
+		return 0
 	}
 
 	if *extendedHelp {
-		fmt.Println(strings.TrimSpace(quickstartDoc))
-		return
+		fmt.Fprintln(stdout, strings.TrimSpace(quickstartDoc))
+		return 0
 	}
 
 	// Handle --verify-minisign-pubkey: validate and exit
 	if *verifyMinisignPubkey != "" {
 		if err := ValidateMinisignPubkey(*verifyMinisignPubkey); err != nil {
-			fmt.Fprintf(os.Stderr, "INVALID: %s: %v\n", *verifyMinisignPubkey, err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "INVALID: %s: %v\n", *verifyMinisignPubkey, err)
+			return 1
 		}
-		fmt.Fprintf(os.Stderr, "OK: %s is a valid minisign public key\n", *verifyMinisignPubkey)
-		return
+		fmt.Fprintf(stderr, "OK: %s is a valid minisign public key\n", *verifyMinisignPubkey)
+		return 0
 	}
 
 	// Handle --show-trust-anchors: output embedded keys and exit
@@ -804,60 +816,60 @@ func main() {
 				},
 			}
 			data, _ := json.MarshalIndent(trustJSON, "", "  ")
-			fmt.Println(string(data))
+			fmt.Fprintln(stdout, string(data))
 		} else {
-			fmt.Printf("minisign:%s\n", EmbeddedMinisignPubkey)
+			fmt.Fprintf(stdout, "minisign:%s\n", EmbeddedMinisignPubkey)
 		}
-		return
+		return 0
 	}
 
 	if *showUpdateConfig || *validateUpdateConfig {
 		cfg, err := loadEmbeddedUpdateTarget()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			fmt.Fprintln(stderr, err)
+			return 1
 		}
 
 		if *validateUpdateConfig {
-			fmt.Fprintln(os.Stderr, "OK: embedded update configuration is valid")
-			return
+			fmt.Fprintln(stderr, "OK: embedded update configuration is valid")
+			return 0
 		}
 
 		data, err := json.MarshalIndent(cfg, "", "  ")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: marshal update config: %v\n", err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "error: marshal update config: %v\n", err)
+			return 1
 		}
-		fmt.Println(string(data))
-		return
+		fmt.Fprintln(stdout, string(data))
+		return 0
 	}
 
 	if *selfUpdate {
 		ucfg, err := loadEmbeddedUpdateTarget()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			fmt.Fprintln(stderr, err)
+			return 1
 		}
 
 		if *repo != "" && *repo != ucfg.Repo.ID {
-			fmt.Fprintf(os.Stderr, "warning: ignoring --repo (%s); self-update targets %s\n", *repo, ucfg.Repo.ID)
+			fmt.Fprintf(stderr, "warning: ignoring --repo (%s); self-update targets %s\n", *repo, ucfg.Repo.ID)
 		}
 		*repo = ucfg.Repo.ID
 
 		targetPath, err := computeSelfUpdatePath(*selfUpdateDir)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			fmt.Fprintln(stderr, err)
+			return 1
 		}
 		if *destDir != "" || *output != "" {
-			fmt.Fprintln(os.Stderr, "warning: ignoring --dest-dir/--output when --self-update is set")
+			fmt.Fprintln(stderr, "warning: ignoring --dest-dir/--output when --self-update is set")
 		}
 		*output = targetPath
 		if !*dryRun && !*selfUpdateYes {
-			fmt.Fprintln(os.Stderr, "--self-update requires --yes to proceed (rerun with --self-update --yes)")
-			os.Exit(1)
+			fmt.Fprintln(stderr, "--self-update requires --yes to proceed (rerun with --self-update --yes)")
+			return 1
 		}
-		fmt.Fprintf(os.Stderr, "Self-update target: %s\n", targetPath)
+		fmt.Fprintf(stderr, "Self-update target: %s\n", targetPath)
 	}
 
 	if !*skipToolsCheck {
@@ -865,26 +877,26 @@ func main() {
 		goarch := runtime.GOARCH
 		goosAliases := aliasList(goos, goosAliasTable)
 		archAliases := aliasList(goarch, archAliasTable)
-		fmt.Fprintf(os.Stderr, "Preflight: GOOS=%s GOARCH=%s goosAliases=%v archAliases=%v\n", goos, goarch, goosAliases, archAliases)
+		fmt.Fprintf(stderr, "Preflight: GOOS=%s GOARCH=%s goosAliases=%v archAliases=%v\n", goos, goarch, goosAliases, archAliases)
 
 		tools := []string{"tar", "unzip"}
 		for _, tool := range tools {
 			if _, err := exec.LookPath(tool); err != nil {
-				fmt.Fprintf(os.Stderr, "missing required tool: %s\n", tool)
-				os.Exit(1)
+				fmt.Fprintf(stderr, "missing required tool: %s\n", tool)
+				return 1
 			}
 		}
 	}
 
 	if *repo == "" {
-		fmt.Fprintln(os.Stderr, "error: --repo is required")
-		flag.Usage()
-		os.Exit(1)
+		fmt.Fprintln(stderr, "error: --repo is required")
+		fs.Usage()
+		return 1
 	}
 
 	if *tag != "" && *latest {
-		fmt.Fprintln(os.Stderr, "error: --tag and --latest are mutually exclusive")
-		os.Exit(1)
+		fmt.Fprintln(stderr, "error: --tag and --latest are mutually exclusive")
+		return 1
 	}
 
 	releaseID := "latest"
@@ -902,27 +914,27 @@ func main() {
 
 	resp, err := httpGetWithAuth(url)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: fetching release: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "error: fetching release: %v\n", err)
+		return 1
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		fmt.Fprintf(os.Stderr, "error: API request failed %d: %s\n", resp.StatusCode, string(body))
-		os.Exit(1)
+		fmt.Fprintf(stderr, "error: API request failed %d: %s\n", resp.StatusCode, string(body))
+		return 1
 	}
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: reading response: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "error: reading response: %v\n", err)
+		return 1
 	}
 
 	var rel Release
 	if err := json.Unmarshal(respBody, &rel); err != nil {
-		fmt.Fprintf(os.Stderr, "error: parsing JSON: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "error: parsing JSON: %v\n", err)
+		return 1
 	}
 
 	if *selfUpdate {
@@ -932,13 +944,13 @@ func main() {
 
 		switch decision {
 		case update.DecisionSkip:
-			fmt.Fprintln(os.Stderr, message)
-			os.Exit(exitCode)
+			fmt.Fprintln(stderr, message)
+			return exitCode
 		case update.DecisionRefuse:
-			fmt.Fprintln(os.Stderr, message)
-			os.Exit(exitCode)
+			fmt.Fprintln(stderr, message)
+			return exitCode
 		case update.DecisionProceed, update.DecisionReinstall, update.DecisionDowngrade, update.DecisionDevInstall:
-			fmt.Fprintln(os.Stderr, message)
+			fmt.Fprintln(stderr, message)
 			// Continue with update
 		}
 	}
@@ -960,14 +972,14 @@ func main() {
 
 	selected, err := selectAsset(&rel, cfg, goos, goarch, *assetMatch, *assetRegex)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, err)
+		return 1
 	}
 
 	classification, classifyWarnings, err := classifyAsset(selected.Name, cfg, *assetTypeFlag)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, err)
+		return 1
 	}
 
 	// Build assessment flags from CLI
@@ -1002,50 +1014,50 @@ func main() {
 			aflags.dryRun = true // Mark as dry-run in flags
 			record := buildProvenanceRecord(*repo, &rel, assessment, aflags, "")
 			if err := outputProvenance(record, *provenanceFile); err != nil {
-				fmt.Fprintf(os.Stderr, "error: %v\n", err)
-				os.Exit(1)
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 1
 			}
 		} else {
 			// --dry-run only: human-readable output
-			fmt.Print(formatDryRunOutput(*repo, &rel, assessment, selfUpdateInfo))
+			fmt.Fprint(stdout, formatDryRunOutput(*repo, &rel, assessment, selfUpdateInfo))
 		}
-		os.Exit(0)
+		return 0
 	}
 
 	// Handle cases where no verification is available
 	if assessment.Workflow == "" {
-		fmt.Fprintln(os.Stderr, "error: no verification available (no signature or checksum found)")
-		fmt.Fprintln(os.Stderr, "hint: use --insecure to proceed without verification (not recommended)")
-		os.Exit(1)
+		fmt.Fprintln(stderr, "error: no verification available (no signature or checksum found)")
+		fmt.Fprintln(stderr, "hint: use --insecure to proceed without verification (not recommended)")
+		return 1
 	}
 
 	// Print warnings
 	for _, w := range assessment.Warnings {
-		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+		fmt.Fprintf(stderr, "warning: %s\n", w)
 	}
 
 	tmpDir, err := os.MkdirTemp("", "sfetch-*")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: mkdir temp: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "error: mkdir temp: %v\n", err)
+		return 1
 	}
 	defer os.RemoveAll(tmpDir)
 
 	assetPath := filepath.Join(tmpDir, selected.Name)
 	if err := download(selected.BrowserDownloadUrl, assetPath); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, err)
+		return 1
 	}
 
 	// Handle --require-minisign validation
 	if *requireMinisign && !assessment.SignatureAvailable {
-		fmt.Fprintln(os.Stderr, "error: --require-minisign specified but no .minisig signature found in release")
-		os.Exit(1)
+		fmt.Fprintln(stderr, "error: --require-minisign specified but no .minisig signature found in release")
+		return 1
 	}
 	if *requireMinisign && assessment.SignatureFormat != sigFormatMinisign {
-		fmt.Fprintf(os.Stderr, "error: --require-minisign specified but signature %s is %s format, not minisign\n",
+		fmt.Fprintf(stderr, "error: --require-minisign specified but signature %s is %s format, not minisign\n",
 			assessment.SignatureFile, assessment.SignatureFormat)
-		os.Exit(1)
+		return 1
 	}
 
 	var sigAsset *Asset
@@ -1057,39 +1069,39 @@ func main() {
 	switch assessment.Workflow {
 	case workflowInsecure:
 		// No verification - just download and proceed
-		fmt.Fprintln(os.Stderr, "WARNING: --insecure mode - NO VERIFICATION PERFORMED")
+		fmt.Fprintln(stderr, "WARNING: --insecure mode - NO VERIFICATION PERFORMED")
 
 	case workflowA:
 		// Workflow A: Verify signature over checksum file, then verify hash
-		fmt.Fprintf(os.Stderr, "Detected checksum-level signature: %s\n", assessment.SignatureFile)
+		fmt.Fprintf(stderr, "Detected checksum-level signature: %s\n", assessment.SignatureFile)
 
 		// Find and download the checksum file
 		checksumAsset := findAssetByName(rel.Assets, assessment.ChecksumFileForSig)
 		if checksumAsset == nil {
-			fmt.Fprintf(os.Stderr, "error: checksum file %s not found\n", assessment.ChecksumFileForSig)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "error: checksum file %s not found\n", assessment.ChecksumFileForSig)
+			return 1
 		}
 
 		checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
 		if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			fmt.Fprintln(stderr, err)
+			return 1
 		}
 
 		// Download checksum signature
 		sigAsset = findAssetByName(rel.Assets, assessment.SignatureFile)
 		sigPath = filepath.Join(tmpDir, sigAsset.Name)
 		if err := download(sigAsset.BrowserDownloadUrl, sigPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			fmt.Fprintln(stderr, err)
+			return 1
 		}
 
 		// Read checksum file for verification
 		// #nosec G304 -- checksumPath tmp controlled
 		checksumBytes, err = os.ReadFile(checksumPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "read checksum: %v\n", err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "read checksum: %v\n", err)
+			return 1
 		}
 
 		// Verify checksum file signature (not asset signature)
@@ -1098,30 +1110,30 @@ func main() {
 			case sigFormatMinisign:
 				minisignKeyPath, err := resolveMinisignKey(*minisignPubKey, *minisignKeyURL, *minisignKeyAsset, rel.Assets, tmpDir)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(1)
+					fmt.Fprintln(stderr, err)
+					return 1
 				}
 				if err := verifyMinisignSignature(checksumBytes, sigPath, minisignKeyPath); err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(1)
+					fmt.Fprintln(stderr, err)
+					return 1
 				}
-				fmt.Println("Minisign checksum signature verified OK")
+				fmt.Fprintln(stdout, "Minisign checksum signature verified OK")
 
 			case sigFormatPGP:
 				pgpKeyPath, err := resolvePGPKey(*pgpKeyFile, *pgpKeyURL, *pgpKeyAsset, rel.Assets, tmpDir)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(1)
+					fmt.Fprintln(stderr, err)
+					return 1
 				}
 				if err := verifyPGPSignature(checksumPath, sigPath, pgpKeyPath, *gpgBin); err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(1)
+					fmt.Fprintln(stderr, err)
+					return 1
 				}
-				fmt.Println("PGP checksum signature verified OK")
+				fmt.Fprintln(stdout, "PGP checksum signature verified OK")
 
 			default:
-				fmt.Fprintf(os.Stderr, "error: unknown signature format for %s\n", assessment.SignatureFile)
-				os.Exit(1)
+				fmt.Fprintf(stderr, "error: unknown signature format for %s\n", assessment.SignatureFile)
+				return 1
 			}
 		}
 
@@ -1129,14 +1141,14 @@ func main() {
 		// Workflow B: Per-asset signature
 		sigAsset = findAssetByName(rel.Assets, assessment.SignatureFile)
 		if sigAsset == nil {
-			fmt.Fprintf(os.Stderr, "error: signature file %s not found\n", assessment.SignatureFile)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "error: signature file %s not found\n", assessment.SignatureFile)
+			return 1
 		}
 
 		sigPath = filepath.Join(tmpDir, sigAsset.Name)
 		if err := download(sigAsset.BrowserDownloadUrl, sigPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			fmt.Fprintln(stderr, err)
+			return 1
 		}
 
 		// Load checksum file if available
@@ -1145,47 +1157,47 @@ func main() {
 			if checksumAsset != nil {
 				checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
 				if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(1)
+					fmt.Fprintln(stderr, err)
+					return 1
 				}
 				// #nosec G304 -- checksumPath tmp controlled
 				checksumBytes, err = os.ReadFile(checksumPath)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "read checksum: %v\n", err)
-					os.Exit(1)
+					fmt.Fprintf(stderr, "read checksum: %v\n", err)
+					return 1
 				}
 			}
 		}
 
 	case workflowC:
 		// Workflow C: Checksum-only (no signature)
-		fmt.Fprintf(os.Stderr, "Using checksum-only verification (no signature available)\n")
+		fmt.Fprintf(stderr, "Using checksum-only verification (no signature available)\n")
 
 		checksumAsset := findAssetByName(rel.Assets, assessment.ChecksumFile)
 		if checksumAsset == nil {
-			fmt.Fprintf(os.Stderr, "error: checksum file %s not found\n", assessment.ChecksumFile)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "error: checksum file %s not found\n", assessment.ChecksumFile)
+			return 1
 		}
 
 		checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
 		if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			fmt.Fprintln(stderr, err)
+			return 1
 		}
 
 		// #nosec G304 -- checksumPath tmp controlled
 		checksumBytes, err = os.ReadFile(checksumPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "read checksum: %v\n", err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "read checksum: %v\n", err)
+			return 1
 		}
 	}
 
 	// #nosec G304 -- assetPath tmp controlled
 	assetBytes, err := os.ReadFile(assetPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "read asset: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "read asset: %v\n", err)
+		return 1
 	}
 
 	// Compute hash for caching (and verification if checksum file exists)
@@ -1200,8 +1212,8 @@ func main() {
 	case "sha512":
 		h = sha512.New()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown hash algo %q\n", hashAlgo)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "unknown hash algo %q\n", hashAlgo)
+		return 1
 	}
 	h.Write(assetBytes)
 	actualHash := hex.EncodeToString(h.Sum(nil))
@@ -1210,14 +1222,14 @@ func main() {
 	if checksumBytes != nil {
 		expectedHash, err := extractChecksum(checksumBytes, hashAlgo, selected.Name)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			fmt.Fprintln(stderr, err)
+			return 1
 		}
 		if actualHash != strings.ToLower(expectedHash) {
-			fmt.Fprintf(os.Stderr, "checksum mismatch: expected %s, got %s\n", expectedHash, actualHash)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "checksum mismatch: expected %s, got %s\n", expectedHash, actualHash)
+			return 1
 		}
-		fmt.Println("Checksum verified OK")
+		fmt.Fprintln(stdout, "Checksum verified OK")
 	}
 
 	cd := *cacheDir
@@ -1231,75 +1243,75 @@ func main() {
 	cacheAssetDir := filepath.Join(cd, actualHash)
 	if err := // #nosec G301 -- cacheAssetDir XDG_CACHE_HOME/hash controlled
 		os.MkdirAll(cacheAssetDir, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "mkdir cache %s: %v\n", cacheAssetDir, err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "mkdir cache %s: %v\n", cacheAssetDir, err)
+		return 1
 	}
 	cacheAssetPath := filepath.Join(cacheAssetDir, selected.Name)
 	if err := os.Rename(assetPath, cacheAssetPath); err != nil {
-		fmt.Fprintf(os.Stderr, "cache asset: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "cache asset: %v\n", err)
+		return 1
 	}
 	assetPath = cacheAssetPath
-	fmt.Printf("Cached to %s\n", cacheAssetPath)
+	fmt.Fprintf(stdout, "Cached to %s\n", cacheAssetPath)
 
 	// Workflow B: Verify per-asset signature
 	if assessment.Workflow == workflowB && !*skipSig {
 		sigData, err := loadSignature(sigPath)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			fmt.Fprintln(stderr, err)
+			return 1
 		}
 
 		switch sigData.format {
 		case sigFormatPGP:
 			pgpKeyPath, err := resolvePGPKey(*pgpKeyFile, *pgpKeyURL, *pgpKeyAsset, rel.Assets, tmpDir)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
+				fmt.Fprintln(stderr, err)
+				return 1
 			}
 			if err := verifyPGPSignature(assetPath, sigPath, pgpKeyPath, *gpgBin); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
+				fmt.Fprintln(stderr, err)
+				return 1
 			}
-			fmt.Println("PGP signature verified OK")
+			fmt.Fprintln(stdout, "PGP signature verified OK")
 
 		case sigFormatMinisign:
 			minisignKeyPath, err := resolveMinisignKey(*minisignPubKey, *minisignKeyURL, *minisignKeyAsset, rel.Assets, tmpDir)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
+				fmt.Fprintln(stderr, err)
+				return 1
 			}
 			if err := verifyMinisignSignature(assetBytes, sigPath, minisignKeyPath); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
+				fmt.Fprintln(stderr, err)
+				return 1
 			}
-			fmt.Println("Minisign signature verified OK")
+			fmt.Fprintln(stdout, "Minisign signature verified OK")
 
 		case sigFormatBinary:
 			normalizedKey, err := normalizeHexKey(*key)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
+				fmt.Fprintln(stderr, err)
+				return 1
 			}
 			pubKeyBytes, err := hex.DecodeString(normalizedKey)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "invalid ed25519 key provided")
-				os.Exit(1)
+				fmt.Fprintln(stderr, "invalid ed25519 key provided")
+				return 1
 			}
 			if len(pubKeyBytes) != ed25519.PublicKeySize {
-				fmt.Fprintf(os.Stderr, "invalid pubkey size: %d\n", len(pubKeyBytes))
-				os.Exit(1)
+				fmt.Fprintf(stderr, "invalid pubkey size: %d\n", len(pubKeyBytes))
+				return 1
 			}
 			pub := ed25519.PublicKey(pubKeyBytes)
 			if !ed25519.Verify(pub, assetBytes, sigData.bytes) {
-				fmt.Fprintln(os.Stderr, "signature verification failed")
-				os.Exit(1)
+				fmt.Fprintln(stderr, "signature verification failed")
+				return 1
 			}
-			fmt.Println("Signature verified OK")
+			fmt.Fprintln(stdout, "Signature verified OK")
 
 		default:
-			fmt.Fprintln(os.Stderr, "error: unsupported signature format")
-			os.Exit(1)
+			fmt.Fprintln(stderr, "error: unsupported signature format")
+			return 1
 		}
 	}
 
@@ -1312,8 +1324,8 @@ func main() {
 		extractDir := filepath.Join(tmpDir, "extract")
 		if err := // #nosec G301 -- extractDir tmpdir controlled
 			os.Mkdir(extractDir, 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "mkdir extract: %v\n", err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "mkdir extract: %v\n", err)
+			return 1
 		}
 
 		var cmd *exec.Cmd
@@ -1338,20 +1350,20 @@ func main() {
 		}
 
 		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "extract archive: %v\n", err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "extract archive: %v\n", err)
+			return 1
 		}
 
 		binaryPath = filepath.Join(extractDir, binaryName)
 		if _, err := os.Stat(binaryPath); err != nil {
-			fmt.Fprintf(os.Stderr, "binary %s not found in archive\n", binaryName)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "binary %s not found in archive\n", binaryName)
+			return 1
 		}
 
 		if err := // #nosec G302 -- binaryPath extracted tmp chmod +x safe
 			os.Chmod(binaryPath, 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "chmod: %v\n", err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "chmod: %v\n", err)
+			return 1
 		}
 
 	case AssetTypePackage:
@@ -1366,8 +1378,8 @@ func main() {
 	}
 
 	if binaryPath == "" {
-		fmt.Fprintln(os.Stderr, "error: could not resolve binary path")
-		os.Exit(1)
+		fmt.Fprintln(stderr, "error: could not resolve binary path")
+		return 1
 	}
 
 	var finalPath string
@@ -1381,49 +1393,51 @@ func main() {
 
 	if err := // #nosec G301 -- Dir(finalPath) user-controlled safe mkdir tmp
 		os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "mkdir %s: %v\n", filepath.Dir(finalPath), err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "mkdir %s: %v\n", filepath.Dir(finalPath), err)
+		return 1
 	}
 
 	if err := os.Rename(binaryPath, finalPath); err != nil {
 		if *selfUpdate && runtime.GOOS == "windows" {
 			alt := finalPath + ".new"
 			if errAlt := os.Rename(binaryPath, alt); errAlt == nil {
-				fmt.Fprintf(os.Stderr, "target appears locked; new binary written to %s. Close running sfetch and replace manually.\n", alt)
-				fmt.Printf("Release: %s\n", rel.TagName)
-				fmt.Printf("Installed %s to %s\n", installName, alt)
-				return
+				fmt.Fprintf(stderr, "target appears locked; new binary written to %s. Close running sfetch and replace manually.\n", alt)
+				fmt.Fprintf(stdout, "Release: %s\n", rel.TagName)
+				fmt.Fprintf(stdout, "Installed %s to %s\n", installName, alt)
+				return 0
 			}
 		}
 		if *selfUpdate {
 			if errCopy := copyFile(binaryPath, finalPath); errCopy == nil {
-				fmt.Printf("Release: %s\n", rel.TagName)
-				fmt.Printf("Installed %s to %s\n", installName, finalPath)
-				return
+				fmt.Fprintf(stdout, "Release: %s\n", rel.TagName)
+				fmt.Fprintf(stdout, "Installed %s to %s\n", installName, finalPath)
+				return 0
 			}
 		}
-		fmt.Fprintf(os.Stderr, "install to %s: %v\n", finalPath, err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "install to %s: %v\n", finalPath, err)
+		return 1
 	}
 
 	if classification.Type == AssetTypeRaw && runtime.GOOS != "windows" && classification.NeedsChmod {
 		if err := // #nosec G302 -- finalPath user-controlled chmod +x optional
 			os.Chmod(finalPath, 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "chmod %s: %v\n", finalPath, err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "chmod %s: %v\n", finalPath, err)
+			return 1
 		}
 	}
 
-	fmt.Printf("Release: %s\n", rel.TagName)
-	fmt.Printf("Installed %s to %s\n", installName, finalPath)
+	fmt.Fprintf(stdout, "Release: %s\n", rel.TagName)
+	fmt.Fprintf(stdout, "Installed %s to %s\n", installName, finalPath)
 
 	// Output provenance record if requested
 	if *provenance || *provenanceFile != "" {
 		record := buildProvenanceRecord(*repo, &rel, assessment, aflags, actualHash)
 		if err := outputProvenance(record, *provenanceFile); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+			fmt.Fprintf(stderr, "warning: %v\n", err)
 		}
 	}
+
+	return 0
 }
 
 func getConfig(repo string) *RepoConfig {
