@@ -45,7 +45,7 @@ jobs:
           set -euo pipefail
           apt-get update && \
             apt-get install -y --no-install-recommends \
-            ca-certificates curl minisign
+            ca-certificates curl minisign unzip
 
       - name: Install sfetch (curl | bash)
         shell: bash
