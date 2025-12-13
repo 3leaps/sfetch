@@ -10,6 +10,8 @@ last_updated: 2025-12-10
 
 This document provides transparency into how sfetch works. As the tagline says: **the `curl | sh` you can actually trust** - and trust requires understanding.
 
+**See also:** [CI/CD Usage Guide](cicd-usage-guide.md) for GitHub Actions, GitLab CI, and container examples.
+
 ---
 
 ## Quick Reference

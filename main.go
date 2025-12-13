@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/3leaps/sfetch/pkg/update"
@@ -1228,8 +1229,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	cacheAssetPath := filepath.Join(cacheAssetDir, selected.Name)
 	if err := os.Rename(assetPath, cacheAssetPath); err != nil {
-		fmt.Fprintf(stderr, "cache asset: %v\n", err)
-		return 1
+		if errors.Is(err, syscall.EXDEV) {
+			if errCopy := copyFile(assetPath, cacheAssetPath); errCopy != nil {
+				fmt.Fprintf(stderr, "cache asset: %v\n", errCopy)
+				return 1
+			}
+			_ = os.Remove(assetPath)
+		} else {
+			fmt.Fprintf(stderr, "cache asset: %v\n", err)
+			return 1
+		}
 	}
 	assetPath = cacheAssetPath
 	fmt.Fprintf(stdout, "Cached to %s\n", cacheAssetPath)
@@ -1378,6 +1387,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if err := os.Rename(binaryPath, finalPath); err != nil {
+		// Windows self-update: target may be locked, write to .new file
 		if *selfUpdate && runtime.GOOS == "windows" {
 			alt := finalPath + ".new"
 			if errAlt := os.Rename(binaryPath, alt); errAlt == nil {
@@ -1387,12 +1397,32 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return 0
 			}
 		}
-		if *selfUpdate {
-			if errCopy := copyFile(binaryPath, finalPath); errCopy == nil {
-				fmt.Fprintf(stdout, "Release: %s\n", rel.TagName)
-				fmt.Fprintf(stdout, "Installed %s to %s\n", installName, finalPath)
-				return 0
+		// Fallback to copy for cross-device errors (EXDEV) or self-update.
+		// EXDEV occurs when tmpDir and destDir are on different filesystems,
+		// common in CI containers with mounted volumes.
+		if errors.Is(err, syscall.EXDEV) || *selfUpdate {
+			errCopy := copyFile(binaryPath, finalPath)
+			if errCopy != nil {
+				fmt.Fprintf(stderr, "install to %s: %v\n", finalPath, errCopy)
+				return 1
 			}
+			fmt.Fprintf(stdout, "Release: %s\n", rel.TagName)
+			fmt.Fprintf(stdout, "Installed %s to %s\n", installName, finalPath)
+			// Handle chmod for raw assets after copy
+			if classification.Type == AssetTypeRaw && runtime.GOOS != "windows" && classification.NeedsChmod {
+				if errChmod := os.Chmod(finalPath, 0o755); errChmod != nil {
+					fmt.Fprintf(stderr, "chmod %s: %v\n", finalPath, errChmod)
+					return 1
+				}
+			}
+			// Output provenance record if requested
+			if *provenance || *provenanceFile != "" {
+				record := buildProvenanceRecord(*repo, &rel, assessment, aflags, actualHash)
+				if errProv := outputProvenance(record, *provenanceFile); errProv != nil {
+					fmt.Fprintf(stderr, "warning: %v\n", errProv)
+				}
+			}
+			return 0
 		}
 		fmt.Fprintf(stderr, "install to %s: %v\n", finalPath, err)
 		return 1
