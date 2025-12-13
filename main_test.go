@@ -303,7 +303,7 @@ func TestFindChecksumSignature(t *testing.T) {
 func TestMergeConfigPreferChecksumSig(t *testing.T) {
 	t.Run("default is true", func(t *testing.T) {
 		cfg := defaults
-		if !cfg.preferChecksumSig() {
+		if !preferChecksumSig(&cfg) {
 			t.Error("expected default preferChecksumSig to be true")
 		}
 	})
@@ -314,7 +314,7 @@ func TestMergeConfigPreferChecksumSig(t *testing.T) {
 			PreferChecksumSig: boolPtr(false),
 		}
 		cfg := mergeConfig(defaults, override)
-		if cfg.preferChecksumSig() {
+		if preferChecksumSig(&cfg) {
 			t.Error("expected preferChecksumSig to be false after override")
 		}
 	})
@@ -325,7 +325,7 @@ func TestMergeConfigPreferChecksumSig(t *testing.T) {
 			// PreferChecksumSig not set (nil)
 		}
 		cfg := mergeConfig(defaults, override)
-		if !cfg.preferChecksumSig() {
+		if !preferChecksumSig(&cfg) {
 			t.Error("expected preferChecksumSig to remain true when not overridden")
 		}
 	})
