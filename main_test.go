@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -38,6 +39,99 @@ func TestCopyFilePreservesPermissions(t *testing.T) {
 		t.Fatalf("stat dst: %v", err)
 	}
 	if got, want := info.Mode().Perm(), os.FileMode(0o755); got != want {
+		t.Fatalf("dst perms: got %o want %o", got, want)
+	}
+}
+
+func TestInstallFileRawChmodOnRename(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dstDir := filepath.Join(dir, "bin")
+	dst := filepath.Join(dstDir, "tool")
+
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		t.Fatalf("mkdir dstDir: %v", err)
+	}
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	cls := AssetClassification{Type: AssetTypeRaw, NeedsChmod: true}
+	installed, err := installFileWithRename(src, dst, cls, false, os.Rename)
+	if err != nil {
+		t.Fatalf("installFileWithRename: %v", err)
+	}
+	if installed != dst {
+		t.Fatalf("installed path: got %q want %q", installed, dst)
+	}
+
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("stat dst: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		if info.Mode().Perm() != 0o755 {
+			t.Fatalf("dst perms: got %o want %o", info.Mode().Perm(), 0o755)
+		}
+	}
+}
+
+func TestInstallFileRawChmodOnCopyFallback(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "bin", "tool")
+
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	cls := AssetClassification{Type: AssetTypeRaw, NeedsChmod: true}
+	rename := func(oldPath, newPath string) error { return syscall.EXDEV }
+	installed, err := installFileWithRename(src, dst, cls, false, rename)
+	if err != nil {
+		t.Fatalf("installFileWithRename: %v", err)
+	}
+	if installed != dst {
+		t.Fatalf("installed path: got %q want %q", installed, dst)
+	}
+
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("stat dst: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		if info.Mode().Perm() != 0o755 {
+			t.Fatalf("dst perms: got %o want %o", info.Mode().Perm(), 0o755)
+		}
+	}
+}
+
+func TestInstallFileCopyFallbackPreservesPermsWhenNoChmodNeeded(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "bin", "tool")
+
+	if err := os.WriteFile(src, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	cls := AssetClassification{Type: AssetTypeRaw, NeedsChmod: false}
+	rename := func(oldPath, newPath string) error { return syscall.EXDEV }
+	if _, err := installFileWithRename(src, dst, cls, false, rename); err != nil {
+		t.Fatalf("installFileWithRename: %v", err)
+	}
+
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("stat dst: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
 		t.Fatalf("dst perms: got %o want %o", got, want)
 	}
 }
