@@ -205,6 +205,11 @@ Ensure the destination directory exists and is writable:
 mkdir -p "$BIN_DIR"
 ```
 
+If the installed binary exists but won’t execute (exit 126), check:
+
+- File mode: `ls -l "$BIN_DIR/tool"` should show it as executable (e.g. `-rwxr-xr-x`). If not, upgrade to sfetch v0.2.6+ (copy-based fallbacks preserve executable permissions).
+- Mount options: some container environments mount destinations with `noexec`, which prevents execution even if the file mode is `+x`. In that case, choose a different `--dest-dir` on an executable filesystem.
+
 ### Signature verification failures
 
 - Check that the release has the expected signature files

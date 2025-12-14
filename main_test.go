@@ -18,6 +18,29 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
+func TestCopyFilePreservesPermissions(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+
+	if err := os.WriteFile(src, []byte("x"), 0o755); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+	if err := copyFile(src, dst); err != nil {
+		t.Fatalf("copyFile: %v", err)
+	}
+
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("stat dst: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o755); got != want {
+		t.Fatalf("dst perms: got %o want %o", got, want)
+	}
+}
+
 func TestGetConfig(t *testing.T) {
 	tests := []struct {
 		repo    string

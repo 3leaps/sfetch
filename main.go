@@ -2113,6 +2113,11 @@ func copyFile(src, dst string) error {
 	}
 	defer in.Close()
 
+	srcInfo, err := in.Stat()
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", src, err)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
 	}
@@ -2131,6 +2136,10 @@ func copyFile(src, dst string) error {
 	if err := out.Close(); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("close %s: %w", tmp, err)
+	}
+	if err := os.Chmod(tmp, srcInfo.Mode().Perm()); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("chmod %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, dst); err != nil {
 		_ = os.Remove(tmp)
