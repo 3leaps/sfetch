@@ -136,6 +136,73 @@ func TestInstallFileCopyFallbackPreservesPermsWhenNoChmodNeeded(t *testing.T) {
 	}
 }
 
+func TestInstallFileArchivePreservesExecOnRename(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "tool")
+	dstDir := filepath.Join(dir, "bin")
+	dst := filepath.Join(dstDir, "tool")
+
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		t.Fatalf("mkdir dstDir: %v", err)
+	}
+	if err := os.WriteFile(src, []byte("x"), 0o755); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	cls := AssetClassification{Type: AssetTypeArchive}
+	installed, err := installFileWithRename(src, dst, cls, false, os.Rename)
+	if err != nil {
+		t.Fatalf("installFileWithRename: %v", err)
+	}
+	if installed != dst {
+		t.Fatalf("installed path: got %q want %q", installed, dst)
+	}
+
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("stat dst: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		if got, want := info.Mode().Perm(), os.FileMode(0o755); got != want {
+			t.Fatalf("dst perms: got %o want %o", got, want)
+		}
+	}
+}
+
+func TestInstallFileArchivePreservesExecOnCopyFallback(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "tool")
+	dst := filepath.Join(dir, "bin", "tool")
+
+	if err := os.WriteFile(src, []byte("x"), 0o755); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	cls := AssetClassification{Type: AssetTypeArchive}
+	rename := func(oldPath, newPath string) error { return syscall.EXDEV }
+	installed, err := installFileWithRename(src, dst, cls, false, rename)
+	if err != nil {
+		t.Fatalf("installFileWithRename: %v", err)
+	}
+	if installed != dst {
+		t.Fatalf("installed path: got %q want %q", installed, dst)
+	}
+
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("stat dst: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		if got, want := info.Mode().Perm(), os.FileMode(0o755); got != want {
+			t.Fatalf("dst perms: got %o want %o", got, want)
+		}
+	}
+}
+
 func TestExtractZip(t *testing.T) {
 	t.Parallel()
 
@@ -806,22 +873,23 @@ func TestApplyInferenceRulesPlatformTokensCaseInsensitive(t *testing.T) {
 
 func TestInferAssetClassification(t *testing.T) {
 	tests := []struct {
-		name     string
-		wantType AssetType
-		wantFmt  ArchiveFormat
+		name           string
+		wantType       AssetType
+		wantFmt        ArchiveFormat
+		wantNeedsChmod bool
 	}{
-		{"sfetch_darwin_arm64.tar.gz", AssetTypeArchive, ArchiveFormatTarGz},
-		{"tool.tgz", AssetTypeArchive, ArchiveFormatTarGz},
-		{"tool.tar.xz", AssetTypeArchive, ArchiveFormatTarXz},
-		{"tool.tar.bz2", AssetTypeArchive, ArchiveFormatTarBz2},
-		{"tool.tar", AssetTypeArchive, ArchiveFormatTar},
-		{"tool.zip", AssetTypeArchive, ArchiveFormatZip},
-		{"install.sh", AssetTypeRaw, ""},
-		{"bootstrap.py", AssetTypeRaw, ""},
-		{"kubectl", AssetTypeRaw, ""},
-		{"terraform.exe", AssetTypeRaw, ""},
-		{"package.deb", AssetTypePackage, ""},
-		{"package.rpm", AssetTypePackage, ""},
+		{"sfetch_darwin_arm64.tar.gz", AssetTypeArchive, ArchiveFormatTarGz, false},
+		{"tool.tgz", AssetTypeArchive, ArchiveFormatTarGz, false},
+		{"tool.tar.xz", AssetTypeArchive, ArchiveFormatTarXz, false},
+		{"tool.tar.bz2", AssetTypeArchive, ArchiveFormatTarBz2, false},
+		{"tool.tar", AssetTypeArchive, ArchiveFormatTar, false},
+		{"tool.zip", AssetTypeArchive, ArchiveFormatZip, false},
+		{"install.sh", AssetTypeRaw, "", true},
+		{"bootstrap.py", AssetTypeRaw, "", true},
+		{"kubectl", AssetTypeRaw, "", true},
+		{"terraform.exe", AssetTypeRaw, "", false},
+		{"package.deb", AssetTypePackage, "", false},
+		{"package.rpm", AssetTypePackage, "", false},
 	}
 
 	for _, tt := range tests {
@@ -832,6 +900,9 @@ func TestInferAssetClassification(t *testing.T) {
 			}
 			if cls.ArchiveFormat != tt.wantFmt {
 				t.Fatalf("ArchiveFormat = %s, want %s", cls.ArchiveFormat, tt.wantFmt)
+			}
+			if cls.NeedsChmod != tt.wantNeedsChmod {
+				t.Fatalf("NeedsChmod = %v, want %v", cls.NeedsChmod, tt.wantNeedsChmod)
 			}
 		})
 	}
