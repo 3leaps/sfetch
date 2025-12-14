@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/3leaps/sfetch/internal/hostenv"
 	"github.com/3leaps/sfetch/pkg/update"
 )
 
@@ -1413,6 +1414,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "warning: no --dest-dir or --output specified, installing to current directory\n")
 		fmt.Fprintf(stderr, "  hint: use --install to install to %s\n", userBinDirDisplay())
 		finalPath = installName
+	}
+
+	if runtime.GOOS == "linux" {
+		dest := filepath.Dir(finalPath)
+		if dest != "." && dest != "" && hostenv.IsNoExecMount(dest) {
+			fmt.Fprintf(stderr, "warning: destination %s appears to be mounted noexec; installed binaries may fail to run\n", dest)
+			fmt.Fprintln(stderr, "  hint: choose a different --dest-dir/--output location; noexec cannot be fixed with chmod")
+		}
 	}
 
 	if err := // #nosec G301 -- Dir(finalPath) user-controlled safe mkdir tmp

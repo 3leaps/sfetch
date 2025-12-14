@@ -147,6 +147,156 @@ func TestExtractZipRejectsZipSlip(t *testing.T) {
 	}
 }
 
+func TestExtractZipRejectsAbsolutePaths(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	zipPath := filepath.Join(tmp, "abs.zip")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+
+	out, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatalf("create zip: %v", err)
+	}
+	zw := zip.NewWriter(out)
+
+	hdr := &zip.FileHeader{Name: "/evil", Method: zip.Deflate}
+	w, err := zw.CreateHeader(hdr)
+	if err != nil {
+		_ = zw.Close()
+		_ = out.Close()
+		t.Fatalf("CreateHeader: %v", err)
+	}
+	if _, err := w.Write([]byte("pwnd")); err != nil {
+		_ = zw.Close()
+		_ = out.Close()
+		t.Fatalf("write zip entry: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		_ = out.Close()
+		t.Fatalf("close zip writer: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatalf("close zip file: %v", err)
+	}
+
+	if err := extractZip(zipPath, extractDir); err == nil {
+		t.Fatalf("expected absolute path rejection")
+	}
+}
+
+func TestExtractZipRejectsSymlinks(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	zipPath := filepath.Join(tmp, "symlink.zip")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+
+	out, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatalf("create zip: %v", err)
+	}
+	zw := zip.NewWriter(out)
+
+	hdr := &zip.FileHeader{Name: "link", Method: zip.Deflate}
+	hdr.SetMode(os.ModeSymlink | 0o777)
+	w, err := zw.CreateHeader(hdr)
+	if err != nil {
+		_ = zw.Close()
+		_ = out.Close()
+		t.Fatalf("CreateHeader: %v", err)
+	}
+	if _, err := w.Write([]byte("/tmp/target")); err != nil {
+		_ = zw.Close()
+		_ = out.Close()
+		t.Fatalf("write zip entry: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		_ = out.Close()
+		t.Fatalf("close zip writer: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatalf("close zip file: %v", err)
+	}
+
+	if err := extractZip(zipPath, extractDir); err == nil {
+		t.Fatalf("expected symlink rejection")
+	}
+}
+
+func TestExtractZipNestedPaths(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	zipPath := filepath.Join(tmp, "nested.zip")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+
+	out, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatalf("create zip: %v", err)
+	}
+	zw := zip.NewWriter(out)
+
+	if _, err := zw.Create("bin/"); err != nil {
+		_ = zw.Close()
+		_ = out.Close()
+		t.Fatalf("create dir entry: %v", err)
+	}
+
+	hdr := &zip.FileHeader{Name: "bin/tool", Method: zip.Deflate}
+	hdr.SetMode(0o755)
+	w, err := zw.CreateHeader(hdr)
+	if err != nil {
+		_ = zw.Close()
+		_ = out.Close()
+		t.Fatalf("CreateHeader: %v", err)
+	}
+	if _, err := w.Write([]byte("hello")); err != nil {
+		_ = zw.Close()
+		_ = out.Close()
+		t.Fatalf("write zip entry: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		_ = out.Close()
+		t.Fatalf("close zip writer: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatalf("close zip file: %v", err)
+	}
+
+	if err := extractZip(zipPath, extractDir); err != nil {
+		t.Fatalf("extractZip: %v", err)
+	}
+
+	toolPath := filepath.Join(extractDir, "bin", "tool")
+	data, err := os.ReadFile(toolPath)
+	if err != nil {
+		t.Fatalf("read extracted tool: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Fatalf("extracted content: got %q want %q", string(data), "hello")
+	}
+
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(toolPath)
+		if err != nil {
+			t.Fatalf("stat extracted tool: %v", err)
+		}
+		if info.Mode().Perm()&0o111 == 0 {
+			t.Fatalf("expected tool to be executable, mode=%o", info.Mode().Perm())
+		}
+	}
+}
+
 func TestHelpExtendedAlias(t *testing.T) {
 	t.Parallel()
 
