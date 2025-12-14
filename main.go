@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -865,7 +866,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		archAliases := aliasList(goarch, archAliasTable)
 		fmt.Fprintf(stderr, "Preflight: GOOS=%s GOARCH=%s goosAliases=%v archAliases=%v\n", goos, goarch, goosAliases, archAliases)
 
-		tools := []string{"tar", "unzip"}
+		tools := []string{"tar"}
 		for _, tool := range tools {
 			if _, err := exec.LookPath(tool); err != nil {
 				fmt.Fprintf(stderr, "missing required tool: %s\n", tool)
@@ -1336,30 +1337,42 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 
-		var cmd *exec.Cmd
 		switch classification.ArchiveFormat {
 		case ArchiveFormatZip:
-			// #nosec G204 -- assetPath tmp controlled
-			cmd = exec.Command("unzip", "-q", assetPath, "-d", extractDir)
+			if err := extractZip(assetPath, extractDir); err != nil {
+				fmt.Fprintf(stderr, "extract zip: %v\n", err)
+				return 1
+			}
 		case ArchiveFormatTarXz:
 			// #nosec G204 -- assetPath tmp controlled
-			cmd = exec.Command("tar", "xJf", assetPath, "-C", extractDir)
+			cmd := exec.Command("tar", "xJf", assetPath, "-C", extractDir)
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintf(stderr, "extract archive: %v\n", err)
+				return 1
+			}
 		case ArchiveFormatTarBz2:
 			// #nosec G204 -- assetPath tmp controlled
-			cmd = exec.Command("tar", "xjf", assetPath, "-C", extractDir)
+			cmd := exec.Command("tar", "xjf", assetPath, "-C", extractDir)
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintf(stderr, "extract archive: %v\n", err)
+				return 1
+			}
 		case ArchiveFormatTar:
 			// #nosec G204 -- assetPath tmp controlled
-			cmd = exec.Command("tar", "xf", assetPath, "-C", extractDir)
+			cmd := exec.Command("tar", "xf", assetPath, "-C", extractDir)
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintf(stderr, "extract archive: %v\n", err)
+				return 1
+			}
 		case ArchiveFormatTarGz:
 			fallthrough
 		default:
 			// #nosec G204 -- assetPath tmp controlled
-			cmd = exec.Command("tar", "xzf", assetPath, "-C", extractDir)
-		}
-
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(stderr, "extract archive: %v\n", err)
-			return 1
+			cmd := exec.Command("tar", "xzf", assetPath, "-C", extractDir)
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintf(stderr, "extract archive: %v\n", err)
+				return 1
+			}
 		}
 
 		binaryPath = filepath.Join(extractDir, binaryName)
@@ -1618,6 +1631,91 @@ func archiveFormatFromString(s string) ArchiveFormat {
 	default:
 		return ""
 	}
+}
+
+func extractZip(zipPath, extractDir string) error {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return fmt.Errorf("open zip %s: %w", zipPath, err)
+	}
+	defer r.Close()
+
+	extractDirClean := filepath.Clean(extractDir)
+	prefix := extractDirClean + string(os.PathSeparator)
+
+	for _, f := range r.File {
+		name := filepath.FromSlash(f.Name)
+		cleaned := filepath.Clean(name)
+		if cleaned == "." {
+			continue
+		}
+		if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) {
+			return fmt.Errorf("zip slip: invalid path %q", f.Name)
+		}
+		if filepath.IsAbs(cleaned) || filepath.VolumeName(cleaned) != "" {
+			return fmt.Errorf("zip slip: invalid path %q", f.Name)
+		}
+
+		destPath := filepath.Join(extractDirClean, cleaned)
+		destPathClean := filepath.Clean(destPath)
+		if destPathClean != extractDirClean && !strings.HasPrefix(destPathClean, prefix) {
+			return fmt.Errorf("zip slip: invalid path %q", f.Name)
+		}
+
+		mode := f.Mode()
+		if mode&os.ModeSymlink != 0 {
+			return fmt.Errorf("zip contains symlink %q", f.Name)
+		}
+		if mode&os.ModeType != 0 && !mode.IsDir() {
+			return fmt.Errorf("zip contains unsupported file type %q", f.Name)
+		}
+
+		if f.FileInfo().IsDir() {
+			if err := os.MkdirAll(destPathClean, 0o755); err != nil {
+				return fmt.Errorf("mkdir %s: %w", destPathClean, err)
+			}
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(destPathClean), 0o755); err != nil {
+			return fmt.Errorf("mkdir %s: %w", filepath.Dir(destPathClean), err)
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			return fmt.Errorf("open %s in zip: %w", f.Name, err)
+		}
+
+		out, err := os.OpenFile(destPathClean, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+		if err != nil {
+			_ = rc.Close()
+			return fmt.Errorf("create %s: %w", destPathClean, err)
+		}
+
+		if _, err := io.Copy(out, rc); err != nil {
+			_ = out.Close()
+			_ = rc.Close()
+			return fmt.Errorf("write %s: %w", destPathClean, err)
+		}
+		if err := out.Close(); err != nil {
+			_ = rc.Close()
+			return fmt.Errorf("close %s: %w", destPathClean, err)
+		}
+		if err := rc.Close(); err != nil {
+			return fmt.Errorf("close %s in zip: %w", f.Name, err)
+		}
+
+		if runtime.GOOS != "windows" {
+			perm := mode.Perm()
+			if perm != 0 {
+				if err := os.Chmod(destPathClean, perm); err != nil {
+					return fmt.Errorf("chmod %s: %w", destPathClean, err)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func isScriptExtension(name string) bool {

@@ -13,13 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - (TBD)
 
 ### Changed
-- (TBD)
+- **ZIP extraction is now pure-Go:** `.zip` assets are extracted via the Go standard library (`archive/zip`), removing the runtime dependency on `unzip`.
 
 ### Fixed
 - (TBD)
 
 ### Security
-- (TBD)
+- **Hardened ZIP extraction:** ZIP slip/path traversal, absolute paths, and symlinks are rejected during extraction.
 
 ## [0.2.6] - TBD
 

@@ -1,5 +1,27 @@
 # Release Notes
 
+## v0.2.7
+
+### Summary
+Remove the external `unzip` dependency by extracting ZIP archives with the Go standard library, improving portability in minimal containers and CI runners.
+
+### Highlights
+
+**Pure-Go ZIP extraction**
+- `.zip` assets are extracted with `archive/zip` (no `unzip` required).
+- Extraction rejects ZIP slip/path traversal, absolute paths, and symlinks.
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+### Details
+- See `CHANGELOG.md` for the complete list.
+
+---
+
 ## v0.2.6
 
 ### Summary
@@ -52,28 +74,6 @@ Self-update reliability improvements (version-aware behavior) plus a schema-back
   - `PGP_KEY_ID` → `SFETCH_PGP_KEY_ID`
   - `GPG_HOMEDIR` → `SFETCH_GPG_HOMEDIR`
   - Added `SFETCH_MINISIGN_PUB` for explicit public key path
-
-### Install
-
-```bash
-curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
-```
-
-### Details
-- See `CHANGELOG.md` for the complete list.
-
----
-
-## v0.2.4
-
-### Summary
-Bug fix for self-update failing when SHA2-512SUMS is preferred over SHA256SUMS.
-
-### Highlights
-
-**Fixed self-update checksum mismatch**
-- Self-update and fetch now correctly detect the hash algorithm from the checksum filename.
-- Previously, when SHA2-512SUMS was selected, the code still used sha256 for hashing, causing "checksum not found" errors.
 
 ### Install
 

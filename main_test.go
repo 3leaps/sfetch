@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -38,6 +39,111 @@ func TestCopyFilePreservesPermissions(t *testing.T) {
 	}
 	if got, want := info.Mode().Perm(), os.FileMode(0o755); got != want {
 		t.Fatalf("dst perms: got %o want %o", got, want)
+	}
+}
+
+func TestExtractZip(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	zipPath := filepath.Join(tmp, "tool.zip")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+
+	out, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatalf("create zip: %v", err)
+	}
+	zw := zip.NewWriter(out)
+
+	hdr := &zip.FileHeader{Name: "tool", Method: zip.Deflate}
+	hdr.SetMode(0o755)
+	w, err := zw.CreateHeader(hdr)
+	if err != nil {
+		_ = zw.Close()
+		_ = out.Close()
+		t.Fatalf("CreateHeader: %v", err)
+	}
+	if _, err := w.Write([]byte("hello")); err != nil {
+		_ = zw.Close()
+		_ = out.Close()
+		t.Fatalf("write zip entry: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		_ = out.Close()
+		t.Fatalf("close zip writer: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatalf("close zip file: %v", err)
+	}
+
+	if err := extractZip(zipPath, extractDir); err != nil {
+		t.Fatalf("extractZip: %v", err)
+	}
+
+	toolPath := filepath.Join(extractDir, "tool")
+	data, err := os.ReadFile(toolPath)
+	if err != nil {
+		t.Fatalf("read extracted tool: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Fatalf("extracted content: got %q want %q", string(data), "hello")
+	}
+
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(toolPath)
+		if err != nil {
+			t.Fatalf("stat extracted tool: %v", err)
+		}
+		if info.Mode().Perm()&0o111 == 0 {
+			t.Fatalf("expected tool to be executable, mode=%o", info.Mode().Perm())
+		}
+	}
+}
+
+func TestExtractZipRejectsZipSlip(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	zipPath := filepath.Join(tmp, "evil.zip")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+
+	out, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatalf("create zip: %v", err)
+	}
+	zw := zip.NewWriter(out)
+
+	hdr := &zip.FileHeader{Name: "../evil", Method: zip.Deflate}
+	w, err := zw.CreateHeader(hdr)
+	if err != nil {
+		_ = zw.Close()
+		_ = out.Close()
+		t.Fatalf("CreateHeader: %v", err)
+	}
+	if _, err := w.Write([]byte("pwnd")); err != nil {
+		_ = zw.Close()
+		_ = out.Close()
+		t.Fatalf("write zip entry: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		_ = out.Close()
+		t.Fatalf("close zip writer: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatalf("close zip file: %v", err)
+	}
+
+	if err := extractZip(zipPath, extractDir); err == nil {
+		t.Fatalf("expected zip slip rejection")
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "evil")); err == nil {
+		t.Fatalf("zip slip wrote outside extraction dir")
 	}
 }
 

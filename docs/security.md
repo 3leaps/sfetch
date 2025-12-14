@@ -29,7 +29,7 @@ Inline `#nosec` comments on 12 sites for line-granular audit.
 
 - **Prefer stdlib/crypto**: ed25519 native, SHA256/512.
 - **No runtime deps**: ~6MB static binary.
-- **Preflight**: `--skip-tools-check` optional (tar/unzip req).
+- **Preflight**: `--skip-tools-check` optional (tar required for tar.* extraction; ZIP extraction is pure-Go).
 - **gpg optional**: `--pgp-key-file` → temp keyring deleted.
 
 ## Manual release signing
