@@ -194,8 +194,14 @@ release-checksums: bootstrap-script
 release-sha256: release-checksums
 
 release-notes:
+	@if [ -z "$(RELEASE_TAG)" ]; then echo "error: RELEASE_TAG not set" >&2; exit 1; fi
 	@mkdir -p $(DIST_RELEASE)
-	cp RELEASE_NOTES.md $(DIST_RELEASE)/release-notes-$(RELEASE_TAG).md
+	@src="docs/releases/$(RELEASE_TAG).md"; \
+	if [ ! -f "$$src" ]; then \
+		echo "error: release notes file $$src not found (did you set RELEASE_TAG?)" >&2; \
+		exit 1; \
+	fi; \
+	cp "$$src" "$(DIST_RELEASE)/release-notes-$(RELEASE_TAG).md"
 	@echo "✅ Release notes copied to $(DIST_RELEASE)"
 
 # Note: SFETCH_GPG_HOMEDIR should be set by user if using custom GPG homedir

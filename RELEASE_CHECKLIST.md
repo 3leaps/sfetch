@@ -63,7 +63,7 @@ export SFETCH_GPG_HOMEDIR=/path/to/custom/gpg/homedir   # optional, defaults to 
    make verify-minisign-pubkey FILE=dist/release/sfetch-minisign.pub  # minisign key (optional, done in step 4)
    ```
 
-6. **Copy release notes**
+6. **Copy release notes** (requires `docs/releases/$RELEASE_TAG.md`)
    ```bash
    make release-notes
    ```
