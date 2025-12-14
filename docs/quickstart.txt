@@ -18,6 +18,7 @@ Install a signed release from GitHub in three steps:
 4. Choose install destination:
    - `-output /usr/local/bin/tool` to clobber a path
    - `-dest-dir ./bin` to place the extracted binary there
+   - `-install` to install to `~/.local/bin` (or `%USERPROFILE%\bin` on Windows)
 
 Examples:
   sfetch -repo fulmenhq/goneat -latest -dest-dir ./bin -pgp-key-file fulmen-release.asc
@@ -49,3 +50,5 @@ Verification:
   --show-trust-anchors print embedded public keys (use --json for JSON output)
 
 Need more detail? Re-run with `sfetch -help` for flag descriptions.
+
+Tip: `sfetch -helpextended` and `sfetch -help-extended` are equivalent.

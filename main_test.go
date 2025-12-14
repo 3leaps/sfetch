@@ -41,6 +41,49 @@ func TestCopyFilePreservesPermissions(t *testing.T) {
 	}
 }
 
+func TestHelpExtendedAlias(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{"-helpextended", "-help-extended", "--help-extended"}
+	for _, arg := range tests {
+		t.Run(arg, func(t *testing.T) {
+			var stdout, stderr strings.Builder
+			code := run([]string{arg}, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("exit code: got %d, stderr=%q", code, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), "sfetch quickstart") {
+				t.Fatalf("stdout missing quickstart header, got: %q", stdout.String())
+			}
+		})
+	}
+}
+
+func TestInstallFlagMutualExclusion(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"--install", "--dest-dir", "/tmp", "--skip-tools-check"}, want: "mutually exclusive"},
+		{args: []string{"--install", "--output", "/tmp/tool", "--skip-tools-check"}, want: "mutually exclusive"},
+		{args: []string{"--install", "--self-update", "--skip-tools-check"}, want: "cannot be used with --self-update"},
+	}
+	for _, tc := range tests {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			var stdout, stderr strings.Builder
+			code := run(tc.args, &stdout, &stderr)
+			if code == 0 {
+				t.Fatalf("expected non-zero exit code; stdout=%q", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("stderr mismatch: got %q want substring %q", stderr.String(), tc.want)
+			}
+		})
+	}
+}
+
 func TestGetConfig(t *testing.T) {
 	tests := []struct {
 		repo    string

@@ -690,8 +690,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	verifyMinisignPubkey := fs.String("verify-minisign-pubkey", "", "verify file is a valid minisign PUBLIC key (not secret)")
 	jsonOut := fs.Bool("json", false, "JSON output for CI")
 	extendedHelp := fs.Bool("helpextended", false, "print quickstart & examples")
+	fs.BoolVar(extendedHelp, "help-extended", false, "print quickstart & examples")
 	versionFlag := fs.Bool("version", false, "print version")
 	versionExtended := fs.Bool("version-extended", false, "print extended version/build info")
+	install := fs.Bool("install", false, "install to user bin directory (~/.local/bin or %USERPROFILE%\\bin)")
 
 	out := stdout
 	printFlag := func(name string) {
@@ -709,7 +711,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(out, "Usage: sfetch [flags]\n\n")
 
 		fmt.Fprintln(out, "Selection:")
-		for _, name := range []string{"repo", "tag", "latest", "asset-match", "asset-regex", "asset-type", "binary-name", "output", "dest-dir", "cache-dir"} {
+		for _, name := range []string{"repo", "tag", "latest", "asset-match", "asset-regex", "asset-type", "binary-name", "output", "dest-dir", "install", "cache-dir"} {
 			printFlag(name)
 		}
 
@@ -823,6 +825,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	if *selfUpdate && *install {
+		fmt.Fprintln(stderr, "error: --install cannot be used with --self-update (use --self-update-dir)")
+		return 1
+	}
+
 	if *selfUpdate {
 		ucfg, err := loadEmbeddedUpdateTarget()
 		if err != nil {
@@ -865,6 +872,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return 1
 			}
 		}
+	}
+
+	// Handle --install: set destDir to user bin directory
+	if *install {
+		if *destDir != "" || *output != "" {
+			fmt.Fprintln(stderr, "error: --install is mutually exclusive with --dest-dir and --output")
+			return 1
+		}
+		path, err := userBinDirPath()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: cannot determine user bin directory: %v\n", err)
+			return 1
+		}
+		*destDir = path
 	}
 
 	if *repo == "" {
@@ -1375,6 +1396,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	} else if *destDir != "" {
 		finalPath = filepath.Join(*destDir, installName)
 	} else {
+		// No destination specified - install to current directory with warning
+		fmt.Fprintf(stderr, "warning: no --dest-dir or --output specified, installing to current directory\n")
+		fmt.Fprintf(stderr, "  hint: use --install to install to %s\n", userBinDirDisplay())
 		finalPath = installName
 	}
 
@@ -2444,6 +2468,24 @@ func renderTemplate(tpl string, ctx templateContext) string {
 		"{{versionNoPrefix}}", ctx.VersionNoPrefix,
 	}
 	return strings.NewReplacer(replacements...).Replace(tpl)
+}
+
+func userBinDirPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	if runtime.GOOS == "windows" {
+		return filepath.Join(home, "bin"), nil
+	}
+	return filepath.Join(home, ".local", "bin"), nil
+}
+
+func userBinDirDisplay() string {
+	if runtime.GOOS == "windows" {
+		return "%USERPROFILE%\\bin"
+	}
+	return "~/.local/bin"
 }
 
 // selfVerifyAssetName returns the expected asset filename for the current platform.
