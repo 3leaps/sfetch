@@ -13,15 +13,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - (TBD)
 
 ### Changed
-- **ZIP extraction is now pure-Go:** `.zip` assets are extracted via the Go standard library (`archive/zip`), removing the runtime dependency on `unzip`.
+- (TBD)
 
 ### Fixed
 - (TBD)
 
 ### Security
+- (TBD)
+
+## [0.2.8] - TBD
+
+### Added
+- **Linux `noexec` detection (warn-only):** sfetch now warns when the install destination appears to be mounted with `noexec`.
+
+### Changed
+- **Release notes source is now versioned:** `make release-notes` now requires `docs/releases/$RELEASE_TAG.md` and fails if missing.
+- **More deterministic install behavior tests:** install logic is factored into a helper to enable unit tests for rename vs EXDEV copy fallback.
+
+### Security
+- Expanded test coverage for ZIP extraction edge cases (zip slip, absolute paths, symlinks).
+
+## [0.2.7] - 2025-12-14
+
+### Changed
+- **ZIP extraction is now pure-Go:** `.zip` assets are extracted via the Go standard library (`archive/zip`), removing the runtime dependency on `unzip`.
+
+### Security
 - **Hardened ZIP extraction:** ZIP slip/path traversal, absolute paths, and symlinks are rejected during extraction.
 
-## [0.2.6] - TBD
+## [0.2.6] - 2025-12-14
 
 ### Fixed
 - **Cross-device installs/caching (EXDEV):** When `--dest-dir` or `--cache-dir` is on a different filesystem than the temp directory (common in containerized CI), sfetch now falls back to copy when `rename(2)` fails with “invalid cross-device link”.
