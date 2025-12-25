@@ -9,10 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.9] - 2025-12-25
+
 ### Fixed
 - **Asset selection now works for `minisign` and similar tool names:** Fixed false positive in supplemental file detection where tools containing "sig" in their name (like `minisign`, `cosign`, `design-tool`) were incorrectly excluded from asset selection. The fix removes the overly broad substring check and adds explicit `.minisig` suffix detection.
 
-## [0.2.8] - TBD
+### Documentation
+- Added "Install permissions" section to README documenting permission behavior for archives, raw scripts/binaries, and cross-device installs.
+
+## [0.2.8] - 2025-12-14
 
 ### Added
 - **Linux `noexec` detection (warn-only):** sfetch now warns when the install destination appears to be mounted with `noexec`.
