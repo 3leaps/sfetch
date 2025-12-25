@@ -9,17 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- (TBD)
-
-### Changed
-- (TBD)
-
 ### Fixed
-- (TBD)
-
-### Security
-- (TBD)
+- **Asset selection now works for `minisign` and similar tool names:** Fixed false positive in supplemental file detection where tools containing "sig" in their name (like `minisign`, `cosign`, `design-tool`) were incorrectly excluded from asset selection. The fix removes the overly broad substring check and adds explicit `.minisig` suffix detection.
 
 ## [0.2.8] - TBD
 
