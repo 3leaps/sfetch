@@ -908,6 +908,62 @@ func TestInferAssetClassification(t *testing.T) {
 	}
 }
 
+func TestLooksLikeSupplemental(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		want bool
+	}{
+		// Signature file extensions - should be supplemental
+		{"SHA256SUMS.asc", true},
+		{"binary.tar.gz.asc", true},
+		{"binary.tar.gz.sig", true},
+		{"binary.tar.gz.sig.ed25519", true},
+		{"SHA256SUMS.minisig", true},
+		{"binary.tar.gz.minisig", true},
+
+		// Checksum-related files - should be supplemental
+		{"SHA256SUMS", true},
+		{"SHA256SUMS.txt", true},
+		{"sha256sums", true},
+		{"SHA512SUMS", true},
+		{"SHA2-512SUMS", true},
+		{"checksums.txt", true},
+		{"CHECKSUMS", true},
+
+		// Public key files - should be supplemental
+		{"sfetch-minisign.pub", true},
+		{"release-signing-key.pub", true},
+
+		// Binary assets - should NOT be supplemental
+		{"binary.tar.gz", false},
+		{"tool.zip", false},
+		{"sfetch_darwin_arm64.tar.gz", false},
+		{"kubectl", false},
+		{"install.sh", false},
+
+		// Tool names containing "sig" substring - should NOT be supplemental (regression test)
+		{"minisign-0.12-macos.zip", false},
+		{"minisign-0.12-linux.tar.gz", false},
+		{"minisign", false},
+		{"cosign-linux-amd64", false},
+		{"design-tool.tar.gz", false},
+
+		// Edge cases
+		{"SIGNATURE.txt", false}, // no .sig suffix, contains "signature" but actually archive metadata
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := looksLikeSupplemental(tt.name)
+			if got != tt.want {
+				t.Errorf("looksLikeSupplemental(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAutoDetectMinisignKeyAsset(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -1993,10 +1993,22 @@ func pickByHeuristics(assets []Asset, cfg *RepoConfig, goos, goarch string) (*As
 
 func looksLikeSupplemental(name string) bool {
 	lower := strings.ToLower(name)
-	if strings.HasSuffix(lower, ".asc") || strings.HasSuffix(lower, ".sig") || strings.HasSuffix(lower, ".sig.ed25519") {
+	// Signature file extensions
+	if strings.HasSuffix(lower, ".asc") || strings.HasSuffix(lower, ".sig") ||
+		strings.HasSuffix(lower, ".sig.ed25519") || strings.HasSuffix(lower, ".minisig") {
 		return true
 	}
-	return strings.Contains(lower, "sha256") || strings.Contains(lower, "checksum") || strings.Contains(lower, "sig") || strings.Contains(lower, "signature")
+	// Checksum files (substring match is safe - no common tools named these patterns)
+	if strings.Contains(lower, "sha256") || strings.Contains(lower, "sha512") ||
+		strings.Contains(lower, "sha2-256") || strings.Contains(lower, "sha2-512") ||
+		strings.Contains(lower, "checksum") {
+		return true
+	}
+	// Public key files
+	if strings.HasSuffix(lower, ".pub") {
+		return true
+	}
+	return false
 }
 
 func filterNonSupplemental(assets []Asset) []Asset {
