@@ -19,7 +19,12 @@ Yet we still ship 15-line bash bootstrap scripts that do manual `curl → sha256
 See [docs/security.md](docs/security.md).
 
 ### Asset Discovery
-Auto-selects via heuristics ([docs/pattern-matching.md](docs/pattern-matching.md)) and classifies assets (archives vs raw scripts/binaries vs package-like). Raw files skip extraction; scripts/binaries are chmod’d on macOS/Linux. Use `--asset-match` for glob/substring selection or `--asset-regex` for advanced regex.
+Auto-selects via heuristics ([docs/pattern-matching.md](docs/pattern-matching.md)) and classifies assets (archives vs raw scripts/binaries vs package-like). Raw files skip extraction; scripts/binaries are chmod'd on macOS/Linux. Use `--asset-match` for glob/substring selection or `--asset-regex` for advanced regex.
+
+### Install permissions
+- **Archives** (`.tar.gz`, `.zip`, etc.): Permissions from the archive are preserved. Executables packaged with `0755` remain executable after extraction.
+- **Raw scripts/binaries** (e.g., `install.sh`, `kubectl`): Automatically set to `0755` on macOS/Linux to ensure executability.
+- **Cross-device installs**: When `--dest-dir` is on a different filesystem than the temp directory (common in containers), sfetch falls back to copy and preserves the source permissions.
 
 ### Signature verification
 
