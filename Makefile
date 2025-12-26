@@ -38,7 +38,7 @@ SFETCH_PGP_KEY_ID ?=
 SFETCH_GPG_HOMEDIR ?=
 MINISIGN_PUB_NAME ?= sfetch-minisign.pub
 
-.PHONY: all build test clean release-clean install release fmt fmt-check shell-check lint tools prereqs prereqs-advise bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-checksums release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script version-check version-set version-patch version-minor version-major corpus corpus-all corpus-dryrun corpus-validate
+.PHONY: all build test clean release-clean install release fmt fmt-check shell-check lint tools prereqs prereqs-advise bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-checksums release-verify-checksums release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script version-check version-set version-patch version-minor version-major corpus corpus-all corpus-dryrun corpus-validate
 
 CORPUS_DEST ?= test-corpus
 
@@ -192,6 +192,21 @@ release-checksums: bootstrap-script
 
 # Backwards compatibility alias
 release-sha256: release-checksums
+
+# Verify local checksums match downloaded release (for auditing signed releases)
+release-verify-checksums:
+	@if [ ! -d "$(DIST_RELEASE)" ]; then echo "error: $(DIST_RELEASE) not found (run make release-download first)" >&2; exit 1; fi
+	@echo "Verifying checksums in $(DIST_RELEASE)..."
+	@cd $(DIST_RELEASE) && \
+	if [ -f SHA256SUMS ]; then \
+		echo "=== SHA256SUMS ===" && \
+		shasum -a 256 -c SHA256SUMS 2>&1 | grep -v ': OK$$' || echo "All SHA256 checksums OK"; \
+	fi && \
+	if [ -f SHA2-512SUMS ]; then \
+		echo "=== SHA2-512SUMS ===" && \
+		shasum -a 512 -c SHA2-512SUMS 2>&1 | grep -v ': OK$$' || echo "All SHA512 checksums OK"; \
+	fi
+	@echo "✅ Checksum verification complete"
 
 release-notes:
 	@if [ -z "$(RELEASE_TAG)" ]; then echo "error: RELEASE_TAG not set" >&2; exit 1; fi

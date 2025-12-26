@@ -84,22 +84,32 @@ fi
 
 # Sign checksum manifests (preferred workflow)
 # Users verify: 1) signature on checksum file, 2) file checksums against it
-for file in "${checksum_files[@]}"; do
-    if [ "$has_minisign" = true ]; then
+#
+# Signing is grouped by tool (all minisign first, then all PGP) to minimize
+# password prompt switching during manual signing workflows.
+
+if [ "$has_minisign" = true ]; then
+    echo ""
+    echo "=== Minisign signatures ==="
+    for file in "${checksum_files[@]}"; do
         echo "🔏 [minisign] Signing $file"
         rm -f "$DIR/$file.minisig"
         minisign -S -s "$SFETCH_MINISIGN_KEY" -t "sfetch $TAG $(date -u +%Y-%m-%dT%H:%M:%SZ)" -m "$DIR/$file"
-    fi
+    done
+fi
 
-    if [ "$has_pgp" = true ]; then
+if [ "$has_pgp" = true ]; then
+    echo ""
+    echo "=== PGP signatures ==="
+    for file in "${checksum_files[@]}"; do
         echo "🔏 [PGP] Signing $file"
         if [ -n "$SFETCH_GPG_HOMEDIR" ]; then
             env GNUPGHOME="$SFETCH_GPG_HOMEDIR" gpg --batch --yes --armor --local-user "$SFETCH_PGP_KEY_ID" --detach-sign -o "$DIR/$file.asc" "$DIR/$file"
         else
             gpg --batch --yes --armor --local-user "$SFETCH_PGP_KEY_ID" --detach-sign -o "$DIR/$file.asc" "$DIR/$file"
         fi
-    fi
-done
+    done
+fi
 
 echo ""
 echo "✅ Signing complete for $TAG"
