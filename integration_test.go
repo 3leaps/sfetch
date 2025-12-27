@@ -252,6 +252,60 @@ func TestIntegrationMinisignAutoDetect(t *testing.T) {
 	}
 }
 
+func TestIntegrationTrustMinimumBlocksUnsigned(t *testing.T) {
+	assetBytes, err := os.ReadFile("testdata/integration/sfetch_test_darwin_arm64.tar.gz")
+	if err != nil {
+		t.Fatalf("read asset: %v", err)
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/test/unsigned/releases/latest":
+			base := fmt.Sprintf("http://%s", r.Host)
+			rel := fakeRelease{
+				TagName: "v0.1.0",
+				Assets: []Asset{
+					// No signature or checksum assets.
+					{Name: "sfetch_test_darwin_arm64.tar.gz", BrowserDownloadUrl: base + "/assets/bin"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(&rel); err != nil {
+				t.Fatalf("encode release: %v", err)
+			}
+		case "/assets/bin":
+			_, _ = w.Write(assetBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	destDir := t.TempDir()
+	cacheDir := filepath.Join(destDir, "cache")
+	cmd := exec.Command("go", "run", ".",
+		"--repo", "test/unsigned",
+		"--latest",
+		"--dest-dir", destDir,
+		"--cache-dir", cacheDir,
+		"--trust-minimum", "30",
+	)
+	cmd.Env = append(os.Environ(), "SFETCH_API_BASE="+ts.URL)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	err = cmd.Run()
+	if err == nil {
+		t.Fatalf("expected sfetch to fail due to --trust-minimum\noutput:\n%s", output.String())
+	}
+	if !bytes.Contains(output.Bytes(), []byte("below --trust-minimum 30")) {
+		t.Fatalf("expected trust-minimum error in output:\n%s", output.String())
+	}
+	if _, err := os.Stat(filepath.Join(destDir, "sfetch")); err == nil {
+		t.Fatalf("did not expect binary to be installed when trust-minimum blocks")
+	}
+}
+
 func TestIntegrationRequireMinisign(t *testing.T) {
 	// Test --require-minisign fails when no minisign sig present
 	assetBytes, err := os.ReadFile("testdata/integration/sfetch_test_darwin_arm64.tar.gz")

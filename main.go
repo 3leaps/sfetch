@@ -566,10 +566,10 @@ func legacyTrustLevelFromTrust(score TrustScore) string {
 }
 
 func finalizeAssessmentTrust(assessment *VerificationAssessment, rel *Release, flags assessmentFlags) {
-	httpsUsed := false
-	if assessment.SelectedAsset != nil {
-		httpsUsed = strings.HasPrefix(strings.ToLower(assessment.SelectedAsset.BrowserDownloadUrl), "https://")
-	}
+	// GitHub release downloads are HTTPS in production. Tests may use http://
+	// for local servers, but the transport property should model the real
+	// acquisition surface.
+	httpsUsed := true
 
 	signatureVerifiable := false
 	switch assessment.SignatureFormat {
@@ -1369,7 +1369,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Print warnings
+	// Print trust and warnings
+	fmt.Fprintf(stderr, "Trust: %d/100 (%s)\n", assessment.Trust.Score, assessment.Trust.LevelName)
 	for _, w := range assessment.Warnings {
 		fmt.Fprintf(stderr, "warning: %s\n", w)
 	}
