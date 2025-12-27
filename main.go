@@ -501,7 +501,7 @@ func assessRelease(rel *Release, cfg *RepoConfig, selectedAsset *Asset, flags as
 			if flags.skipChecksum {
 				assessment.Warnings = append(assessment.Warnings, "Checksum verification skipped (--skip-checksum flag)")
 			} else {
-				assessment.Warnings = append(assessment.Warnings, "No checksum file found; using signature for integrity")
+				assessment.Warnings = append(assessment.Warnings, "No checksum file found")
 			}
 		}
 
@@ -584,6 +584,10 @@ func finalizeAssessmentTrust(assessment *VerificationAssessment, rel *Release, f
 	}
 	if !assessment.SignatureAvailable {
 		signatureVerifiable = false
+	}
+
+	if assessment.SignatureAvailable && !signatureVerifiable {
+		assessment.Warnings = append(assessment.Warnings, "Signature file found but no verification key available")
 	}
 
 	signatureSkipped := flags.skipSig || flags.insecure
@@ -677,10 +681,11 @@ func formatDryRunOutput(repo string, rel *Release, assessment *VerificationAsses
 	// Signature info
 	if assessment.SignatureAvailable {
 		sigType := assessment.SignatureFormat
+		verifiable := assessment.Trust.Factors.Signature.Verifiable
 		if assessment.SignatureIsChecksum {
-			sb.WriteString(fmt.Sprintf("  Signature:  %s (%s, checksum-level)\n", assessment.SignatureFile, sigType))
+			sb.WriteString(fmt.Sprintf("  Signature:  %s (%s, checksum-level, verifiable=%t)\n", assessment.SignatureFile, sigType, verifiable))
 		} else {
-			sb.WriteString(fmt.Sprintf("  Signature:  %s (%s, per-asset)\n", assessment.SignatureFile, sigType))
+			sb.WriteString(fmt.Sprintf("  Signature:  %s (%s, per-asset, verifiable=%t)\n", assessment.SignatureFile, sigType, verifiable))
 		}
 	} else {
 		sb.WriteString("  Signature:  none\n")
@@ -688,8 +693,9 @@ func formatDryRunOutput(repo string, rel *Release, assessment *VerificationAsses
 
 	// Checksum info
 	if assessment.ChecksumAvailable {
-		sb.WriteString(fmt.Sprintf("  Checksum:   %s (%s, %s)\n",
-			assessment.ChecksumFile, assessment.ChecksumAlgorithm, assessment.ChecksumType))
+		verifiable := assessment.Trust.Factors.Checksum.Verifiable
+		sb.WriteString(fmt.Sprintf("  Checksum:   %s (%s, %s, verifiable=%t)\n",
+			assessment.ChecksumFile, assessment.ChecksumAlgorithm, assessment.ChecksumType, verifiable))
 	} else {
 		sb.WriteString("  Checksum:   none\n")
 	}
