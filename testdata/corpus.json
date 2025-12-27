@@ -39,28 +39,38 @@
     "repo": "sharkdp/fd",
     "tag": "v10.2.0",
     "assetMatch": "*apple-darwin*",
-    "expectedWorkflow": "insecure",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "note": "No checksums/signatures; should be workflow none"
+  },
+  {
+    "repo": "https://claude.ai/install.sh",
+    "tag": "n/a",
+    "assetMatch": "install.sh",
+    "expectedWorkflow": "none",
     "expectSuccess": false,
     "tier": "fast",
-    "note": "No checksums/signatures; expect failure unless --insecure"
+    "note": "Claude Code installer script pattern (not GitHub; expected failure until generalized URL support)",
+    "pattern": "curl -fsSL https://claude.ai/install.sh | bash"
   },
   {
     "repo": "BurntSushi/ripgrep",
     "tag": "14.0.3",
     "assetRegex": "^ripgrep-14\\.0\\.3-aarch64-apple-darwin\\.tar\\.gz$",
-    "expectedWorkflow": "A",
+    "expectedWorkflow": "C",
     "expectSuccess": true,
     "tier": "fast",
-    "note": "PGP checksums.txt.asc (Workflow A)"
+    "note": "Per-asset checksum-only (no signature detected)"
   },
   {
     "repo": "cli/cli",
     "tag": "v2.53.0",
     "assetMatch": "gh_*_macOS_arm64*",
-    "expectedWorkflow": "B",
+    "expectedWorkflow": "none",
     "expectSuccess": true,
     "tier": "fast",
-    "note": "Goreleaser ed25519 per-asset sigs (Workflow B)"
+    "note": "No verification artifacts detected (expected to remain low trust until supported)"
   },
   {
     "repo": "gohugoio/hugo",

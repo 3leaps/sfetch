@@ -19,6 +19,7 @@ type corpusEntry struct {
 	ExpectSuccess    bool   `json:"expectSuccess"`
 	Tier             string `json:"tier"`
 	Note             string `json:"note"`
+	Pattern          string `json:"pattern"`
 }
 
 type result struct {
@@ -30,11 +31,13 @@ type result struct {
 	ExitSuccess bool   `json:"exitSuccess"`
 	Status      string `json:"status"`
 	Note        string `json:"note,omitempty"`
+	Pattern     string `json:"pattern,omitempty"`
 	Output      string `json:"output,omitempty"`
 }
 
 func main() {
 	manifestPath := flag.String("manifest", "testdata/corpus.json", "path to corpus manifest")
+	sfetchBinFlag := flag.String("sfetch-bin", "", "path to sfetch binary to run")
 	includeSlow := flag.Bool("include-slow", false, "include slow/large entries")
 	dryRunOnly := flag.Bool("dry-run", true, "perform dry-run only (no downloads)")
 	destDirFlag := flag.String("dest", "", "destination dir for downloads (when dry-run is false)")
@@ -42,6 +45,7 @@ func main() {
 
 	manifest := firstSet(*manifestPath, os.Getenv("CORPUS_MANIFEST"))
 	destDir := firstSet(*destDirFlag, os.Getenv("CORPUS_DEST"), "test-corpus")
+	sfetchBin := firstSet(*sfetchBinFlag, os.Getenv("CORPUS_SFETCH_BIN"), "sfetch")
 
 	entries, err := loadManifest(manifest)
 	if err != nil {
@@ -63,7 +67,7 @@ func main() {
 			continue
 		}
 
-		res := runEntry(e, *dryRunOnly, destDir)
+		res := runEntry(e, *dryRunOnly, destDir, sfetchBin)
 		results = append(results, res)
 		if res.Status != "pass" {
 			failures++
@@ -74,6 +78,9 @@ func main() {
 		fmt.Printf("[%s] %s@%s asset=%s tier=%s expected=%v gotExit=%v", strings.ToUpper(r.Status), r.Repo, r.Tag, r.Asset, r.Tier, r.Expected, r.ExitSuccess)
 		if r.Note != "" {
 			fmt.Printf(" note=%s", r.Note)
+		}
+		if r.Pattern != "" {
+			fmt.Printf(" pattern=%s", r.Pattern)
 		}
 		fmt.Println()
 		if r.Status != "pass" && strings.TrimSpace(r.Output) != "" {
@@ -86,7 +93,7 @@ func main() {
 	}
 }
 
-func runEntry(e corpusEntry, dryRunOnly bool, dest string) result {
+func runEntry(e corpusEntry, dryRunOnly bool, dest, sfetchBin string) result {
 	args := []string{"--repo", e.Repo, "--tag", e.Tag}
 	if e.AssetMatch != "" {
 		args = append(args, "--asset-match", e.AssetMatch)
@@ -96,11 +103,17 @@ func runEntry(e corpusEntry, dryRunOnly bool, dest string) result {
 	}
 
 	args = append(args, "--dry-run")
-	dryRunExit, dryRunOut := runCmd("sfetch", args...)
+	dryRunExit, dryRunOut := runCmd(sfetchBin, args...)
 
 	exitSuccess := dryRunExit == 0
+	workflowOK := true
+	if exitSuccess {
+		// Only validate workflow when sfetch produced an assessment.
+		workflowOK = strings.Contains(dryRunOut, "Workflow:   "+e.ExpectedWorkflow)
+	}
+
 	status := "fail"
-	if exitSuccess == e.ExpectSuccess {
+	if exitSuccess == e.ExpectSuccess && workflowOK {
 		status = "pass"
 	}
 
@@ -118,7 +131,7 @@ func runEntry(e corpusEntry, dryRunOnly bool, dest string) result {
 		if e.AssetRegex != "" {
 			dlArgs = append(dlArgs, "--asset-regex", e.AssetRegex)
 		}
-		runCmd("sfetch", dlArgs...)
+		runCmd(sfetchBin, dlArgs...)
 	}
 
 	return result{
@@ -130,6 +143,7 @@ func runEntry(e corpusEntry, dryRunOnly bool, dest string) result {
 		ExitSuccess: exitSuccess,
 		Status:      status,
 		Note:        e.Note,
+		Pattern:     e.Pattern,
 		Output:      dryRunOut,
 	}
 }
@@ -176,8 +190,8 @@ func validateEntries(entries []corpusEntry) error {
 		if strings.TrimSpace(e.AssetMatch) == "" && strings.TrimSpace(e.AssetRegex) == "" {
 			return fmt.Errorf("entry %d: assetMatch or assetRegex required", i)
 		}
-		if e.ExpectedWorkflow != "A" && e.ExpectedWorkflow != "B" && e.ExpectedWorkflow != "C" && e.ExpectedWorkflow != "insecure" {
-			return fmt.Errorf("entry %d: expectedWorkflow must be A, B, C, or insecure", i)
+		if e.ExpectedWorkflow != "A" && e.ExpectedWorkflow != "B" && e.ExpectedWorkflow != "C" && e.ExpectedWorkflow != "none" && e.ExpectedWorkflow != "insecure" {
+			return fmt.Errorf("entry %d: expectedWorkflow must be A, B, C, none, or insecure", i)
 		}
 		if e.Tier != "fast" && e.Tier != "slow" {
 			return fmt.Errorf("entry %d: tier must be fast or slow", i)

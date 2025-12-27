@@ -133,25 +133,25 @@ lint-workflows: yamllint-workflows actionlint-workflows
 # require authenticated GitHub API calls. Run manually during release prep:
 #   GITHUB_TOKEN=<token> make corpus        # fast repos, dry-run
 #   GITHUB_TOKEN=<token> make corpus-all    # all repos including slow
-corpus:
+corpus: build
 	@mkdir -p $(CORPUS_DEST)
 	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
-	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --dest $(CORPUS_DEST)
+	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --dest $(CORPUS_DEST) --sfetch-bin $(BUILD_ARTIFACT)
 
-corpus-dryrun:
+corpus-dryrun: build
 	@mkdir -p $(CORPUS_DEST)
 	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
-	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --dest $(CORPUS_DEST)
+	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --dest $(CORPUS_DEST) --sfetch-bin $(BUILD_ARTIFACT)
 
-corpus-all:
+corpus-all: build
 	@mkdir -p $(CORPUS_DEST)
 	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
-	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --include-slow --dest $(CORPUS_DEST)
+	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --include-slow --dest $(CORPUS_DEST) --sfetch-bin $(BUILD_ARTIFACT)
 
-corpus-validate:
+corpus-validate: build
 	@mkdir -p $(CORPUS_DEST)
 	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
-	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --include-slow --dest $(CORPUS_DEST)
+	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --include-slow --dest $(CORPUS_DEST) --sfetch-bin $(BUILD_ARTIFACT)
 
 
 quality: prereqs fmt-check shell-check lint test gosec-high build-all yamllint-workflows
