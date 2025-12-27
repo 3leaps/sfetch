@@ -4,7 +4,7 @@
   "title": "sfetch Provenance Record",
   "description": "Structured record of verification actions performed during asset download. Use for audit trails, CI integration, and compliance.",
   "type": "object",
-  "required": ["version", "timestamp", "source", "asset", "verification", "trustLevel"],
+  "required": ["version", "timestamp", "source", "asset", "verification", "trustLevel", "trust"],
   "properties": {
     "$schema": {
       "type": "string",
@@ -117,8 +117,8 @@
       "properties": {
         "workflow": {
           "type": "string",
-          "enum": ["A", "B", "C", "insecure"],
-          "description": "Verification workflow used: A=checksum-level-sig, B=per-asset-sig, C=checksum-only, insecure=none"
+          "enum": ["A", "B", "C", "none", "insecure"],
+          "description": "Verification workflow used: A=checksum-level-sig, B=per-asset-sig, C=checksum-only, none=no artifacts, insecure=bypass"
         },
         "signature": {
           "type": "object",
@@ -199,7 +199,66 @@
     "trustLevel": {
       "type": "string",
       "enum": ["high", "medium", "low", "none"],
-      "description": "Computed trust level: high=sig+checksum, medium=sig-only, low=checksum-only, none=insecure"
+      "description": "DEPRECATED (v0.3.0): legacy categorical trust level; retained for backwards compat for one minor cycle"
+    },
+    "trust": {
+      "type": "object",
+      "description": "Trust rating (v0.3.0): numeric score and transparent factor breakdown",
+      "required": ["score", "level", "levelName", "factors"],
+      "properties": {
+        "score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "level": {"type": "integer", "minimum": 0, "maximum": 4},
+        "levelName": {"type": "string", "enum": ["bypassed", "minimal", "low", "medium", "high"]},
+        "factors": {
+          "type": "object",
+          "required": ["signature", "checksum", "transport", "algorithm"],
+          "properties": {
+            "signature": {
+              "type": "object",
+              "required": ["verifiable", "validated", "skipped", "points"],
+              "properties": {
+                "verifiable": {"type": "boolean"},
+                "validated": {"type": "boolean"},
+                "skipped": {"type": "boolean"},
+                "points": {"type": "integer"}
+              },
+              "additionalProperties": false
+            },
+            "checksum": {
+              "type": "object",
+              "required": ["verifiable", "validated", "skipped", "points"],
+              "properties": {
+                "verifiable": {"type": "boolean"},
+                "validated": {"type": "boolean"},
+                "skipped": {"type": "boolean"},
+                "algorithm": {"type": "string"},
+                "points": {"type": "integer"}
+              },
+              "additionalProperties": false
+            },
+            "transport": {
+              "type": "object",
+              "required": ["https", "points"],
+              "properties": {
+                "https": {"type": "boolean"},
+                "points": {"type": "integer"}
+              },
+              "additionalProperties": false
+            },
+            "algorithm": {
+              "type": "object",
+              "required": ["points"],
+              "properties": {
+                "name": {"type": "string"},
+                "points": {"type": "integer"}
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     },
     "trustSignals": {
       "type": "object",
@@ -303,6 +362,17 @@
         }
       },
       "trustLevel": "low",
+      "trust": {
+        "score": 45,
+        "level": 2,
+        "levelName": "low",
+        "factors": {
+          "signature": {"verifiable": false, "validated": false, "skipped": false, "points": 0},
+          "checksum": {"verifiable": true, "validated": true, "skipped": false, "algorithm": "sha256", "points": 40},
+          "transport": {"https": true, "points": 0},
+          "algorithm": {"name": "sha256", "points": 5}
+        }
+      },
       "warnings": [
         "No signature available; authenticity cannot be proven"
       ],

@@ -49,16 +49,196 @@ const (
 	workflowA        = "A"        // Checksum-level signature (SHA256SUMS.minisig)
 	workflowB        = "B"        // Per-asset signature (asset.tar.gz.minisig)
 	workflowC        = "C"        // Checksum-only (no signature available)
-	workflowInsecure = "insecure" // No verification (--insecure flag)
+	workflowNone     = "none"     // No verification artifacts provided by source
+	workflowInsecure = "insecure" // Verification bypass (--insecure flag)
 )
 
-// Trust levels for provenance records
+// Legacy trust levels for provenance records.
+//
+// Deprecated in v0.3.0: retained for one minor cycle for backwards compatibility.
+// New callers should use TrustScore/TrustLevel.
 const (
 	trustHigh   = "high"   // Signature + checksum verified
 	trustMedium = "medium" // Signature only (no checksum)
 	trustLow    = "low"    // Checksum only (no signature)
-	trustNone   = "none"   // No verification (--insecure)
+	trustNone   = "none"   // No verification (--insecure) or no-verification available
 )
+
+type TrustLevel int
+
+const (
+	TrustBypassed TrustLevel = 0 // User bypassed verifiable checks
+	TrustMinimal  TrustLevel = 1 // HTTPS-only, no verification available
+	TrustLow      TrustLevel = 2 // Checksum-only
+	TrustMedium   TrustLevel = 3 // Signature-only, or partial verification
+	TrustHigh     TrustLevel = 4 // Signature + checksum verified
+)
+
+func TrustLevelFromScore(score int) TrustLevel {
+	switch {
+	case score <= 0:
+		return TrustBypassed
+	case score < 30:
+		return TrustMinimal
+	case score < 60:
+		return TrustLow
+	case score < 85:
+		return TrustMedium
+	default:
+		return TrustHigh
+	}
+}
+
+func (tl TrustLevel) Name() string {
+	switch tl {
+	case TrustBypassed:
+		return "bypassed"
+	case TrustMinimal:
+		return "minimal"
+	case TrustLow:
+		return "low"
+	case TrustMedium:
+		return "medium"
+	case TrustHigh:
+		return "high"
+	default:
+		return "unknown"
+	}
+}
+
+type TrustSigFactor struct {
+	Verifiable bool `json:"verifiable"`
+	Validated  bool `json:"validated"`
+	Skipped    bool `json:"skipped"`
+	Points     int  `json:"points"`
+}
+
+type TrustChecksumFactor struct {
+	Verifiable bool   `json:"verifiable"`
+	Validated  bool   `json:"validated"`
+	Skipped    bool   `json:"skipped"`
+	Algorithm  string `json:"algorithm,omitempty"`
+	Points     int    `json:"points"`
+}
+
+type TrustTransportFactor struct {
+	HTTPS  bool `json:"https"`
+	Points int  `json:"points"`
+}
+
+type TrustAlgorithmFactor struct {
+	Name   string `json:"name,omitempty"`
+	Points int    `json:"points"`
+}
+
+type TrustFactors struct {
+	Signature TrustSigFactor       `json:"signature"`
+	Checksum  TrustChecksumFactor  `json:"checksum"`
+	Transport TrustTransportFactor `json:"transport"`
+	Algorithm TrustAlgorithmFactor `json:"algorithm"`
+}
+
+type TrustScore struct {
+	Score     int          `json:"score"`
+	Level     TrustLevel   `json:"level"`
+	LevelName string       `json:"levelName"`
+	Factors   TrustFactors `json:"factors"`
+}
+
+type trustScoreInput struct {
+	SignatureVerifiable bool
+	SignatureValidated  bool
+	SignatureSkipped    bool
+
+	ChecksumVerifiable bool
+	ChecksumValidated  bool
+	ChecksumSkipped    bool
+	ChecksumAlgorithm  string
+
+	HTTPSUsed bool
+
+	InsecureFlag bool
+}
+
+func computeTrustScore(in trustScoreInput) TrustScore {
+	var out TrustScore
+
+	out.Factors.Signature.Verifiable = in.SignatureVerifiable
+	out.Factors.Signature.Validated = in.SignatureValidated
+	out.Factors.Signature.Skipped = in.SignatureSkipped
+
+	out.Factors.Checksum.Verifiable = in.ChecksumVerifiable
+	out.Factors.Checksum.Validated = in.ChecksumValidated
+	out.Factors.Checksum.Skipped = in.ChecksumSkipped
+	out.Factors.Checksum.Algorithm = in.ChecksumAlgorithm
+
+	out.Factors.Transport.HTTPS = in.HTTPSUsed
+
+	verifiedAny := in.SignatureValidated || in.ChecksumValidated
+
+	score := 0
+
+	// Signature (dominant factor)
+	if in.SignatureValidated {
+		score += 70
+		out.Factors.Signature.Points = 70
+	} else if in.SignatureVerifiable && in.SignatureSkipped {
+		score -= 20
+		out.Factors.Signature.Points = -20
+	}
+
+	// Checksum
+	if in.ChecksumValidated {
+		score += 40
+		out.Factors.Checksum.Points = 40
+	} else if in.ChecksumVerifiable && in.ChecksumSkipped {
+		score -= 15
+		out.Factors.Checksum.Points = -15
+	}
+
+	// Transport baseline (only if nothing verified)
+	if !verifiedAny && in.HTTPSUsed {
+		score += 25
+		out.Factors.Transport.Points = 25
+	}
+
+	// Algorithm (only meaningful if checksum validated)
+	if in.ChecksumValidated {
+		switch strings.ToLower(in.ChecksumAlgorithm) {
+		case "sha256", "sha512":
+			score += 5
+			out.Factors.Algorithm.Name = strings.ToLower(in.ChecksumAlgorithm)
+			out.Factors.Algorithm.Points = 5
+		case "sha1", "md5":
+			score -= 10
+			out.Factors.Algorithm.Name = strings.ToLower(in.ChecksumAlgorithm)
+			out.Factors.Algorithm.Points = -10
+		}
+	}
+
+	// Bypass semantics
+	if in.InsecureFlag && (in.SignatureVerifiable || in.ChecksumVerifiable) {
+		score = 0
+		out.Factors.Signature.Points = 0
+		out.Factors.Checksum.Points = 0
+		out.Factors.Transport.Points = 0
+		out.Factors.Algorithm.Points = 0
+		out.Factors.Algorithm.Name = ""
+	}
+
+	if score < 0 {
+		score = 0
+	}
+	if score > 100 {
+		score = 100
+	}
+
+	out.Score = score
+	out.Level = TrustLevelFromScore(score)
+	out.LevelName = out.Level.Name()
+
+	return out
+}
 
 // Minisign key format constants
 // Public key: "RW" + 54 base64 chars = 56 total (42 bytes: 2 algo + 8 keyid + 32 pubkey)
@@ -116,6 +296,7 @@ type ProvenanceRecord struct {
 	Asset         ProvenanceAsset  `json:"asset"`
 	Verification  ProvenanceVerify `json:"verification"`
 	TrustLevel    string           `json:"trustLevel"`
+	Trust         TrustScore       `json:"trust"`
 	Warnings      []string         `json:"warnings,omitempty"`
 	Flags         ProvenanceFlags  `json:"flags,omitempty"`
 }
@@ -199,7 +380,8 @@ type VerificationAssessment struct {
 
 	// Computed workflow and trust
 	Workflow   string // A, B, C, or insecure
-	TrustLevel string // high, medium, low, none
+	TrustLevel string // legacy: high, medium, low, none
+	Trust      TrustScore
 
 	// Warnings generated during assessment
 	Warnings []string
@@ -213,11 +395,56 @@ func assessRelease(rel *Release, cfg *RepoConfig, selectedAsset *Asset, flags as
 		Warnings:      []string{},
 	}
 
-	// Handle --insecure flag first
+	// Handle --insecure flag first.
+	// We still compute what verification artifacts are present so we can distinguish
+	// "bypassed available verification" from "no verification possible" in trust scoring.
 	if flags.insecure {
 		assessment.Workflow = workflowInsecure
-		assessment.TrustLevel = trustNone
 		assessment.Warnings = append(assessment.Warnings, "No verification performed (--insecure flag)")
+
+		baseName := trimKnownExtension(selectedAsset.Name, cfg.ArchiveExtensions)
+		ctx := templateContext{
+			AssetName:       selectedAsset.Name,
+			BaseName:        baseName,
+			BinaryName:      cfg.BinaryName,
+			GOOS:            runtime.GOOS,
+			GOARCH:          runtime.GOARCH,
+			Version:         rel.TagName,
+			VersionNoPrefix: strings.TrimPrefix(rel.TagName, "v"),
+		}
+
+		// Prefer checking for signature artifacts so bypass semantics are accurate.
+		if checksumSigAsset, checksumFileName := findChecksumSignature(rel.Assets, cfg); checksumSigAsset != nil {
+			assessment.SignatureAvailable = true
+			assessment.SignatureFile = checksumSigAsset.Name
+			assessment.SignatureFormat = signatureFormatFromExtension(checksumSigAsset.Name, cfg.SignatureFormats)
+			assessment.SignatureIsChecksum = true
+			assessment.ChecksumFileForSig = checksumFileName
+
+			assessment.ChecksumAvailable = true
+			assessment.ChecksumFile = checksumFileName
+			assessment.ChecksumType = "consolidated"
+			assessment.ChecksumAlgorithm = detectChecksumAlgorithm(checksumFileName, cfg.HashAlgo)
+		} else if perAssetSig := findPerAssetSignature(rel.Assets, ctx, cfg); perAssetSig != nil {
+			assessment.SignatureAvailable = true
+			assessment.SignatureFile = perAssetSig.Name
+			assessment.SignatureFormat = signatureFormatFromExtension(perAssetSig.Name, cfg.SignatureFormats)
+			assessment.SignatureIsChecksum = false
+
+			if checksumAsset := findChecksumFile(rel.Assets, ctx, cfg); checksumAsset != nil {
+				assessment.ChecksumAvailable = true
+				assessment.ChecksumFile = checksumAsset.Name
+				assessment.ChecksumType = detectChecksumType(checksumAsset.Name)
+				assessment.ChecksumAlgorithm = detectChecksumAlgorithm(checksumAsset.Name, cfg.HashAlgo)
+			}
+		} else if checksumAsset := findChecksumFile(rel.Assets, ctx, cfg); checksumAsset != nil {
+			assessment.ChecksumAvailable = true
+			assessment.ChecksumFile = checksumAsset.Name
+			assessment.ChecksumType = detectChecksumType(checksumAsset.Name)
+			assessment.ChecksumAlgorithm = detectChecksumAlgorithm(checksumAsset.Name, cfg.HashAlgo)
+		}
+
+		finalizeAssessmentTrust(assessment, rel, flags)
 		return assessment
 	}
 
@@ -249,11 +476,9 @@ func assessRelease(rel *Release, cfg *RepoConfig, selectedAsset *Asset, flags as
 
 		assessment.Workflow = workflowA
 		if flags.skipChecksum {
-			assessment.TrustLevel = trustMedium
 			assessment.Warnings = append(assessment.Warnings, "Checksum verification skipped (--skip-checksum flag)")
-		} else {
-			assessment.TrustLevel = trustHigh
 		}
+		finalizeAssessmentTrust(assessment, rel, flags)
 		return assessment
 	}
 
@@ -272,9 +497,7 @@ func assessRelease(rel *Release, cfg *RepoConfig, selectedAsset *Asset, flags as
 			assessment.ChecksumFile = checksumAsset.Name
 			assessment.ChecksumType = detectChecksumType(checksumAsset.Name)
 			assessment.ChecksumAlgorithm = detectChecksumAlgorithm(checksumAsset.Name, cfg.HashAlgo)
-			assessment.TrustLevel = trustHigh
 		} else {
-			assessment.TrustLevel = trustMedium
 			if flags.skipChecksum {
 				assessment.Warnings = append(assessment.Warnings, "Checksum verification skipped (--skip-checksum flag)")
 			} else {
@@ -283,6 +506,7 @@ func assessRelease(rel *Release, cfg *RepoConfig, selectedAsset *Asset, flags as
 		}
 
 		assessment.Workflow = workflowB
+		finalizeAssessmentTrust(assessment, rel, flags)
 		return assessment
 	}
 
@@ -295,21 +519,21 @@ func assessRelease(rel *Release, cfg *RepoConfig, selectedAsset *Asset, flags as
 		assessment.ChecksumAlgorithm = detectChecksumAlgorithm(checksumAsset.Name, cfg.HashAlgo)
 
 		assessment.Workflow = workflowC
-		assessment.TrustLevel = trustLow
 		assessment.Warnings = append(assessment.Warnings, "No signature available; authenticity cannot be proven")
 
 		if flags.skipSig {
 			// User explicitly skipped sig, but there wasn't one anyway
 			assessment.Warnings = append(assessment.Warnings, "Note: --skip-sig had no effect (no signature found)")
 		}
+		finalizeAssessmentTrust(assessment, rel, flags)
 		return assessment
 	}
 
 	// Nothing available
-	assessment.Workflow = ""
-	assessment.TrustLevel = trustNone
-	assessment.Warnings = append(assessment.Warnings, "No verification available (no signature or checksum found)")
+	assessment.Workflow = workflowNone
+	assessment.Warnings = append(assessment.Warnings, "No verification artifacts provided by source")
 
+	finalizeAssessmentTrust(assessment, rel, flags)
 	return assessment
 }
 
@@ -321,6 +545,68 @@ type assessmentFlags struct {
 	preferPerAsset  bool
 	requireMinisign bool
 	dryRun          bool
+
+	minisignKeyConfigured bool
+	pgpKeyConfigured      bool
+	ed25519KeyConfigured  bool
+	gpgBin                string
+}
+
+func legacyTrustLevelFromTrust(score TrustScore) string {
+	switch score.Level {
+	case TrustHigh:
+		return trustHigh
+	case TrustMedium:
+		return trustMedium
+	case TrustLow:
+		return trustLow
+	default:
+		return trustNone
+	}
+}
+
+func finalizeAssessmentTrust(assessment *VerificationAssessment, rel *Release, flags assessmentFlags) {
+	httpsUsed := false
+	if assessment.SelectedAsset != nil {
+		httpsUsed = strings.HasPrefix(strings.ToLower(assessment.SelectedAsset.BrowserDownloadUrl), "https://")
+	}
+
+	signatureVerifiable := false
+	switch assessment.SignatureFormat {
+	case sigFormatMinisign:
+		signatureVerifiable = flags.minisignKeyConfigured || autoDetectMinisignKeyAsset(rel.Assets) != nil
+	case sigFormatPGP:
+		signatureVerifiable = flags.pgpKeyConfigured || autoDetectKeyAsset(rel.Assets) != nil
+	case sigFormatBinary:
+		signatureVerifiable = flags.ed25519KeyConfigured
+	default:
+		signatureVerifiable = false
+	}
+	if !assessment.SignatureAvailable {
+		signatureVerifiable = false
+	}
+
+	signatureSkipped := flags.skipSig || flags.insecure
+	checksumSkipped := flags.skipChecksum || flags.insecure
+
+	checksumVerifiable := assessment.ChecksumAvailable
+
+	in := trustScoreInput{
+		SignatureVerifiable: signatureVerifiable,
+		SignatureValidated:  signatureVerifiable && assessment.SignatureAvailable && !signatureSkipped,
+		SignatureSkipped:    signatureSkipped,
+
+		ChecksumVerifiable: checksumVerifiable,
+		ChecksumValidated:  checksumVerifiable && !checksumSkipped,
+		ChecksumSkipped:    checksumSkipped,
+		ChecksumAlgorithm:  assessment.ChecksumAlgorithm,
+
+		HTTPSUsed:    httpsUsed,
+		InsecureFlag: flags.insecure,
+	}
+
+	assessment.Trust = computeTrustScore(in)
+	assessment.TrustLevel = legacyTrustLevelFromTrust(assessment.Trust)
 }
 
 // findPerAssetSignature looks for a signature file for the specific asset (Workflow B).
@@ -410,7 +696,26 @@ func formatDryRunOutput(repo string, rel *Release, assessment *VerificationAsses
 
 	sb.WriteString("\nVerification plan:\n")
 	sb.WriteString(fmt.Sprintf("  Workflow:   %s\n", describeWorkflow(assessment.Workflow)))
-	sb.WriteString(fmt.Sprintf("  Trust:      %s\n", assessment.TrustLevel))
+	sb.WriteString(fmt.Sprintf("  Trust:      %d/100 (%s)\n", assessment.Trust.Score, assessment.Trust.LevelName))
+	// Trust factor breakdown
+	sb.WriteString("\nTrust factors:\n")
+	sb.WriteString(fmt.Sprintf("  Signature:  verifiable=%t validated=%t skipped=%t points=%d\n",
+		assessment.Trust.Factors.Signature.Verifiable,
+		assessment.Trust.Factors.Signature.Validated,
+		assessment.Trust.Factors.Signature.Skipped,
+		assessment.Trust.Factors.Signature.Points))
+	sb.WriteString(fmt.Sprintf("  Checksum:   verifiable=%t validated=%t skipped=%t algo=%s points=%d\n",
+		assessment.Trust.Factors.Checksum.Verifiable,
+		assessment.Trust.Factors.Checksum.Validated,
+		assessment.Trust.Factors.Checksum.Skipped,
+		assessment.Trust.Factors.Checksum.Algorithm,
+		assessment.Trust.Factors.Checksum.Points))
+	sb.WriteString(fmt.Sprintf("  Transport:  https=%t points=%d\n",
+		assessment.Trust.Factors.Transport.HTTPS,
+		assessment.Trust.Factors.Transport.Points))
+	sb.WriteString(fmt.Sprintf("  Algorithm:  name=%s points=%d\n",
+		assessment.Trust.Factors.Algorithm.Name,
+		assessment.Trust.Factors.Algorithm.Points))
 
 	if len(assessment.Warnings) > 0 {
 		sb.WriteString("\nWarnings:\n")
@@ -431,10 +736,12 @@ func describeWorkflow(workflow string) string {
 		return "B (per-asset signature)"
 	case workflowC:
 		return "C (checksum-only)"
+	case workflowNone:
+		return "none (no verification artifacts)"
 	case workflowInsecure:
-		return "insecure (no verification)"
+		return "insecure (verification bypass)"
 	default:
-		return "none (no verification available)"
+		return "unknown"
 	}
 }
 
@@ -456,8 +763,10 @@ func buildProvenanceRecord(repo string, rel *Release, assessment *VerificationAs
 			},
 		},
 		TrustLevel: assessment.TrustLevel,
+		Trust:      assessment.Trust,
 		Warnings:   assessment.Warnings,
 		Flags: ProvenanceFlags{
+
 			SkipSig:         flags.skipSig,
 			SkipChecksum:    flags.skipChecksum,
 			Insecure:        flags.insecure,
@@ -669,6 +978,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	skipSig := fs.Bool("skip-sig", false, "skip signature verification (testing only)")
 	skipChecksum := fs.Bool("skip-checksum", false, "skip checksum verification even if available")
 	insecure := fs.Bool("insecure", false, "skip all verification (dangerous - use only for testing)")
+	trustMinimum := fs.Int("trust-minimum", 0, "minimum trust score required to proceed (0-100)")
 	selfUpdate := fs.Bool("self-update", false, "update sfetch to the latest release for this platform")
 	selfUpdateYes := fs.Bool("yes", false, "confirm self-update without prompting")
 	selfUpdateForce := fs.Bool("self-update-force", false, "allow major-version jumps and proceed even if target is locked")
@@ -991,6 +1301,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		insecure:        *insecure,
 		preferPerAsset:  *preferPerAsset,
 		requireMinisign: *requireMinisign,
+
+		minisignKeyConfigured: *minisignPubKey != "" || *minisignKeyURL != "" || *minisignKeyAsset != "",
+		pgpKeyConfigured:      *pgpKeyFile != "" || *pgpKeyURL != "" || *pgpKeyAsset != "",
+		ed25519KeyConfigured:  *key != "",
+		gpgBin:                *gpgBin,
 	}
 
 	// Assess what verification is available
@@ -1026,16 +1341,42 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	// Handle cases where no verification is available
-	if assessment.Workflow == "" {
-		fmt.Fprintln(stderr, "error: no verification available (no signature or checksum found)")
-		fmt.Fprintln(stderr, "hint: use --insecure to proceed without verification (not recommended)")
+	// Enforce minimum trust if requested.
+	if *trustMinimum < 0 || *trustMinimum > 100 {
+		fmt.Fprintln(stderr, "error: --trust-minimum must be between 0 and 100")
+		return 1
+	}
+	if assessment.Trust.Score < *trustMinimum {
+		fmt.Fprintf(stderr, "error: trust score %d/100 (%s) is below --trust-minimum %d\n", assessment.Trust.Score, assessment.Trust.LevelName, *trustMinimum)
+		fmt.Fprintln(stderr, "trust factors:")
+		fmt.Fprintf(stderr, "  signature:  verifiable=%t validated=%t skipped=%t points=%d\n",
+			assessment.Trust.Factors.Signature.Verifiable,
+			assessment.Trust.Factors.Signature.Validated,
+			assessment.Trust.Factors.Signature.Skipped,
+			assessment.Trust.Factors.Signature.Points)
+		fmt.Fprintf(stderr, "  checksum:   verifiable=%t validated=%t skipped=%t algo=%s points=%d\n",
+			assessment.Trust.Factors.Checksum.Verifiable,
+			assessment.Trust.Factors.Checksum.Validated,
+			assessment.Trust.Factors.Checksum.Skipped,
+			assessment.Trust.Factors.Checksum.Algorithm,
+			assessment.Trust.Factors.Checksum.Points)
+		fmt.Fprintf(stderr, "  transport:  https=%t points=%d\n",
+			assessment.Trust.Factors.Transport.HTTPS,
+			assessment.Trust.Factors.Transport.Points)
+		fmt.Fprintf(stderr, "  algorithm:  name=%s points=%d\n",
+			assessment.Trust.Factors.Algorithm.Name,
+			assessment.Trust.Factors.Algorithm.Points)
 		return 1
 	}
 
 	// Print warnings
 	for _, w := range assessment.Warnings {
 		fmt.Fprintf(stderr, "warning: %s\n", w)
+	}
+
+	// If no verification artifacts exist, proceed but make the situation explicit.
+	if assessment.Workflow == workflowNone {
+		fmt.Fprintln(stderr, "note: proceeding without verification artifacts provided by the source")
 	}
 
 	tmpDir, err := os.MkdirTemp("", "sfetch-*")
@@ -1069,9 +1410,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	// Execute verification based on assessed workflow
 	switch assessment.Workflow {
+	case workflowNone:
+		// No verification artifacts - just download and proceed.
+		fmt.Fprintln(stderr, "Note: no verification artifacts provided by the source")
+
 	case workflowInsecure:
-		// No verification - just download and proceed
-		fmt.Fprintln(stderr, "WARNING: --insecure mode - NO VERIFICATION PERFORMED")
+		// Verification bypass - just download and proceed.
+		fmt.Fprintln(stderr, "WARNING: verification bypass enabled (--insecure)")
 
 	case workflowA:
 		// Workflow A: Verify signature over checksum file, then verify hash

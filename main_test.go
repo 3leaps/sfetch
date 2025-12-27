@@ -1060,6 +1060,159 @@ func mustLoadInferenceRules(t *testing.T) *InferenceRules {
 	return rules
 }
 
+func TestComputeTrustScoreOptionA(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   trustScoreInput
+		want TrustScore
+	}{
+		{
+			name: "https-only (no verification artifacts)",
+			in: trustScoreInput{
+				HTTPSUsed: true,
+			},
+			want: TrustScore{Score: 25, Level: TrustMinimal, LevelName: "minimal"},
+		},
+		{
+			name: "checksum-only sha256",
+			in: trustScoreInput{
+				ChecksumVerifiable: true,
+				ChecksumValidated:  true,
+				ChecksumAlgorithm:  "sha256",
+				HTTPSUsed:          true,
+			},
+			want: TrustScore{Score: 45, Level: TrustLow, LevelName: "low"},
+		},
+		{
+			name: "signature-only",
+			in: trustScoreInput{
+				SignatureVerifiable: true,
+				SignatureValidated:  true,
+				HTTPSUsed:           true,
+			},
+			want: TrustScore{Score: 70, Level: TrustMedium, LevelName: "medium"},
+		},
+		{
+			name: "signature+checksum sha256",
+			in: trustScoreInput{
+				SignatureVerifiable: true,
+				SignatureValidated:  true,
+				ChecksumVerifiable:  true,
+				ChecksumValidated:   true,
+				ChecksumAlgorithm:   "sha256",
+				HTTPSUsed:           true,
+			},
+			want: TrustScore{Score: 100, Level: TrustHigh, LevelName: "high"},
+		},
+		{
+			name: "signature+checksum with --skip-checksum",
+			in: trustScoreInput{
+				SignatureVerifiable: true,
+				SignatureValidated:  true,
+				ChecksumVerifiable:  true,
+				ChecksumSkipped:     true,
+				ChecksumAlgorithm:   "sha256",
+				HTTPSUsed:           true,
+			},
+			want: TrustScore{Score: 55, Level: TrustLow, LevelName: "low"},
+		},
+		{
+			name: "--insecure with verification verifiable",
+			in: trustScoreInput{
+				SignatureVerifiable: true,
+				SignatureSkipped:    true,
+				ChecksumVerifiable:  true,
+				ChecksumSkipped:     true,
+				HTTPSUsed:           true,
+				InsecureFlag:        true,
+			},
+			want: TrustScore{Score: 0, Level: TrustBypassed, LevelName: "bypassed"},
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := computeTrustScore(tc.in)
+			if got.Score != tc.want.Score {
+				t.Fatalf("Score: got %d want %d", got.Score, tc.want.Score)
+			}
+			if got.Level != tc.want.Level {
+				t.Fatalf("Level: got %d want %d", got.Level, tc.want.Level)
+			}
+			if got.LevelName != tc.want.LevelName {
+				t.Fatalf("LevelName: got %q want %q", got.LevelName, tc.want.LevelName)
+			}
+
+			switch tc.name {
+			case "https-only (no verification artifacts)":
+				if got.Factors.Transport.Points != 25 {
+					t.Fatalf("transport points: got %d want %d", got.Factors.Transport.Points, 25)
+				}
+				if got.Factors.Signature.Points != 0 || got.Factors.Checksum.Points != 0 {
+					t.Fatalf("expected no verification points for https-only")
+				}
+
+			case "checksum-only sha256":
+				if got.Factors.Checksum.Points != 40 {
+					t.Fatalf("checksum points: got %d want %d", got.Factors.Checksum.Points, 40)
+				}
+				if got.Factors.Algorithm.Points != 5 {
+					t.Fatalf("algo points: got %d want %d", got.Factors.Algorithm.Points, 5)
+				}
+				if got.Factors.Transport.Points != 0 {
+					t.Fatalf("transport points: got %d want %d", got.Factors.Transport.Points, 0)
+				}
+
+			case "signature-only":
+				if got.Factors.Signature.Points != 70 {
+					t.Fatalf("signature points: got %d want %d", got.Factors.Signature.Points, 70)
+				}
+				if got.Factors.Transport.Points != 0 {
+					t.Fatalf("transport points: got %d want %d", got.Factors.Transport.Points, 0)
+				}
+
+			case "signature+checksum sha256":
+				if got.Factors.Signature.Points != 70 {
+					t.Fatalf("signature points: got %d want %d", got.Factors.Signature.Points, 70)
+				}
+				if got.Factors.Checksum.Points != 40 {
+					t.Fatalf("checksum points: got %d want %d", got.Factors.Checksum.Points, 40)
+				}
+				if got.Factors.Algorithm.Points != 5 {
+					t.Fatalf("algo points: got %d want %d", got.Factors.Algorithm.Points, 5)
+				}
+				if got.Factors.Transport.Points != 0 {
+					t.Fatalf("transport points: got %d want %d", got.Factors.Transport.Points, 0)
+				}
+
+			case "signature+checksum with --skip-checksum":
+				if got.Factors.Signature.Points != 70 {
+					t.Fatalf("signature points: got %d want %d", got.Factors.Signature.Points, 70)
+				}
+				if got.Factors.Checksum.Points != -15 {
+					t.Fatalf("checksum points: got %d want %d", got.Factors.Checksum.Points, -15)
+				}
+				if got.Factors.Transport.Points != 0 {
+					t.Fatalf("transport points: got %d want %d", got.Factors.Transport.Points, 0)
+				}
+
+			case "--insecure with verification verifiable":
+				if got.Score != 0 {
+					t.Fatalf("expected bypassed score 0")
+				}
+				if got.Factors.Transport.Points != 0 || got.Factors.Signature.Points != 0 || got.Factors.Checksum.Points != 0 {
+					t.Fatalf("expected factor points zeroed in bypass case")
+				}
+			}
+		})
+	}
+}
+
 func TestAssessRelease(t *testing.T) {
 	cfg := &defaults
 
@@ -1079,7 +1232,7 @@ func TestAssessRelease(t *testing.T) {
 				{Name: "SHA256SUMS"},
 				{Name: "SHA256SUMS.minisig"},
 			},
-			flags:        assessmentFlags{},
+			flags:        assessmentFlags{minisignKeyConfigured: true},
 			wantWorkflow: workflowA,
 			wantTrust:    trustHigh,
 			wantSigAvail: true,
@@ -1092,7 +1245,7 @@ func TestAssessRelease(t *testing.T) {
 				{Name: "SHA256SUMS"},
 				{Name: "SHA256SUMS.asc"},
 			},
-			flags:        assessmentFlags{},
+			flags:        assessmentFlags{pgpKeyConfigured: true},
 			wantWorkflow: workflowA,
 			wantTrust:    trustHigh,
 			wantSigAvail: true,
@@ -1104,7 +1257,7 @@ func TestAssessRelease(t *testing.T) {
 				{Name: "binary.tar.gz"},
 				{Name: "binary.tar.gz.minisig"},
 			},
-			flags:        assessmentFlags{},
+			flags:        assessmentFlags{minisignKeyConfigured: true},
 			wantWorkflow: workflowB,
 			wantTrust:    trustMedium, // no checksum file
 			wantSigAvail: true,
@@ -1117,7 +1270,7 @@ func TestAssessRelease(t *testing.T) {
 				{Name: "binary.tar.gz.minisig"},
 				{Name: "SHA256SUMS"},
 			},
-			flags:        assessmentFlags{},
+			flags:        assessmentFlags{minisignKeyConfigured: true},
 			wantWorkflow: workflowB,
 			wantTrust:    trustHigh,
 			wantSigAvail: true,
@@ -1153,8 +1306,8 @@ func TestAssessRelease(t *testing.T) {
 				{Name: "binary.tar.gz"},
 			},
 			flags:        assessmentFlags{},
-			wantWorkflow: "",
-			wantTrust:    trustNone,
+			wantWorkflow: workflowNone,
+			wantTrust:    trustNone, // legacy mapping collapses minimal/bypassed into "none"
 			wantSigAvail: false,
 			wantCSAvail:  false,
 		},
@@ -1165,11 +1318,11 @@ func TestAssessRelease(t *testing.T) {
 				{Name: "SHA256SUMS"},
 				{Name: "SHA256SUMS.minisig"},
 			},
-			flags:        assessmentFlags{insecure: true},
+			flags:        assessmentFlags{insecure: true, minisignKeyConfigured: true},
 			wantWorkflow: workflowInsecure,
 			wantTrust:    trustNone,
-			wantSigAvail: false,
-			wantCSAvail:  false,
+			wantSigAvail: true,
+			wantCSAvail:  true,
 		},
 		{
 			name: "skip-sig falls back to checksum-only",
@@ -1192,7 +1345,7 @@ func TestAssessRelease(t *testing.T) {
 				{Name: "SHA256SUMS.minisig"},
 				{Name: "binary.tar.gz.minisig"},
 			},
-			flags:        assessmentFlags{preferPerAsset: true},
+			flags:        assessmentFlags{preferPerAsset: true, minisignKeyConfigured: true},
 			wantWorkflow: workflowB,
 			wantTrust:    trustHigh,
 			wantSigAvail: true,
@@ -1205,9 +1358,9 @@ func TestAssessRelease(t *testing.T) {
 				{Name: "SHA256SUMS"},
 				{Name: "SHA256SUMS.minisig"},
 			},
-			flags:        assessmentFlags{skipChecksum: true},
+			flags:        assessmentFlags{skipChecksum: true, minisignKeyConfigured: true},
 			wantWorkflow: workflowA,
-			wantTrust:    trustMedium, // downgraded because checksum skipped
+			wantTrust:    trustLow, // score 55 => low (v0.3.0)
 			wantSigAvail: true,
 			wantCSAvail:  true, // still available, just not verified
 		},
@@ -1220,6 +1373,7 @@ func TestAssessRelease(t *testing.T) {
 				Assets:  tt.assets,
 			}
 			selected := &tt.assets[0] // assume first asset is the binary
+			selected.BrowserDownloadUrl = "https://example.invalid/" + selected.Name
 
 			assessment := assessRelease(rel, cfg, selected, tt.flags)
 
@@ -1679,6 +1833,17 @@ func TestProvenanceRecordValidation(t *testing.T) {
 					},
 				},
 				TrustLevel: "high",
+				Trust: TrustScore{
+					Score:     100,
+					Level:     TrustHigh,
+					LevelName: "high",
+					Factors: TrustFactors{
+						Signature: TrustSigFactor{Verifiable: true, Validated: true, Skipped: false, Points: 70},
+						Checksum:  TrustChecksumFactor{Verifiable: true, Validated: true, Skipped: false, Algorithm: "sha256", Points: 40},
+						Transport: TrustTransportFactor{HTTPS: true, Points: 0},
+						Algorithm: TrustAlgorithmFactor{Name: "sha256", Points: 5},
+					},
+				},
 			},
 			wantErr: false,
 		},
@@ -1721,7 +1886,18 @@ func TestProvenanceRecordValidation(t *testing.T) {
 					},
 				},
 				TrustLevel: "low",
-				Warnings:   []string{"No signature available; authenticity cannot be proven"},
+				Trust: TrustScore{
+					Score:     45,
+					Level:     TrustLow,
+					LevelName: "low",
+					Factors: TrustFactors{
+						Signature: TrustSigFactor{Verifiable: false, Validated: false, Skipped: false, Points: 0},
+						Checksum:  TrustChecksumFactor{Verifiable: true, Validated: true, Skipped: false, Algorithm: "sha256", Points: 40},
+						Transport: TrustTransportFactor{HTTPS: true, Points: 0},
+						Algorithm: TrustAlgorithmFactor{Name: "sha256", Points: 5},
+					},
+				},
+				Warnings: []string{"No signature available; authenticity cannot be proven"},
 			},
 			wantErr: false,
 		},
@@ -1758,8 +1934,19 @@ func TestProvenanceRecordValidation(t *testing.T) {
 					},
 				},
 				TrustLevel: "none",
-				Flags:      ProvenanceFlags{Insecure: true},
-				Warnings:   []string{"No verification performed (--insecure)"},
+				Trust: TrustScore{
+					Score:     0,
+					Level:     TrustBypassed,
+					LevelName: "bypassed",
+					Factors: TrustFactors{
+						Signature: TrustSigFactor{Verifiable: false, Validated: false, Skipped: true, Points: 0},
+						Checksum:  TrustChecksumFactor{Verifiable: false, Validated: false, Skipped: true, Points: 0},
+						Transport: TrustTransportFactor{HTTPS: true, Points: 0},
+						Algorithm: TrustAlgorithmFactor{Points: 0},
+					},
+				},
+				Flags:    ProvenanceFlags{Insecure: true},
+				Warnings: []string{"No verification performed (--insecure)"},
 			},
 			wantErr: false,
 		},
@@ -1799,8 +1986,19 @@ func TestProvenanceRecordValidation(t *testing.T) {
 					},
 				},
 				TrustLevel: "low",
-				Flags:      ProvenanceFlags{DryRun: true},
-				Warnings:   []string{"No signature available; authenticity cannot be proven"},
+				Trust: TrustScore{
+					Score:     45,
+					Level:     TrustLow,
+					LevelName: "low",
+					Factors: TrustFactors{
+						Signature: TrustSigFactor{Verifiable: false, Validated: false, Skipped: false, Points: 0},
+						Checksum:  TrustChecksumFactor{Verifiable: true, Validated: true, Skipped: false, Algorithm: "sha256", Points: 40},
+						Transport: TrustTransportFactor{HTTPS: true, Points: 0},
+						Algorithm: TrustAlgorithmFactor{Name: "sha256", Points: 5},
+					},
+				},
+				Flags:    ProvenanceFlags{DryRun: true},
+				Warnings: []string{"No signature available; authenticity cannot be proven"},
 			},
 			wantErr: false,
 		},
