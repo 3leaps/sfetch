@@ -483,7 +483,7 @@ Representative repos and patterns (see `testdata/corpus.json` and `make corpus`)
 | `jedisct1/minisign` | Per-asset minisign | B | `sfetch --repo jedisct1/minisign --latest --dry-run` |
 | `jesseduffield/lazygit` | Checksum-only | C | `sfetch --repo jesseduffield/lazygit --latest --dry-run` |
 | `junegunn/fzf` | Versioned checksums | C | `sfetch --repo junegunn/fzf --latest --dry-run` |
-| `sharkdp/fd` | Unsigned (expected fail without --insecure) | insecure | `sfetch --repo sharkdp/fd --latest --dry-run` |
+| `sharkdp/fd` | Unsigned (no artifacts) | none | `sfetch --repo sharkdp/fd --latest --dry-run` |
 
 Run the corpus locally: `GITHUB_TOKEN=<token> make corpus` (fast) or `GITHUB_TOKEN=<token> make corpus-all` (includes slow entries). A token with public repo read is sufficient to avoid GitHub API rate limits.
 
@@ -534,7 +534,7 @@ Verification available:
 
 Verification plan:
   Workflow:   C (checksum-only)
-  Trust:      low
+  Trust:      45/100 (low)
 
 Warnings:
   - No signature available; authenticity cannot be proven
@@ -558,9 +558,10 @@ sfetch --repo jesseduffield/lazygit --latest --dry-run --provenance
 Provenance record includes:
 - Source repository and release info
 - Asset name, size, URL, and computed checksum
-- Verification workflow used (A/B/C/insecure)
+- Verification workflow used (A/B/C/none/insecure)
 - Signature and checksum verification status
-- Trust level (high/medium/low/none)
+- Trust rating (`trust.score` + `trust.levelName`) and legacy `trustLevel`
+- Trust factor breakdown (`trust.factors.*`)
 - Any warnings generated
 
 Schema: `schemas/provenance.schema.json`
