@@ -25,6 +25,17 @@ If `make prereqs` fails because `yamllint` is missing, install it manually via `
 
 Inline `#nosec` comments on 12 sites for line-granular audit.
 
+## Trust Rating
+
+sfetch computes a numeric trust score (`0–100`) with a transparent factor breakdown.
+
+- If upstream publishes nothing verifiable, sfetch can only award baseline trust (e.g., HTTPS) and will not “pretend” the download is highly trusted.
+- If the user bypasses verifiable checks (`--insecure`, `--skip-*`), the trust model treats this as an explicit bypass.
+
+For CI gating, use `--trust-minimum <0-100>`.
+
+Design guide: `docs/trust-rating-system.md`.
+
 ## Static Analysis Philosophy
 
 - **Prefer stdlib/crypto**: ed25519 native, SHA256/512.

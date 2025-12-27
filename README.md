@@ -48,9 +48,19 @@ See [docs/key-handling.md](docs/key-handling.md) for details. Run `sfetch -helpe
 
 ### Verification assessment
 
+sfetch computes a **trust score** (0–100) from the verification plan/results, and can optionally gate installs with `--trust-minimum`.
+
+Design guide: `docs/trust-rating-system.md`.
+
 **Dry-run mode** - see what verification is available before downloading:
 ```bash
 sfetch --repo BurntSushi/ripgrep --latest --dry-run
+```
+
+**Enforce a minimum trust score** (useful in CI):
+```bash
+# Require at least medium trust
+sfetch --repo 3leaps/sfetch --latest --trust-minimum 60 --dest-dir /tmp
 ```
 
 **Provenance records** - structured JSON for audit trails and CI:
