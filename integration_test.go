@@ -252,6 +252,83 @@ func TestIntegrationMinisignAutoDetect(t *testing.T) {
 	}
 }
 
+func TestIntegrationInsecureStillInstalls(t *testing.T) {
+	assetBytes, err := os.ReadFile("testdata/integration/sfetch_test_darwin_arm64.tar.gz")
+	if err != nil {
+		t.Fatalf("read asset: %v", err)
+	}
+	shaBytes, err := os.ReadFile("testdata/integration/SHA256SUMS")
+	if err != nil {
+		t.Fatalf("read checksum: %v", err)
+	}
+	minisigBytes, err := os.ReadFile("testdata/integration/SHA256SUMS.minisig")
+	if err != nil {
+		t.Fatalf("read minisig: %v", err)
+	}
+	pubKeyBytes, err := os.ReadFile("testdata/integration/test-minisign.pub")
+	if err != nil {
+		t.Fatalf("read pubkey: %v", err)
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/test/insecure/releases/latest":
+			base := fmt.Sprintf("http://%s", r.Host)
+			rel := fakeRelease{
+				TagName: "v0.1.0",
+				Assets: []Asset{
+					{Name: "sfetch_test_darwin_arm64.tar.gz", BrowserDownloadUrl: base + "/assets/bin"},
+					{Name: "SHA256SUMS", BrowserDownloadUrl: base + "/assets/sha"},
+					{Name: "SHA256SUMS.minisig", BrowserDownloadUrl: base + "/assets/sha-minisig"},
+					{Name: "test-minisign.pub", BrowserDownloadUrl: base + "/assets/pubkey"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(&rel); err != nil {
+				t.Fatalf("encode release: %v", err)
+			}
+		case "/assets/bin":
+			_, _ = w.Write(assetBytes)
+		case "/assets/sha":
+			_, _ = w.Write(shaBytes)
+		case "/assets/sha-minisig":
+			_, _ = w.Write(minisigBytes)
+		case "/assets/pubkey":
+			_, _ = w.Write(pubKeyBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	destDir := t.TempDir()
+	cacheDir := filepath.Join(destDir, "cache")
+	cmd := exec.Command("go", "run", ".",
+		"--repo", "test/insecure",
+		"--latest",
+		"--dest-dir", destDir,
+		"--cache-dir", cacheDir,
+		"--binary-name", "sfetch",
+		"--insecure",
+	)
+	cmd.Env = append(os.Environ(), "SFETCH_API_BASE="+ts.URL)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("sfetch failed: %v\noutput:\n%s", err, output.String())
+	}
+
+	installed := filepath.Join(destDir, "sfetch")
+	if _, err := os.Stat(installed); err != nil {
+		t.Fatalf("expected installed binary at %s: %v", installed, err)
+	}
+
+	if !bytes.Contains(output.Bytes(), []byte("WARNING: verification bypass enabled (--insecure)")) {
+		t.Fatalf("expected insecure warning in output:\n%s", output.String())
+	}
+}
+
 func TestIntegrationTrustMinimumBlocksUnsigned(t *testing.T) {
 	assetBytes, err := os.ReadFile("testdata/integration/sfetch_test_darwin_arm64.tar.gz")
 	if err != nil {
