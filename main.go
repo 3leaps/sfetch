@@ -1039,7 +1039,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 
 		fmt.Fprintln(out, "\nProvenance & assessment:")
-		for _, name := range []string{"dry-run", "provenance", "provenance-file"} {
+		for _, name := range []string{"dry-run", "trust-minimum", "provenance", "provenance-file"} {
 			printFlag(name)
 		}
 
