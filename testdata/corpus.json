@@ -51,8 +51,28 @@
     "expectedWorkflow": "none",
     "expectSuccess": false,
     "tier": "fast",
-    "note": "Claude Code installer script pattern (not GitHub; expected failure until generalized URL support)",
+    "note": "Claude Code installer script pattern (not GitHub release assets; expected failure until generalized URL + raw GitHub content acquisition)",
     "pattern": "curl -fsSL https://claude.ai/install.sh | bash"
+  },
+  {
+    "repo": "https://get.docker.com",
+    "tag": "n/a",
+    "assetMatch": "get-docker.sh",
+    "expectedWorkflow": "none",
+    "expectSuccess": false,
+    "tier": "fast",
+    "note": "Docker convenience installer (often requires sudo / system package installs). Track as a common curl|sh pattern; expected failure until generalized URL acquisition",
+    "pattern": "curl -fsSL https://get.docker.com | sh"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3",
+    "tag": "n/a",
+    "assetMatch": "get-helm-3",
+    "expectedWorkflow": "none",
+    "expectSuccess": false,
+    "tier": "fast",
+    "note": "Helm install script (often uses sudo to write /usr/local/bin). Track as a common curl|bash pattern; expected failure until raw GitHub content acquisition",
+    "pattern": "curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
   },
   {
     "repo": "BurntSushi/ripgrep",
