@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - TBD
+
+### Added
+- **Trust rating system (v0.3.0):** Numeric trust score (0–100) with transparent factor breakdown.
+- **Policy gating:** New `--trust-minimum <0-100>` blocks downloads below the threshold.
+- **Workflow `none`:** Explicitly represents sources that provide no verification artifacts (distinct from bypass via `--insecure`).
+- **Dogfood corpus expansion:** Corpus continues to live in `testdata/corpus.json` and is runnable via `make corpus-dryrun`.
+
+### Changed
+- **Provenance schema:** Added `trust` object (`score`, `level`, `levelName`, `factors`) while retaining legacy `trustLevel` for one minor cycle.
+- **CLI output:** Normal runs now print trust score; dry-run includes a verifiable/validated breakdown.
+
+### Fixed
+- Clarified dry-run messaging to avoid implying integrity when signature artifacts exist but no verification key is available.
+
 ## [0.2.9] - 2025-12-25
 
 ### Fixed

@@ -1,22 +1,25 @@
-# Release Notes
 
-## v0.2.8
+## v0.3.0
 
 ### Summary
-Tighten installation ergonomics and verification-related test coverage: warn on Linux `noexec` destinations, improve deterministic install-path testing, and add low-risk unit tests for internal helpers.
+Introduce a numeric trust rating system (0–100) with transparent factor breakdown and optional policy gating via `--trust-minimum`.
 
 ### Highlights
 
-**Linux `noexec` destination warning (best effort)**
-- When the install destination appears to be mounted with `noexec`, sfetch prints a warning explaining that `chmod +x` won’t fix it.
+**Trust rating (v0.3.0)**
+- Trust is now reported as `N/100 (level)` with factor breakdown (signature/checksum/transport/algo).
+- New workflow `none` distinguishes “source provides no verification artifacts” from explicit bypass (`--insecure`).
+- Provenance JSON includes a new `trust` object and retains legacy `trustLevel` for one minor cycle.
 
-**Install-path test coverage (rename vs copy fallback)**
-- Added unit tests that cover executable permission behavior for raw and archive installs across both rename and EXDEV copy fallback paths.
-- Added a Windows-only test covering the self-update locked-target `.new` fallback.
+**Policy gating**
+- `--trust-minimum <0-100>` blocks downloads below the specified threshold and prints factor breakdown on failure.
 
-**Internal helper coverage (low risk)**
-- Added unit tests for `internal/verify` checksum parsing and key normalization.
-- Added unit tests for `internal/selfupdate` target path selection.
+**Dogfood corpus (opt-in)**
+- Dogfood set lives in `testdata/corpus.json` and is runnable via `make corpus-dryrun`.
+
+**Exit codes**
+- Exit code `0` indicates the requested fetch/install completed (even if the user chose to bypass verification).
+- Non-zero indicates the operation was blocked (e.g., `--trust-minimum`) or failed (download/verification errors).
 
 ### Install
 
@@ -29,27 +32,26 @@ curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfe
 
 ---
 
-## v0.2.7
+## v0.2.9
 
 ### Summary
-Improved reliability in containerized CI by handling cross-device installs/caching automatically, plus internal refactoring to improve auditability (no intended CLI behavior changes).
+Fix asset selection for tools with "sig" in their name (e.g., `minisign`, `cosign`) and document install permission behavior.
 
 ### Highlights
+- Fixed false positives in supplemental file detection for tool names containing "sig".
+- Documented permission behavior for archives, raw scripts/binaries, and cross-device installs.
 
-**Cross-device install/caching fix (EXDEV)**
-- When `--dest-dir` or `--cache-dir` is on a different filesystem than the temp directory (common with container mounts), sfetch now falls back to a copy operation when `rename(2)` fails with “invalid cross-device link”.
+---
 
-**CI/CD documentation**
-- New guide: `docs/cicd-usage-guide.md` (GitHub Actions, GitLab CI, container runners).
+## v0.2.8
 
-### Install
+### Summary
+Tighten installation ergonomics and verification-related test coverage: warn on Linux `noexec` destinations, improve deterministic install-path testing, and add low-risk unit tests for internal helpers.
 
-```bash
-curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
-```
-
-### Details
-- See `CHANGELOG.md` for the complete list.
+### Highlights
+- Warn on Linux `noexec` destinations (best effort).
+- Added deterministic tests for rename vs EXDEV copy fallback.
+- Added unit tests for internal verify/selfupdate helpers.
 
 ---
 
