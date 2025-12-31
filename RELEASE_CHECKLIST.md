@@ -68,7 +68,13 @@ export SFETCH_GPG_HOMEDIR=/path/to/custom/gpg/homedir   # optional, defaults to 
    make release-notes
    ```
 
-7. **Upload signatures and keys**
+7. **Verify checksums before upload**
+   ```bash
+   make release-verify-checksums
+   ```
+   Validates that all archives match their checksums in SHA256SUMS/SHA2-512SUMS.
+
+8. **Upload signatures and keys**
    ```bash
    make release-upload
    ```
