@@ -908,6 +908,40 @@ func TestInferAssetClassification(t *testing.T) {
 	}
 }
 
+func TestClassifyAssetLegacyArchiveTypeDoesNotOverrideRaw(t *testing.T) {
+	// Regression test: legacy archiveType in config should not override
+	// correctly inferred raw scripts/packages
+	cfg := &RepoConfig{
+		ArchiveType: "tar.gz", // legacy field set in defaults
+	}
+
+	tests := []struct {
+		name     string
+		wantType AssetType
+	}{
+		{"install.sh", AssetTypeRaw},
+		{"bootstrap.py", AssetTypeRaw},
+		{"kubectl", AssetTypeRaw},
+		{"package.deb", AssetTypePackage},
+		{"package.rpm", AssetTypePackage},
+		// Archives should still work
+		{"tool.tar.gz", AssetTypeArchive},
+		{"binary.zip", AssetTypeArchive},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cls, _, err := classifyAsset(tt.name, cfg, "")
+			if err != nil {
+				t.Fatalf("classifyAsset error: %v", err)
+			}
+			if cls.Type != tt.wantType {
+				t.Fatalf("Type = %s, want %s", cls.Type, tt.wantType)
+			}
+		})
+	}
+}
+
 func TestLooksLikeSupplemental(t *testing.T) {
 	t.Parallel()
 

@@ -1847,10 +1847,13 @@ func classifyAsset(assetName string, cfg *RepoConfig, override string) (AssetCla
 	warnings := []string{}
 
 	// Backward compatibility: legacy archiveType
+	// Only apply when inferred type is Archive or Unknown (don't override raw scripts/packages)
 	if cfg.ArchiveType != "" && cfg.AssetType == "" && cfg.ArchiveFormat == "" {
-		if fmt := archiveFormatFromString(cfg.ArchiveType); fmt != "" {
-			cls.Type = AssetTypeArchive
-			cls.ArchiveFormat = fmt
+		if cls.Type == AssetTypeArchive || cls.Type == AssetTypeUnknown {
+			if fmt := archiveFormatFromString(cfg.ArchiveType); fmt != "" {
+				cls.Type = AssetTypeArchive
+				cls.ArchiveFormat = fmt
+			}
 		}
 	}
 
