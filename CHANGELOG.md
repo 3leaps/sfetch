@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2025-12-31
+
+### Fixed
+- **Raw scripts no longer misclassified as archives:** Fixed regression where raw scripts (e.g., `install-sfetch.sh`) were incorrectly treated as archives when the default config includes `archiveType: "tar.gz"`. The legacy `archiveType` field now only applies to assets that are actually archives or have unknown type.
+
+### Documentation
+- Added `make release-verify-checksums` step to `RELEASE_CHECKLIST.md`.
+
 ## [0.3.0] - 2025-12-29
 
 ### Added
