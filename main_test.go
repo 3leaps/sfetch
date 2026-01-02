@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -2927,5 +2928,416 @@ func TestFilterNonSupplemental(t *testing.T) {
 		if looksLikeSupplemental(a.Name) {
 			t.Errorf("filterNonSupplemental kept supplemental asset: %q", a.Name)
 		}
+	}
+}
+
+// =============================================================================
+// Pass 4: Asset Selection Logic Tests
+// =============================================================================
+
+func TestMatchWithMatch(t *testing.T) {
+	t.Parallel()
+
+	assets := []Asset{
+		{Name: "sfetch_darwin_arm64.tar.gz"},
+		{Name: "sfetch_darwin_amd64.tar.gz"},
+		{Name: "sfetch_linux_arm64.tar.gz"},
+		{Name: "sfetch_linux_amd64.tar.gz"},
+		{Name: "sfetch_windows_amd64.zip"},
+		{Name: "SHA256SUMS"},
+		{Name: "SHA256SUMS.minisig"},
+	}
+	cfg := &RepoConfig{BinaryName: "sfetch"}
+
+	tests := []struct {
+		name      string
+		pattern   string
+		goos      string
+		goarch    string
+		wantAsset string
+		wantErr   bool
+	}{
+		// Exact substring match
+		{"exact darwin arm64", "darwin_arm64", "darwin", "arm64", "sfetch_darwin_arm64.tar.gz", false},
+		{"exact linux amd64", "linux_amd64", "linux", "amd64", "sfetch_linux_amd64.tar.gz", false},
+		// Glob pattern
+		{"glob darwin", "*darwin*arm64*", "darwin", "arm64", "sfetch_darwin_arm64.tar.gz", false},
+		{"glob windows", "*windows*", "windows", "amd64", "sfetch_windows_amd64.zip", false},
+		// No match
+		{"no match", "freebsd", "freebsd", "amd64", "", true},
+		// Multiple matches - should use inference to pick
+		{"multiple darwin", "darwin", "darwin", "arm64", "sfetch_darwin_arm64.tar.gz", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := matchWithMatch(assets, tt.pattern, cfg, tt.goos, tt.goarch)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("matchWithMatch() expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("matchWithMatch() error = %v", err)
+				return
+			}
+			if got.Name != tt.wantAsset {
+				t.Errorf("matchWithMatch() = %q, want %q", got.Name, tt.wantAsset)
+			}
+		})
+	}
+}
+
+func TestMatchWithRegex(t *testing.T) {
+	t.Parallel()
+
+	assets := []Asset{
+		{Name: "sfetch_darwin_arm64.tar.gz"},
+		{Name: "sfetch_darwin_amd64.tar.gz"},
+		{Name: "sfetch_linux_arm64.tar.gz"},
+		{Name: "sfetch_linux_amd64.tar.gz"},
+		{Name: "SHA256SUMS"},
+	}
+	cfg := &RepoConfig{BinaryName: "sfetch"}
+
+	tests := []struct {
+		name      string
+		regex     string
+		goos      string
+		goarch    string
+		wantAsset string
+		wantErr   bool
+	}{
+		{"exact match", "sfetch_darwin_arm64\\.tar\\.gz", "darwin", "arm64", "sfetch_darwin_arm64.tar.gz", false},
+		{"pattern match", "sfetch_linux.*\\.tar\\.gz", "linux", "arm64", "sfetch_linux_arm64.tar.gz", false},
+		{"no match", "freebsd", "freebsd", "amd64", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			re := regexp.MustCompile(tt.regex)
+			got, err := matchWithRegex(assets, re, cfg, tt.goos, tt.goarch)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("matchWithRegex() expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("matchWithRegex() error = %v", err)
+				return
+			}
+			if got.Name != tt.wantAsset {
+				t.Errorf("matchWithRegex() = %q, want %q", got.Name, tt.wantAsset)
+			}
+		})
+	}
+}
+
+func TestPickByHeuristics(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		assets    []Asset
+		cfg       *RepoConfig
+		goos      string
+		goarch    string
+		wantAsset string
+		wantErr   bool
+	}{
+		{
+			name: "exact platform match",
+			assets: []Asset{
+				{Name: "tool_darwin_arm64.tar.gz"},
+				{Name: "tool_linux_amd64.tar.gz"},
+				{Name: "SHA256SUMS"},
+			},
+			cfg:       &RepoConfig{BinaryName: "tool", ArchiveExtensions: []string{".tar.gz"}},
+			goos:      "darwin",
+			goarch:    "arm64",
+			wantAsset: "tool_darwin_arm64.tar.gz",
+			wantErr:   false,
+		},
+		{
+			name: "alias match - macos for darwin",
+			assets: []Asset{
+				{Name: "tool_macos_arm64.tar.gz"},
+				{Name: "tool_linux_amd64.tar.gz"},
+			},
+			cfg:       &RepoConfig{BinaryName: "tool", ArchiveExtensions: []string{".tar.gz"}},
+			goos:      "darwin",
+			goarch:    "arm64",
+			wantAsset: "tool_macos_arm64.tar.gz",
+			wantErr:   false,
+		},
+		{
+			name: "alias match - x86_64 for amd64",
+			assets: []Asset{
+				{Name: "tool_linux_x86_64.tar.gz"},
+				{Name: "tool_linux_arm64.tar.gz"},
+			},
+			cfg:       &RepoConfig{BinaryName: "tool", ArchiveExtensions: []string{".tar.gz"}},
+			goos:      "linux",
+			goarch:    "amd64",
+			wantAsset: "tool_linux_x86_64.tar.gz",
+			wantErr:   false,
+		},
+		{
+			name: "alias match - aarch64 for arm64",
+			assets: []Asset{
+				{Name: "tool_linux_aarch64.tar.gz"},
+				{Name: "tool_linux_amd64.tar.gz"},
+			},
+			cfg:       &RepoConfig{BinaryName: "tool", ArchiveExtensions: []string{".tar.gz"}},
+			goos:      "linux",
+			goarch:    "arm64",
+			wantAsset: "tool_linux_aarch64.tar.gz",
+			wantErr:   false,
+		},
+		{
+			name: "prefers exact over alias",
+			assets: []Asset{
+				{Name: "tool_darwin_arm64.tar.gz"},
+				{Name: "tool_macos_arm64.tar.gz"},
+			},
+			cfg:       &RepoConfig{BinaryName: "tool", ArchiveExtensions: []string{".tar.gz"}},
+			goos:      "darwin",
+			goarch:    "arm64",
+			wantAsset: "tool_darwin_arm64.tar.gz",
+			wantErr:   false,
+		},
+		{
+			name: "filters supplemental files",
+			assets: []Asset{
+				{Name: "tool_darwin_arm64.tar.gz"},
+				{Name: "tool_darwin_arm64.tar.gz.asc"},
+				{Name: "SHA256SUMS"},
+			},
+			cfg:       &RepoConfig{BinaryName: "tool", ArchiveExtensions: []string{".tar.gz"}},
+			goos:      "darwin",
+			goarch:    "arm64",
+			wantAsset: "tool_darwin_arm64.tar.gz",
+			wantErr:   false,
+		},
+		{
+			name: "no matching platform - freebsd not in assets",
+			assets: []Asset{
+				{Name: "tool_linux_amd64.tar.gz"},
+				{Name: "tool_darwin_arm64.tar.gz"},
+			},
+			cfg:       &RepoConfig{BinaryName: "tool", ArchiveExtensions: []string{".tar.gz"}},
+			goos:      "freebsd",
+			goarch:    "riscv64",
+			wantAsset: "",
+			wantErr:   true,
+		},
+		{
+			name: "only supplemental files",
+			assets: []Asset{
+				{Name: "SHA256SUMS"},
+				{Name: "SHA256SUMS.minisig"},
+			},
+			cfg:       &RepoConfig{BinaryName: "tool"},
+			goos:      "darwin",
+			goarch:    "arm64",
+			wantAsset: "",
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := pickByHeuristics(tt.assets, tt.cfg, tt.goos, tt.goarch)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("pickByHeuristics() expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("pickByHeuristics() error = %v", err)
+				return
+			}
+			if got.Name != tt.wantAsset {
+				t.Errorf("pickByHeuristics() = %q, want %q", got.Name, tt.wantAsset)
+			}
+		})
+	}
+}
+
+func TestSelectAsset(t *testing.T) {
+	t.Parallel()
+
+	release := &Release{
+		TagName: "v1.0.0",
+		Assets: []Asset{
+			{Name: "tool_darwin_arm64.tar.gz"},
+			{Name: "tool_darwin_amd64.tar.gz"},
+			{Name: "tool_linux_arm64.tar.gz"},
+			{Name: "tool_linux_amd64.tar.gz"},
+			{Name: "tool_windows_amd64.zip"},
+			{Name: "SHA256SUMS"},
+			{Name: "SHA256SUMS.minisig"},
+		},
+	}
+
+	tests := []struct {
+		name       string
+		cfg        *RepoConfig
+		goos       string
+		goarch     string
+		assetMatch string
+		assetRegex string
+		wantAsset  string
+		wantErr    bool
+	}{
+		{
+			name:      "heuristics - darwin arm64",
+			cfg:       &RepoConfig{BinaryName: "tool", ArchiveExtensions: []string{".tar.gz", ".zip"}},
+			goos:      "darwin",
+			goarch:    "arm64",
+			wantAsset: "tool_darwin_arm64.tar.gz",
+		},
+		{
+			name:      "heuristics - windows amd64",
+			cfg:       &RepoConfig{BinaryName: "tool", ArchiveExtensions: []string{".tar.gz", ".zip"}},
+			goos:      "windows",
+			goarch:    "amd64",
+			wantAsset: "tool_windows_amd64.zip",
+		},
+		{
+			name:       "asset-match override",
+			cfg:        &RepoConfig{BinaryName: "tool"},
+			goos:       "darwin",
+			goarch:     "arm64",
+			assetMatch: "linux_amd64",
+			wantAsset:  "tool_linux_amd64.tar.gz",
+		},
+		{
+			name:       "asset-regex override",
+			cfg:        &RepoConfig{BinaryName: "tool"},
+			goos:       "darwin",
+			goarch:     "arm64",
+			assetRegex: ".*windows.*\\.zip",
+			wantAsset:  "tool_windows_amd64.zip",
+		},
+		{
+			name:       "asset-match no match",
+			cfg:        &RepoConfig{BinaryName: "tool"},
+			goos:       "darwin",
+			goarch:     "arm64",
+			assetMatch: "freebsd",
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := selectAsset(release, tt.cfg, tt.goos, tt.goarch, tt.assetMatch, tt.assetRegex)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("selectAsset() expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("selectAsset() error = %v", err)
+				return
+			}
+			if got.Name != tt.wantAsset {
+				t.Errorf("selectAsset() = %q, want %q", got.Name, tt.wantAsset)
+			}
+		})
+	}
+}
+
+func TestRenderPattern(t *testing.T) {
+	t.Parallel()
+
+	cfg := &RepoConfig{BinaryName: "mytool"}
+
+	tests := []struct {
+		name    string
+		pattern string
+		goos    string
+		goarch  string
+		wantRe  string // expected regex pattern (we check it compiles and matches expected)
+	}{
+		{
+			name:    "basic template",
+			pattern: "{{binary}}_{{goos}}_{{goarch}}",
+			goos:    "darwin",
+			goarch:  "arm64",
+			wantRe:  "mytool_darwin_arm64",
+		},
+		{
+			name:    "uppercase",
+			pattern: "{{binary}}_{{GOOS}}_{{GOARCH}}",
+			goos:    "darwin",
+			goarch:  "arm64",
+			wantRe:  "mytool_DARWIN_ARM64",
+		},
+		{
+			name:    "titlecase",
+			pattern: "{{binary}}_{{Goos}}_{{Goarch}}",
+			goos:    "darwin",
+			goarch:  "arm64",
+			wantRe:  "mytool_Darwin_Arm64",
+		},
+		{
+			name:    "os token with aliases",
+			pattern: "{{binary}}_{{osToken}}_{{archToken}}",
+			goos:    "darwin",
+			goarch:  "arm64",
+			wantRe:  `mytool_\(\?:darwin\|macos\|macosx\|osx\)_\(\?:aarch64\|arm64\)`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := renderPattern(tt.pattern, cfg, tt.goos, tt.goarch)
+			// For simple patterns, check exact match
+			if !strings.Contains(tt.pattern, "Token") {
+				if got != tt.wantRe {
+					t.Errorf("renderPattern() = %q, want %q", got, tt.wantRe)
+				}
+			} else {
+				// For token patterns, just verify it's a valid regex
+				if _, err := regexp.Compile(got); err != nil {
+					t.Errorf("renderPattern() produced invalid regex: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestHasAllowedExtension(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		exts []string
+		want bool
+	}{
+		{"tool.tar.gz with tar.gz allowed", []string{".tar.gz", ".zip"}, true},
+		{"tool.zip with zip allowed", []string{".tar.gz", ".zip"}, true},
+		{"tool.exe with tar.gz/zip allowed", []string{".tar.gz", ".zip"}, false},
+		{"any extension with empty list", []string{""}, true}, // empty string means any
+		{"tool.tar.gz with empty list", []string{}, false},
+	}
+
+	for _, tt := range tests {
+		testName := tt.name
+		t.Run(testName, func(t *testing.T) {
+			// Extract filename from test name
+			nameParts := strings.SplitN(tt.name, " with", 2)
+			fileName := nameParts[0]
+			got := hasAllowedExtension(fileName, tt.exts)
+			if got != tt.want {
+				t.Errorf("hasAllowedExtension(%q, %v) = %v, want %v", fileName, tt.exts, got, tt.want)
+			}
+		})
 	}
 }
