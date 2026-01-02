@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/json"
+	"fmt"
 	"hash"
 	"net/http"
 	"net/http/httptest"
@@ -3339,5 +3340,282 @@ func TestHasAllowedExtension(t *testing.T) {
 				t.Errorf("hasAllowedExtension(%q, %v) = %v, want %v", fileName, tt.exts, got, tt.want)
 			}
 		})
+	}
+}
+
+// Pass 5: Comprehensive trust score edge cases
+func TestComputeTrustScoreEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		in             trustScoreInput
+		wantScore      int
+		wantLevel      TrustLevel
+		wantLevelName  string
+		wantAlgoPoints int
+		wantAlgoName   string
+	}{
+		{
+			name: "sha512 algorithm bonus",
+			in: trustScoreInput{
+				ChecksumVerifiable: true,
+				ChecksumValidated:  true,
+				ChecksumAlgorithm:  "sha512",
+				HTTPSUsed:          true,
+			},
+			wantScore:      45, // 40 checksum + 5 sha512
+			wantLevel:      TrustLow,
+			wantLevelName:  "low",
+			wantAlgoPoints: 5,
+			wantAlgoName:   "sha512",
+		},
+		{
+			name: "sha1 weak algorithm penalty",
+			in: trustScoreInput{
+				ChecksumVerifiable: true,
+				ChecksumValidated:  true,
+				ChecksumAlgorithm:  "sha1",
+				HTTPSUsed:          true,
+			},
+			wantScore:      30, // 40 checksum - 10 sha1
+			wantLevel:      TrustLow,
+			wantLevelName:  "low",
+			wantAlgoPoints: -10,
+			wantAlgoName:   "sha1",
+		},
+		{
+			name: "md5 weak algorithm penalty",
+			in: trustScoreInput{
+				ChecksumVerifiable: true,
+				ChecksumValidated:  true,
+				ChecksumAlgorithm:  "MD5", // uppercase to test case insensitivity
+				HTTPSUsed:          true,
+			},
+			wantScore:      30, // 40 checksum - 10 md5
+			wantLevel:      TrustLow,
+			wantLevelName:  "low",
+			wantAlgoPoints: -10,
+			wantAlgoName:   "md5",
+		},
+		{
+			name: "skip signature penalty",
+			in: trustScoreInput{
+				SignatureVerifiable: true,
+				SignatureSkipped:    true,
+				HTTPSUsed:           true,
+			},
+			wantScore:     5, // 25 https - 20 skipped sig
+			wantLevel:     TrustMinimal,
+			wantLevelName: "minimal",
+		},
+		{
+			name: "skip both signature and checksum penalties",
+			in: trustScoreInput{
+				SignatureVerifiable: true,
+				SignatureSkipped:    true,
+				ChecksumVerifiable:  true,
+				ChecksumSkipped:     true,
+				HTTPSUsed:           true,
+			},
+			wantScore:     0, // 25 https - 20 sig - 15 checksum = -10, floored to 0
+			wantLevel:     TrustBypassed,
+			wantLevelName: "bypassed",
+		},
+		{
+			name: "no https baseline",
+			in: trustScoreInput{
+				HTTPSUsed: false,
+			},
+			wantScore:     0,
+			wantLevel:     TrustBypassed,
+			wantLevelName: "bypassed",
+		},
+		{
+			name: "unknown algorithm gets no bonus",
+			in: trustScoreInput{
+				ChecksumVerifiable: true,
+				ChecksumValidated:  true,
+				ChecksumAlgorithm:  "blake2b",
+				HTTPSUsed:          true,
+			},
+			wantScore:      40, // 40 checksum, no algo bonus
+			wantLevel:      TrustLow,
+			wantLevelName:  "low",
+			wantAlgoPoints: 0,
+			wantAlgoName:   "",
+		},
+		{
+			name: "insecure flag with checksum only zeroes everything",
+			in: trustScoreInput{
+				ChecksumVerifiable: true,
+				ChecksumValidated:  true,
+				ChecksumAlgorithm:  "sha256",
+				HTTPSUsed:          true,
+				InsecureFlag:       true,
+			},
+			wantScore:      0,
+			wantLevel:      TrustBypassed,
+			wantLevelName:  "bypassed",
+			wantAlgoPoints: 0,
+			wantAlgoName:   "",
+		},
+		{
+			name: "insecure flag without verifiable artifacts does nothing special",
+			in: trustScoreInput{
+				HTTPSUsed:    true,
+				InsecureFlag: true,
+			},
+			wantScore:     25, // https only, insecure doesn't apply
+			wantLevel:     TrustMinimal,
+			wantLevelName: "minimal",
+		},
+		{
+			name: "score capped at 100",
+			in: trustScoreInput{
+				SignatureVerifiable: true,
+				SignatureValidated:  true,
+				ChecksumVerifiable:  true,
+				ChecksumValidated:   true,
+				ChecksumAlgorithm:   "sha256",
+				HTTPSUsed:           true,
+			},
+			wantScore:     100, // 70 sig + 40 checksum + 5 algo = 115, capped to 100
+			wantLevel:     TrustHigh,
+			wantLevelName: "high",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := computeTrustScore(tc.in)
+			if got.Score != tc.wantScore {
+				t.Errorf("Score: got %d want %d", got.Score, tc.wantScore)
+			}
+			if got.Level != tc.wantLevel {
+				t.Errorf("Level: got %d want %d", got.Level, tc.wantLevel)
+			}
+			if got.LevelName != tc.wantLevelName {
+				t.Errorf("LevelName: got %q want %q", got.LevelName, tc.wantLevelName)
+			}
+			if tc.wantAlgoName != "" || tc.wantAlgoPoints != 0 {
+				if got.Factors.Algorithm.Points != tc.wantAlgoPoints {
+					t.Errorf("Algorithm.Points: got %d want %d", got.Factors.Algorithm.Points, tc.wantAlgoPoints)
+				}
+				if got.Factors.Algorithm.Name != tc.wantAlgoName {
+					t.Errorf("Algorithm.Name: got %q want %q", got.Factors.Algorithm.Name, tc.wantAlgoName)
+				}
+			}
+		})
+	}
+}
+
+func TestTrustLevelFromScore(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		score int
+		want  TrustLevel
+	}{
+		{-10, TrustBypassed},
+		{0, TrustBypassed},
+		{1, TrustMinimal},
+		{29, TrustMinimal},
+		{30, TrustLow},
+		{59, TrustLow},
+		{60, TrustMedium},
+		{84, TrustMedium},
+		{85, TrustHigh},
+		{100, TrustHigh},
+		{150, TrustHigh}, // over 100 still maps to high
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(fmt.Sprintf("score_%d", tc.score), func(t *testing.T) {
+			t.Parallel()
+			got := TrustLevelFromScore(tc.score)
+			if got != tc.want {
+				t.Errorf("TrustLevelFromScore(%d) = %d, want %d", tc.score, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTrustLevelName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		level TrustLevel
+		want  string
+	}{
+		{TrustBypassed, "bypassed"},
+		{TrustMinimal, "minimal"},
+		{TrustLow, "low"},
+		{TrustMedium, "medium"},
+		{TrustHigh, "high"},
+		{TrustLevel(99), "unknown"}, // invalid level
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.want, func(t *testing.T) {
+			t.Parallel()
+			got := tc.level.Name()
+			if got != tc.want {
+				t.Errorf("TrustLevel(%d).Name() = %q, want %q", tc.level, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTrustScoreFactorsCopied(t *testing.T) {
+	t.Parallel()
+
+	// Verify that input fields are properly copied to output factors
+	in := trustScoreInput{
+		SignatureVerifiable: true,
+		SignatureValidated:  true,
+		SignatureSkipped:    false,
+		ChecksumVerifiable:  true,
+		ChecksumValidated:   true,
+		ChecksumSkipped:     false,
+		ChecksumAlgorithm:   "sha256",
+		HTTPSUsed:           true,
+	}
+
+	got := computeTrustScore(in)
+
+	// Signature factors
+	if got.Factors.Signature.Verifiable != in.SignatureVerifiable {
+		t.Errorf("Signature.Verifiable not copied")
+	}
+	if got.Factors.Signature.Validated != in.SignatureValidated {
+		t.Errorf("Signature.Validated not copied")
+	}
+	if got.Factors.Signature.Skipped != in.SignatureSkipped {
+		t.Errorf("Signature.Skipped not copied")
+	}
+
+	// Checksum factors
+	if got.Factors.Checksum.Verifiable != in.ChecksumVerifiable {
+		t.Errorf("Checksum.Verifiable not copied")
+	}
+	if got.Factors.Checksum.Validated != in.ChecksumValidated {
+		t.Errorf("Checksum.Validated not copied")
+	}
+	if got.Factors.Checksum.Skipped != in.ChecksumSkipped {
+		t.Errorf("Checksum.Skipped not copied")
+	}
+	if got.Factors.Checksum.Algorithm != in.ChecksumAlgorithm {
+		t.Errorf("Checksum.Algorithm not copied")
+	}
+
+	// Transport factors
+	if got.Factors.Transport.HTTPS != in.HTTPSUsed {
+		t.Errorf("Transport.HTTPS not copied")
 	}
 }
