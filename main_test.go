@@ -504,6 +504,197 @@ func TestInstallFlagMutualExclusion(t *testing.T) {
 	}
 }
 
+// Pass 3: CLI flag validation tests
+func TestCLIFlagValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		args       []string
+		wantCode   int
+		wantStderr string // substring to match in stderr
+	}{
+		{
+			name:       "insecure and require-minisign conflict",
+			args:       []string{"--repo", "foo/bar", "--insecure", "--require-minisign", "--skip-tools-check"},
+			wantCode:   1,
+			wantStderr: "mutually exclusive",
+		},
+		{
+			name:       "tag and latest conflict",
+			args:       []string{"--repo", "foo/bar", "--tag", "v1.0.0", "--latest", "--skip-tools-check"},
+			wantCode:   1,
+			wantStderr: "mutually exclusive",
+		},
+		{
+			name:       "repo required",
+			args:       []string{"--skip-tools-check"},
+			wantCode:   1,
+			wantStderr: "--repo is required",
+		},
+		{
+			name:       "unknown flag",
+			args:       []string{"--nonexistent-flag"},
+			wantCode:   2,
+			wantStderr: "flag provided but not defined",
+		},
+		{
+			name:       "help flag returns success",
+			args:       []string{"--help"},
+			wantCode:   0,
+			wantStderr: "", // help goes to stdout
+		},
+		{
+			name:       "version flag returns success",
+			args:       []string{"--version"},
+			wantCode:   0,
+			wantStderr: "sfetch",
+		},
+		{
+			name:       "version-extended flag returns success",
+			args:       []string{"--version-extended"},
+			wantCode:   0,
+			wantStderr: "go version",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var stdout, stderr strings.Builder
+			code := run(tc.args, &stdout, &stderr)
+			if code != tc.wantCode {
+				t.Errorf("exit code: got %d want %d (stderr=%q)", code, tc.wantCode, stderr.String())
+			}
+			if tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Errorf("stderr: got %q, want substring %q", stderr.String(), tc.wantStderr)
+			}
+		})
+	}
+}
+
+func TestCLIFlagHelpOutput(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"--help"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("--help returned %d", code)
+	}
+
+	// Help should contain key sections
+	output := stdout.String()
+	sections := []string{"Selection:", "Verification:", "Provenance", "Tools"}
+	for _, section := range sections {
+		if !strings.Contains(output, section) {
+			t.Errorf("help output missing section %q", section)
+		}
+	}
+
+	// Help should document key flags
+	flags := []string{"--repo", "--tag", "--latest", "--insecure", "--dry-run", "--install"}
+	for _, flag := range flags {
+		if !strings.Contains(output, strings.TrimPrefix(flag, "--")) {
+			t.Errorf("help output missing flag %q", flag)
+		}
+	}
+}
+
+func TestCLISelfVerifyFlag(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"--self-verify"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("--self-verify returned %d", code)
+	}
+	// Note: printSelfVerify() writes to os.Stderr/os.Stdout directly, not the passed writers.
+	// We just verify the flag is accepted and returns success.
+}
+
+func TestCLISelfVerifyJSONFlag(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"--self-verify", "--json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("--self-verify --json returned %d", code)
+	}
+	// Note: printSelfVerifyJSON() writes to os.Stdout directly, not the passed writer.
+	// We just verify the flag combination is accepted and returns success.
+}
+
+func TestCLIShowTrustAnchorsText(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"--show-trust-anchors"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("--show-trust-anchors returned %d", code)
+	}
+
+	// Text output goes to stderr
+	output := stderr.String()
+	if !strings.Contains(output, "minisign:") {
+		t.Errorf("--show-trust-anchors missing minisign key: %q", output)
+	}
+	if !strings.Contains(output, "RW") {
+		t.Errorf("--show-trust-anchors missing RW prefix for minisign key: %q", output)
+	}
+}
+
+func TestCLIShowTrustAnchorsJSON(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"--show-trust-anchors", "--json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("--show-trust-anchors --json returned %d", code)
+	}
+
+	// JSON output goes to stdout
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(stdout.String()), &data); err != nil {
+		t.Fatalf("--show-trust-anchors --json output not valid JSON: %v", err)
+	}
+
+	if _, ok := data["minisign"]; !ok {
+		t.Errorf("JSON output missing minisign key")
+	}
+}
+
+func TestCLIValidateUpdateConfig(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"--validate-update-config"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("--validate-update-config returned %d (stderr=%q)", code, stderr.String())
+	}
+
+	if !strings.Contains(stderr.String(), "OK") {
+		t.Errorf("--validate-update-config missing OK message: %q", stderr.String())
+	}
+}
+
+func TestCLIShowUpdateConfig(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"--show-update-config"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("--show-update-config returned %d", code)
+	}
+
+	// JSON output goes to stdout
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(stdout.String()), &data); err != nil {
+		t.Fatalf("--show-update-config output not valid JSON: %v", err)
+	}
+}
+
 func TestGetConfig(t *testing.T) {
 	tests := []struct {
 		repo    string
