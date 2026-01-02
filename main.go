@@ -1077,21 +1077,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *versionFlag {
-		fmt.Fprintln(stdout, "sfetch", version)
+		fmt.Fprintln(stderr, "sfetch", version)
 		return 0
 	}
 
 	if *versionExtended {
-		fmt.Fprintf(stdout, "sfetch %s\n", version)
-		fmt.Fprintf(stdout, "  build time: %s\n", buildTime)
-		fmt.Fprintf(stdout, "  git commit: %s\n", gitCommit)
-		fmt.Fprintf(stdout, "  go version: %s\n", runtime.Version())
-		fmt.Fprintf(stdout, "  platform:   %s/%s\n", runtime.GOOS, runtime.GOARCH)
+		fmt.Fprintf(stderr, "sfetch %s\n", version)
+		fmt.Fprintf(stderr, "  build time: %s\n", buildTime)
+		fmt.Fprintf(stderr, "  git commit: %s\n", gitCommit)
+		fmt.Fprintf(stderr, "  go version: %s\n", runtime.Version())
+		fmt.Fprintf(stderr, "  platform:   %s/%s\n", runtime.GOOS, runtime.GOARCH)
 		return 0
 	}
 
 	if *extendedHelp {
-		fmt.Fprintln(stdout, strings.TrimSpace(quickstartDoc))
+		fmt.Fprintln(stderr, strings.TrimSpace(quickstartDoc))
 		return 0
 	}
 
@@ -1106,6 +1106,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Handle --show-trust-anchors: output embedded keys and exit
+	// JSON to stdout (machine-parseable), text to stderr (human-readable)
 	if *showTrustAnchors {
 		if *jsonOut {
 			trustJSON := map[string]interface{}{
@@ -1117,7 +1118,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			data, _ := json.MarshalIndent(trustJSON, "", "  ")
 			fmt.Fprintln(stdout, string(data))
 		} else {
-			fmt.Fprintf(stdout, "minisign:%s\n", EmbeddedMinisignPubkey)
+			fmt.Fprintf(stderr, "minisign:%s\n", EmbeddedMinisignPubkey)
 		}
 		return 0
 	}
@@ -1341,8 +1342,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return 1
 			}
 		} else {
-			// --dry-run only: human-readable output
-			fmt.Fprint(stdout, formatDryRunOutput(*repo, &rel, assessment, selfUpdateInfo))
+			// --dry-run only: human-readable output to stderr
+			fmt.Fprint(stderr, formatDryRunOutput(*repo, &rel, assessment, selfUpdateInfo))
 		}
 		return 0
 	}
@@ -1471,7 +1472,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 					fmt.Fprintln(stderr, err)
 					return 1
 				}
-				fmt.Fprintln(stdout, "Minisign checksum signature verified OK")
+				fmt.Fprintln(stderr, "Minisign checksum signature verified OK")
 
 			case sigFormatPGP:
 				pgpKeyPath, err := resolvePGPKey(*pgpKeyFile, *pgpKeyURL, *pgpKeyAsset, rel.Assets, tmpDir)
@@ -1483,7 +1484,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 					fmt.Fprintln(stderr, err)
 					return 1
 				}
-				fmt.Fprintln(stdout, "PGP checksum signature verified OK")
+				fmt.Fprintln(stderr, "PGP checksum signature verified OK")
 
 			default:
 				fmt.Fprintf(stderr, "error: unknown signature format for %s\n", assessment.SignatureFile)
@@ -1583,7 +1584,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "checksum mismatch: expected %s, got %s\n", expectedHash, actualHash)
 			return 1
 		}
-		fmt.Fprintln(stdout, "Checksum verified OK")
+		fmt.Fprintln(stderr, "Checksum verified OK")
 	}
 
 	cd := *cacheDir
@@ -1614,7 +1615,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	assetPath = cacheAssetPath
-	fmt.Fprintf(stdout, "Cached to %s\n", cacheAssetPath)
+	fmt.Fprintf(stderr, "Cached to %s\n", cacheAssetPath)
 
 	// Workflow B: Verify per-asset signature
 	if assessment.Workflow == workflowB && !*skipSig {
@@ -1635,7 +1636,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintln(stderr, err)
 				return 1
 			}
-			fmt.Fprintln(stdout, "PGP signature verified OK")
+			fmt.Fprintln(stderr, "PGP signature verified OK")
 
 		case sigFormatMinisign:
 			minisignKeyPath, err := resolveMinisignKey(*minisignPubKey, *minisignKeyURL, *minisignKeyAsset, rel.Assets, tmpDir)
@@ -1647,7 +1648,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintln(stderr, err)
 				return 1
 			}
-			fmt.Fprintln(stdout, "Minisign signature verified OK")
+			fmt.Fprintln(stderr, "Minisign signature verified OK")
 
 		case sigFormatBinary:
 			normalizedKey, err := normalizeHexKey(*key)
@@ -1669,7 +1670,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintln(stderr, "signature verification failed")
 				return 1
 			}
-			fmt.Fprintln(stdout, "Signature verified OK")
+			fmt.Fprintln(stderr, "Signature verified OK")
 
 		default:
 			fmt.Fprintln(stderr, "error: unsupported signature format")
@@ -1791,15 +1792,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// Windows self-update: target may be locked, write to .new file.
 	if *selfUpdate && runtime.GOOS == "windows" && installedPath != finalPath {
 		fmt.Fprintf(stderr, "target appears locked; new binary written to %s. Close running sfetch and replace manually.\n", installedPath)
-		fmt.Fprintf(stdout, "Release: %s\n", rel.TagName)
-		fmt.Fprintf(stdout, "Installed %s to %s\n", installName, installedPath)
+		fmt.Fprintf(stderr, "Release: %s\n", rel.TagName)
+		fmt.Fprintf(stderr, "Installed %s to %s\n", installName, installedPath)
 		return 0
 	}
 
 	finalPath = installedPath
 
-	fmt.Fprintf(stdout, "Release: %s\n", rel.TagName)
-	fmt.Fprintf(stdout, "Installed %s to %s\n", installName, finalPath)
+	fmt.Fprintf(stderr, "Release: %s\n", rel.TagName)
+	fmt.Fprintf(stderr, "Installed %s to %s\n", installName, finalPath)
 
 	// Output provenance record if requested
 	if *provenance || *provenanceFile != "" {
@@ -3047,85 +3048,86 @@ func printSelfVerify(jsonOutput bool) {
 	// Attempt to fetch expected hash (optional, may fail on network issues or dev builds)
 	expectedHash, hashErr := fetchExpectedHash(ver, assetName)
 
+	// JSON output goes to stdout (machine-parseable), text to stderr (human-readable)
 	if jsonOutput {
 		printSelfVerifyJSON(ver, assetName, expectedHash, hashErr)
 		return
 	}
 
 	// Header
-	fmt.Printf("\nsfetch %s (%s/%s)\n", ver, runtime.GOOS, runtime.GOARCH)
-	fmt.Printf("Built: %s\n", buildTime)
-	fmt.Printf("Commit: %s\n", gitCommit)
+	fmt.Fprintf(os.Stderr, "\nsfetch %s (%s/%s)\n", ver, runtime.GOOS, runtime.GOARCH)
+	fmt.Fprintf(os.Stderr, "Built: %s\n", buildTime)
+	fmt.Fprintf(os.Stderr, "Commit: %s\n", gitCommit)
 
 	// Dev build early exit
 	if ver == "dev" {
-		fmt.Println("\nThis is a development build. No published checksums available.")
-		fmt.Println("To verify a release build, install from: https://github.com/3leaps/sfetch/releases")
-		fmt.Println()
-		fmt.Println("Embedded trust anchors:")
-		fmt.Printf("  Minisign pubkey: %s\n", EmbeddedMinisignPubkey)
-		fmt.Printf("  Key ID: %s\n", EmbeddedMinisignKeyID)
+		fmt.Fprintln(os.Stderr, "\nThis is a development build. No published checksums available.")
+		fmt.Fprintln(os.Stderr, "To verify a release build, install from: https://github.com/3leaps/sfetch/releases")
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "Embedded trust anchors:")
+		fmt.Fprintf(os.Stderr, "  Minisign pubkey: %s\n", EmbeddedMinisignPubkey)
+		fmt.Fprintf(os.Stderr, "  Key ID: %s\n", EmbeddedMinisignKeyID)
 		return
 	}
 
 	// Release URLs
-	fmt.Println()
-	fmt.Println("Release URLs:")
-	fmt.Printf("  SHA256SUMS:         https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS\n", ver)
-	fmt.Printf("  SHA256SUMS.minisig: https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS.minisig\n", ver)
-	fmt.Printf("  SHA256SUMS.asc:     https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS.asc\n", ver)
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "Release URLs:")
+	fmt.Fprintf(os.Stderr, "  SHA256SUMS:         https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS\n", ver)
+	fmt.Fprintf(os.Stderr, "  SHA256SUMS.minisig: https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS.minisig\n", ver)
+	fmt.Fprintf(os.Stderr, "  SHA256SUMS.asc:     https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS.asc\n", ver)
 
 	// Expected asset
-	fmt.Println()
-	fmt.Printf("Expected asset: %s\n", assetName)
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "Expected asset: %s\n", assetName)
 
 	// Expected hash
-	fmt.Println()
+	fmt.Fprintln(os.Stderr)
 	if hashErr != nil {
-		fmt.Printf("Expected SHA256: (network unavailable - fetch manually from URLs above)\n")
+		fmt.Fprintf(os.Stderr, "Expected SHA256: (network unavailable - fetch manually from URLs above)\n")
 	} else {
-		fmt.Printf("Expected SHA256 (fetched from release):\n")
-		fmt.Printf("  %s\n", expectedHash)
+		fmt.Fprintf(os.Stderr, "Expected SHA256 (fetched from release):\n")
+		fmt.Fprintf(os.Stderr, "  %s\n", expectedHash)
 	}
 
 	// Checksum verification commands
-	fmt.Println()
-	fmt.Println("Verify checksum externally:")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "Verify checksum externally:")
 	if runtime.GOOS == "darwin" {
-		fmt.Println("  # macOS")
-		fmt.Println("  shasum -a 256 $(which sfetch)")
+		fmt.Fprintln(os.Stderr, "  # macOS")
+		fmt.Fprintln(os.Stderr, "  shasum -a 256 $(which sfetch)")
 	} else if runtime.GOOS == "windows" {
-		fmt.Println("  # Windows (PowerShell)")
-		fmt.Println("  Get-FileHash (Get-Command sfetch).Source -Algorithm SHA256")
+		fmt.Fprintln(os.Stderr, "  # Windows (PowerShell)")
+		fmt.Fprintln(os.Stderr, "  Get-FileHash (Get-Command sfetch).Source -Algorithm SHA256")
 	} else {
-		fmt.Println("  # Linux")
-		fmt.Println("  sha256sum $(which sfetch)")
+		fmt.Fprintln(os.Stderr, "  # Linux")
+		fmt.Fprintln(os.Stderr, "  sha256sum $(which sfetch)")
 	}
 
 	// Minisign verification
-	fmt.Println()
-	fmt.Println("Verify signature with minisign:")
-	fmt.Printf("  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS -o /tmp/SHA256SUMS\n", ver)
-	fmt.Printf("  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS.minisig -o /tmp/SHA256SUMS.minisig\n", ver)
-	fmt.Printf("  minisign -Vm /tmp/SHA256SUMS -P %s\n", EmbeddedMinisignPubkey)
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "Verify signature with minisign:")
+	fmt.Fprintf(os.Stderr, "  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS -o /tmp/SHA256SUMS\n", ver)
+	fmt.Fprintf(os.Stderr, "  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS.minisig -o /tmp/SHA256SUMS.minisig\n", ver)
+	fmt.Fprintf(os.Stderr, "  minisign -Vm /tmp/SHA256SUMS -P %s\n", EmbeddedMinisignPubkey)
 
 	// GPG verification
-	fmt.Println()
-	fmt.Println("Verify signature with GPG:")
-	fmt.Printf("  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS -o /tmp/SHA256SUMS\n", ver)
-	fmt.Printf("  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS.asc -o /tmp/SHA256SUMS.asc\n", ver)
-	fmt.Printf("  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/sfetch-release-signing-key.asc | gpg --import\n", ver)
-	fmt.Println("  gpg --verify /tmp/SHA256SUMS.asc /tmp/SHA256SUMS")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "Verify signature with GPG:")
+	fmt.Fprintf(os.Stderr, "  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS -o /tmp/SHA256SUMS\n", ver)
+	fmt.Fprintf(os.Stderr, "  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/SHA256SUMS.asc -o /tmp/SHA256SUMS.asc\n", ver)
+	fmt.Fprintf(os.Stderr, "  curl -sL https://github.com/3leaps/sfetch/releases/download/v%s/sfetch-release-signing-key.asc | gpg --import\n", ver)
+	fmt.Fprintln(os.Stderr, "  gpg --verify /tmp/SHA256SUMS.asc /tmp/SHA256SUMS")
 
 	// Trust anchors
-	fmt.Println()
-	fmt.Println("Embedded trust anchors:")
-	fmt.Printf("  Minisign pubkey: %s\n", EmbeddedMinisignPubkey)
-	fmt.Printf("  Key ID: %s\n", EmbeddedMinisignKeyID)
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "Embedded trust anchors:")
+	fmt.Fprintf(os.Stderr, "  Minisign pubkey: %s\n", EmbeddedMinisignPubkey)
+	fmt.Fprintf(os.Stderr, "  Key ID: %s\n", EmbeddedMinisignKeyID)
 
 	// Security warning
-	fmt.Println()
-	fmt.Println("WARNING: A compromised binary could lie. Run these commands yourself.")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "WARNING: A compromised binary could lie. Run these commands yourself.")
 }
 
 // SelfVerifyOutput is the JSON structure for --self-verify --json output.

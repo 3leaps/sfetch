@@ -9,6 +9,24 @@
     "note": "Minisign checksum-level signature"
   },
   {
+    "repo": "3leaps/shellsentry",
+    "tag": "v0.1.0",
+    "assetMatch": "*darwin_arm64*",
+    "expectedWorkflow": "A",
+    "expectSuccess": true,
+    "tier": "fast",
+    "note": "Shellsentry binary - minisign checksum-level signature (SHA2-512SUMS)"
+  },
+  {
+    "repo": "3leaps/shellsentry",
+    "tag": "v0.1.0",
+    "assetMatch": "install-shellsentry.sh",
+    "expectedWorkflow": "A",
+    "expectSuccess": true,
+    "tier": "fast",
+    "note": "Shellsentry installer script - minisign checksum-level signature"
+  },
+  {
     "repo": "jedisct1/minisign",
     "tag": "0.12",
     "assetMatch": "*macos*.zip",

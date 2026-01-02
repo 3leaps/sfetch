@@ -15,6 +15,27 @@ Yet we still ship 15-line bash bootstrap scripts that do manual `curl → sha256
 
 `sfetch` is the missing 1% that deletes those scripts forever.
 
+### Pair with shellsentry
+
+[shellsentry](https://github.com/3leaps/shellsentry) analyzes shell scripts for risky patterns before you run them. Use sfetch to verify downloads, then shellsentry to inspect what's inside:
+
+```bash
+# Install both tools
+sfetch --repo 3leaps/sfetch --latest --dest-dir ~/.local/bin
+sfetch --repo 3leaps/shellsentry --latest --dest-dir ~/.local/bin
+
+# The new curl | sh - verified download, inspected before execution
+curl -sSfL https://example.com/install.sh -o install.sh
+shellsentry install.sh && bash install.sh
+```
+
+Or as a one-liner that downloads, analyzes, and runs only if safe:
+
+```bash
+# Download, analyze, execute only if no high-risk patterns found
+curl -sSfL https://example.com/install.sh -o install.sh && shellsentry --exit-on-danger install.sh && bash install.sh
+```
+
 ### Security & Verification
 See [docs/security.md](docs/security.md).
 

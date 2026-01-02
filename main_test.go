@@ -469,8 +469,9 @@ func TestHelpExtendedAlias(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("exit code: got %d, stderr=%q", code, stderr.String())
 			}
-			if !strings.Contains(stdout.String(), "sfetch quickstart") {
-				t.Fatalf("stdout missing quickstart header, got: %q", stdout.String())
+			// Help text goes to stderr (human-readable), stdout reserved for machine output
+			if !strings.Contains(stderr.String(), "sfetch quickstart") {
+				t.Fatalf("stderr missing quickstart header, got: %q", stderr.String())
 			}
 		})
 	}
@@ -2570,5 +2571,361 @@ func TestProvenanceSchemaRejectsInvalid(t *testing.T) {
 				t.Errorf("expected validation error for invalid record, got nil")
 			}
 		})
+	}
+}
+
+// =============================================================================
+// Pass 1: Pure Function Unit Tests
+// =============================================================================
+
+func TestInferBinaryName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		repo string
+		want string
+	}{
+		{"jedisct1/minisign", "minisign"},
+		{"3leaps/sfetch", "sfetch"},
+		{"BurntSushi/ripgrep", "ripgrep"},
+		{"owner/tool-name", "tool-name"},
+		{"single", "single"},
+		{"", ""},
+		{"a/b/c", "b"}, // takes second part
+	}
+	for _, tt := range tests {
+		t.Run(tt.repo, func(t *testing.T) {
+			got := inferBinaryName(tt.repo)
+			if got != tt.want {
+				t.Errorf("inferBinaryName(%q) = %q, want %q", tt.repo, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInferArchiveFormat(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		want ArchiveFormat
+	}{
+		{"tool.tar.gz", ArchiveFormatTarGz},
+		{"tool.tgz", ArchiveFormatTarGz},
+		{"tool.tar.xz", ArchiveFormatTarXz},
+		{"tool.txz", ArchiveFormatTarXz},
+		{"tool.tar.bz2", ArchiveFormatTarBz2},
+		{"tool.tbz2", ArchiveFormatTarBz2},
+		{"tool.tar", ArchiveFormatTar},
+		{"tool.zip", ArchiveFormatZip},
+		{"tool.exe", ""},
+		{"tool", ""},
+		{"tool.sh", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := inferArchiveFormat(tt.name)
+			if got != tt.want {
+				t.Errorf("inferArchiveFormat(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestArchiveFormatFromString(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input string
+		want  ArchiveFormat
+	}{
+		{"tar.gz", ArchiveFormatTarGz},
+		{"TGZ", ArchiveFormatTarGz},
+		{"tar.xz", ArchiveFormatTarXz},
+		{"TXZ", ArchiveFormatTarXz},
+		{"tar.bz2", ArchiveFormatTarBz2},
+		{"TBZ2", ArchiveFormatTarBz2},
+		{"tar", ArchiveFormatTar},
+		{"zip", ArchiveFormatZip},
+		{"ZIP", ArchiveFormatZip},
+		{"unknown", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := archiveFormatFromString(tt.input)
+			if got != tt.want {
+				t.Errorf("archiveFormatFromString(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsScriptExtension(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"install.sh", true},
+		{"script.bash", true},
+		{"setup.zsh", true},
+		{"deploy.py", true},
+		{"build.rb", true},
+		{"run.pl", true},
+		{"setup.ps1", true},
+		{"run.bat", true},
+		{"install.cmd", true},
+		{"tool.exe", false},
+		{"binary", false},
+		{"archive.tar.gz", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isScriptExtension(tt.name)
+			if got != tt.want {
+				t.Errorf("isScriptExtension(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsPackageExtension(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"package.deb", true},
+		{"package.rpm", true},
+		{"installer.pkg", true},
+		{"setup.msi", true},
+		{"tool.exe", false},
+		{"archive.tar.gz", false},
+		{"script.sh", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isPackageExtension(tt.name)
+			if got != tt.want {
+				t.Errorf("isPackageExtension(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContainsTokenCI(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		tokens []string
+		want   bool
+	}{
+		{"sfetch_darwin_arm64.tar.gz", []string{"darwin"}, true},
+		{"sfetch_Darwin_arm64.tar.gz", []string{"darwin"}, true},
+		{"sfetch_DARWIN_arm64.tar.gz", []string{"darwin"}, true},
+		{"sfetch_linux_arm64.tar.gz", []string{"darwin"}, false},
+		{"sfetch_darwin_arm64.tar.gz", []string{"linux", "darwin"}, true},
+		{"sfetch_darwin_arm64.tar.gz", []string{}, false},
+		{"sfetch_darwin_arm64.tar.gz", []string{""}, false},
+	}
+	for _, tt := range tests {
+		name := tt.name + "_" + strings.Join(tt.tokens, ",")
+		t.Run(name, func(t *testing.T) {
+			got := containsTokenCI(tt.name, tt.tokens)
+			if got != tt.want {
+				t.Errorf("containsTokenCI(%q, %v) = %v, want %v", tt.name, tt.tokens, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTrimExtensionCI(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		exts []string
+		want string
+	}{
+		{"tool.tar.gz", []string{".tar.gz"}, "tool"},
+		{"tool.TAR.GZ", []string{".tar.gz"}, "tool"},
+		{"tool.zip", []string{".tar.gz", ".zip"}, "tool"},
+		{"tool.exe", []string{".tar.gz"}, "tool.exe"},
+		{"tool", []string{".tar.gz"}, "tool"},
+		{"tool.tar.gz", []string{}, "tool.tar.gz"},
+		{"tool.tar.gz", []string{""}, "tool.tar.gz"},
+	}
+	for _, tt := range tests {
+		name := tt.name + "_" + strings.Join(tt.exts, ",")
+		t.Run(name, func(t *testing.T) {
+			got := trimExtensionCI(tt.name, tt.exts)
+			if got != tt.want {
+				t.Errorf("trimExtensionCI(%q, %v) = %q, want %q", tt.name, tt.exts, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHasArchiveExtension(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		exts []string
+		want bool
+	}{
+		{"tool.tar.gz", []string{".tar.gz", ".zip"}, true},
+		{"tool.zip", []string{".tar.gz", ".zip"}, true},
+		{"tool.exe", []string{".tar.gz", ".zip"}, false},
+		{"tool", []string{".tar.gz"}, false},
+		{"tool.tar.gz", []string{}, false},
+	}
+	for _, tt := range tests {
+		name := tt.name + "_" + strings.Join(tt.exts, ",")
+		t.Run(name, func(t *testing.T) {
+			got := hasArchiveExtension(tt.name, tt.exts)
+			if got != tt.want {
+				t.Errorf("hasArchiveExtension(%q, %v) = %v, want %v", tt.name, tt.exts, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContainsAny(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		haystack string
+		needles  []string
+		want     bool
+	}{
+		{"sfetch_darwin_arm64", []string{"darwin", "linux"}, true},
+		{"sfetch_darwin_arm64", []string{"windows"}, false},
+		{"sfetch_darwin_arm64", []string{}, false},
+		{"sfetch_darwin_arm64", []string{""}, false},
+	}
+	for _, tt := range tests {
+		name := tt.haystack + "_" + strings.Join(tt.needles, ",")
+		t.Run(name, func(t *testing.T) {
+			got := containsAny(tt.haystack, tt.needles)
+			if got != tt.want {
+				t.Errorf("containsAny(%q, %v) = %v, want %v", tt.haystack, tt.needles, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTitleCase(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"darwin", "Darwin"},
+		{"DARWIN", "Darwin"},
+		{"linux", "Linux"},
+		{"", ""},
+		{"a", "A"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := titleCase(tt.input)
+			if got != tt.want {
+				t.Errorf("titleCase(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAliasList(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		value   string
+		wantLen int
+		wantHas []string
+	}{
+		{"darwin", 4, []string{"darwin", "macos", "macosx", "osx"}},
+		{"amd64", 3, []string{"amd64", "x86_64", "x64"}},
+		{"arm64", 2, []string{"arm64", "aarch64"}},
+		{"unknown", 1, []string{"unknown"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			var table map[string][]string
+			if tt.value == "darwin" || tt.value == "linux" || tt.value == "windows" {
+				table = goosAliasTable
+			} else {
+				table = archAliasTable
+			}
+			got := aliasList(tt.value, table)
+			if len(got) != tt.wantLen {
+				t.Errorf("aliasList(%q) len = %d, want %d; got %v", tt.value, len(got), tt.wantLen, got)
+			}
+			for _, want := range tt.wantHas {
+				found := false
+				for _, g := range got {
+					if g == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("aliasList(%q) missing %q; got %v", tt.value, want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestMergeExtensions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		rule    []string
+		cfg     []string
+		wantLen int
+	}{
+		{"both empty", nil, nil, 0},
+		{"rule only", []string{".tar.gz"}, nil, 1},
+		{"cfg only", nil, []string{".zip"}, 1},
+		{"both unique", []string{".tar.gz"}, []string{".zip"}, 2},
+		{"duplicates", []string{".tar.gz", ".zip"}, []string{".ZIP", ".tar.gz"}, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeExtensions(tt.rule, tt.cfg)
+			if len(got) != tt.wantLen {
+				t.Errorf("mergeExtensions(%v, %v) len = %d, want %d; got %v", tt.rule, tt.cfg, len(got), tt.wantLen, got)
+			}
+		})
+	}
+}
+
+func TestFilterNonSupplemental(t *testing.T) {
+	t.Parallel()
+
+	assets := []Asset{
+		{Name: "sfetch_darwin_arm64.tar.gz"},
+		{Name: "SHA256SUMS"},
+		{Name: "SHA256SUMS.minisig"},
+		{Name: "sfetch_linux_amd64.tar.gz"},
+		{Name: "key.pub"},
+	}
+
+	got := filterNonSupplemental(assets)
+	if len(got) != 2 {
+		t.Fatalf("filterNonSupplemental returned %d assets, want 2", len(got))
+	}
+	for _, a := range got {
+		if looksLikeSupplemental(a.Name) {
+			t.Errorf("filterNonSupplemental kept supplemental asset: %q", a.Name)
+		}
 	}
 }
