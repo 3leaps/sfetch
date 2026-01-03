@@ -19,13 +19,24 @@ jobs:
         with:
           go-version: '1.23'
 
-      - name: Install tools
+      - name: Install system tools
         run: |
           sudo apt-get update && \
             sudo apt-get install -y --no-install-recommends \
             yamllint shellcheck minisign
-          go install mvdan.cc/sh/v3/cmd/shfmt@latest
-          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+
+      - name: Build sfetch (from this commit)
+        run: |
+          go build -o bin/sfetch .
+          ./bin/sfetch --version
+
+      - name: Install goneat via sfetch (dogfooding)
+        run: |
+          ./bin/sfetch --repo fulmenhq/goneat \
+            --tag v0.4.0 \
+            --dest-dir bin \
+            --require-minisign
+          ./bin/goneat version
 
       - name: Quality
         run: make precommit
@@ -69,11 +80,10 @@ jobs:
           mkdir -p "$BIN_DIR" "$CACHE_DIR"
           export PATH="$BIN_DIR:$PATH"
 
-          # Optional: set `GITHUB_TOKEN` to avoid rate limits.
           sfetch --repo fulmenhq/goneat \
-            --tag v0.3.17 \
+            --tag v0.4.0 \
             --dest-dir "$BIN_DIR" \
             --cache-dir "$CACHE_DIR" \
             --require-minisign
 
-          goneat --version
+          goneat version
