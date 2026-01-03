@@ -1737,12 +1737,12 @@ func TestValidateMinisignPubkey(t *testing.T) {
 			if err != nil {
 				t.Fatalf("create temp: %v", err)
 			}
-			defer os.Remove(tmpFile.Name())
+			defer os.Remove(tmpFile.Name()) //nolint:errcheck // best-effort test cleanup
 
 			if _, err := tmpFile.WriteString(tt.content); err != nil {
 				t.Fatalf("write temp: %v", err)
 			}
-			tmpFile.Close()
+			_ = tmpFile.Close() // error unimportant after successful write
 
 			err = ValidateMinisignPubkey(tmpFile.Name())
 

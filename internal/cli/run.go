@@ -13,7 +13,7 @@ var Handler func(args []string, stdout, stderr io.Writer) int
 
 func Run(args []string, stdout, stderr io.Writer) int {
 	if Handler == nil {
-		fmt.Fprintln(stderr, "internal error: cli handler not configured")
+		_, _ = fmt.Fprintln(stderr, "internal error: cli handler not configured") //nolint:errcheck // best-effort error output
 		return 1
 	}
 	return Handler(args, stdout, stderr)

@@ -75,7 +75,7 @@ func VerifyPGPSignature(assetPath, sigPath, pubKeyPath, gpgBin string) error {
 	if err != nil {
 		return fmt.Errorf("create gpg home: %w", err)
 	}
-	defer os.RemoveAll(home)
+	defer os.RemoveAll(home) //nolint:errcheck // best-effort cleanup of temp dir
 
 	importArgs := []string{"--batch", "--no-tty", "--homedir", home, "--import", pubKeyPath}
 	if err := runCommand(gpgBin, importArgs...); err != nil {

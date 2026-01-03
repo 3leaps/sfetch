@@ -165,7 +165,7 @@ func loadManifest(path string) ([]corpusEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // read-only file, close error non-critical
 
 	data, err := io.ReadAll(f)
 	if err != nil {

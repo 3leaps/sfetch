@@ -175,7 +175,7 @@ func writeChecksums(dir string, files []string, job checksumJob) error {
 	if err != nil {
 		return fmt.Errorf("create %s: %w", outPath, err)
 	}
-	defer outFile.Close()
+	defer outFile.Close() //nolint:errcheck // error checked via sync below
 
 	for _, name := range files {
 		sum, err := computeFileHash(filepath.Join(dir, name), job.newHash)

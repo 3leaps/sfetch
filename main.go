@@ -1014,41 +1014,42 @@ func run(args []string, stdout, stderr io.Writer) int {
 	install := fs.Bool("install", false, "install to user bin directory (~/.local/bin or %USERPROFILE%\\bin)")
 
 	out := stdout
+	// printFlag outputs a flag's help text; errors ignored as help output is best-effort
 	printFlag := func(name string) {
 		if f := fs.Lookup(name); f != nil {
 			def := f.DefValue
 			if def != "" && def != "false" {
-				fmt.Fprintf(out, "  -%s\t%s (default %q)\n", f.Name, f.Usage, def)
+				_, _ = fmt.Fprintf(out, "  -%s\t%s (default %q)\n", f.Name, f.Usage, def) //nolint:errcheck
 			} else {
-				fmt.Fprintf(out, "  -%s\t%s\n", f.Name, f.Usage)
+				_, _ = fmt.Fprintf(out, "  -%s\t%s\n", f.Name, f.Usage) //nolint:errcheck
 			}
 		}
 	}
 
 	fs.Usage = func() {
-		fmt.Fprintf(out, "Usage: sfetch [flags]\n\n")
+		_, _ = fmt.Fprintf(out, "Usage: sfetch [flags]\n\n") //nolint:errcheck // help output best-effort
 
-		fmt.Fprintln(out, "Selection:")
+		_, _ = fmt.Fprintln(out, "Selection:") //nolint:errcheck
 		for _, name := range []string{"repo", "tag", "latest", "asset-match", "asset-regex", "asset-type", "binary-name", "output", "dest-dir", "install", "cache-dir"} {
 			printFlag(name)
 		}
 
-		fmt.Fprintln(out, "\nVerification:")
+		_, _ = fmt.Fprintln(out, "\nVerification:") //nolint:errcheck
 		for _, name := range []string{"minisign-key", "minisign-key-url", "minisign-key-asset", "pgp-key-file", "pgp-key-url", "pgp-key-asset", "gpg-bin", "key", "prefer-per-asset", "require-minisign", "skip-sig", "skip-checksum", "insecure"} {
 			printFlag(name)
 		}
 
-		fmt.Fprintln(out, "\nProvenance & assessment:")
+		_, _ = fmt.Fprintln(out, "\nProvenance & assessment:") //nolint:errcheck
 		for _, name := range []string{"dry-run", "trust-minimum", "provenance", "provenance-file"} {
 			printFlag(name)
 		}
 
-		fmt.Fprintln(out, "\nTools & validation:")
+		_, _ = fmt.Fprintln(out, "\nTools & validation:") //nolint:errcheck
 		for _, name := range []string{"skip-tools-check", "verify-minisign-pubkey", "self-verify", "show-trust-anchors", "show-update-config", "validate-update-config", "json"} {
 			printFlag(name)
 		}
 
-		fmt.Fprintln(out, "\nMeta:")
+		_, _ = fmt.Fprintln(out, "\nMeta:") //nolint:errcheck
 		for _, name := range []string{"helpextended", "version", "version-extended"} {
 			printFlag(name)
 		}
@@ -1059,7 +1060,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fs.Usage()
 			return 0
 		}
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck // best-effort error output
 		fs.Usage()
 		return 2
 	}
@@ -1072,36 +1073,37 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	// Validate flag combinations
 	if *insecure && *requireMinisign {
-		fmt.Fprintln(stderr, "error: --insecure and --require-minisign are mutually exclusive")
+		_, _ = fmt.Fprintln(stderr, "error: --insecure and --require-minisign are mutually exclusive") //nolint:errcheck
 		return 1
 	}
 
 	if *versionFlag {
-		fmt.Fprintln(stderr, "sfetch", version)
+		_, _ = fmt.Fprintln(stderr, "sfetch", version) //nolint:errcheck // best-effort version output
 		return 0
 	}
 
 	if *versionExtended {
-		fmt.Fprintf(stderr, "sfetch %s\n", version)
-		fmt.Fprintf(stderr, "  build time: %s\n", buildTime)
-		fmt.Fprintf(stderr, "  git commit: %s\n", gitCommit)
-		fmt.Fprintf(stderr, "  go version: %s\n", runtime.Version())
-		fmt.Fprintf(stderr, "  platform:   %s/%s\n", runtime.GOOS, runtime.GOARCH)
+		// Version info is best-effort output; errors ignored
+		_, _ = fmt.Fprintf(stderr, "sfetch %s\n", version)                                //nolint:errcheck
+		_, _ = fmt.Fprintf(stderr, "  build time: %s\n", buildTime)                       //nolint:errcheck
+		_, _ = fmt.Fprintf(stderr, "  git commit: %s\n", gitCommit)                       //nolint:errcheck
+		_, _ = fmt.Fprintf(stderr, "  go version: %s\n", runtime.Version())               //nolint:errcheck
+		_, _ = fmt.Fprintf(stderr, "  platform:   %s/%s\n", runtime.GOOS, runtime.GOARCH) //nolint:errcheck
 		return 0
 	}
 
 	if *extendedHelp {
-		fmt.Fprintln(stderr, strings.TrimSpace(quickstartDoc))
+		_, _ = fmt.Fprintln(stderr, strings.TrimSpace(quickstartDoc)) //nolint:errcheck
 		return 0
 	}
 
 	// Handle --verify-minisign-pubkey: validate and exit
 	if *verifyMinisignPubkey != "" {
 		if err := ValidateMinisignPubkey(*verifyMinisignPubkey); err != nil {
-			fmt.Fprintf(stderr, "INVALID: %s: %v\n", *verifyMinisignPubkey, err)
+			_, _ = fmt.Fprintf(stderr, "INVALID: %s: %v\n", *verifyMinisignPubkey, err) //nolint:errcheck
 			return 1
 		}
-		fmt.Fprintf(stderr, "OK: %s is a valid minisign public key\n", *verifyMinisignPubkey)
+		_, _ = fmt.Fprintf(stderr, "OK: %s is a valid minisign public key\n", *verifyMinisignPubkey) //nolint:errcheck
 		return 0
 	}
 
@@ -1116,9 +1118,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 				},
 			}
 			data, _ := json.MarshalIndent(trustJSON, "", "  ")
-			fmt.Fprintln(stdout, string(data))
+			_, _ = fmt.Fprintln(stdout, string(data)) //nolint:errcheck
 		} else {
-			fmt.Fprintf(stderr, "minisign:%s\n", EmbeddedMinisignPubkey)
+			_, _ = fmt.Fprintf(stderr, "minisign:%s\n", EmbeddedMinisignPubkey) //nolint:errcheck
 		}
 		return 0
 	}
@@ -1126,55 +1128,55 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if *showUpdateConfig || *validateUpdateConfig {
 		cfg, err := loadEmbeddedUpdateTarget()
 		if err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
 
 		if *validateUpdateConfig {
-			fmt.Fprintln(stderr, "OK: embedded update configuration is valid")
+			_, _ = fmt.Fprintln(stderr, "OK: embedded update configuration is valid") //nolint:errcheck
 			return 0
 		}
 
 		data, err := json.MarshalIndent(cfg, "", "  ")
 		if err != nil {
-			fmt.Fprintf(stderr, "error: marshal update config: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "error: marshal update config: %v\n", err) //nolint:errcheck
 			return 1
 		}
-		fmt.Fprintln(stdout, string(data))
+		_, _ = fmt.Fprintln(stdout, string(data)) //nolint:errcheck
 		return 0
 	}
 
 	if *selfUpdate && *install {
-		fmt.Fprintln(stderr, "error: --install cannot be used with --self-update (use --self-update-dir)")
+		_, _ = fmt.Fprintln(stderr, "error: --install cannot be used with --self-update (use --self-update-dir)") //nolint:errcheck
 		return 1
 	}
 
 	if *selfUpdate {
 		ucfg, err := loadEmbeddedUpdateTarget()
 		if err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
 
 		if *repo != "" && *repo != ucfg.Repo.ID {
-			fmt.Fprintf(stderr, "warning: ignoring --repo (%s); self-update targets %s\n", *repo, ucfg.Repo.ID)
+			_, _ = fmt.Fprintf(stderr, "warning: ignoring --repo (%s); self-update targets %s\n", *repo, ucfg.Repo.ID) //nolint:errcheck
 		}
 		*repo = ucfg.Repo.ID
 
 		targetPath, err := computeSelfUpdatePath(*selfUpdateDir)
 		if err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
 		if *destDir != "" || *output != "" {
-			fmt.Fprintln(stderr, "warning: ignoring --dest-dir/--output when --self-update is set")
+			_, _ = fmt.Fprintln(stderr, "warning: ignoring --dest-dir/--output when --self-update is set") //nolint:errcheck
 		}
 		*output = targetPath
 		if !*dryRun && !*selfUpdateYes {
-			fmt.Fprintln(stderr, "--self-update requires --yes to proceed (rerun with --self-update --yes)")
+			_, _ = fmt.Fprintln(stderr, "--self-update requires --yes to proceed (rerun with --self-update --yes)") //nolint:errcheck
 			return 1
 		}
-		fmt.Fprintf(stderr, "Self-update target: %s\n", targetPath)
+		_, _ = fmt.Fprintf(stderr, "Self-update target: %s\n", targetPath) //nolint:errcheck
 	}
 
 	if !*skipToolsCheck {
@@ -1182,12 +1184,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		goarch := runtime.GOARCH
 		goosAliases := aliasList(goos, goosAliasTable)
 		archAliases := aliasList(goarch, archAliasTable)
-		fmt.Fprintf(stderr, "Preflight: GOOS=%s GOARCH=%s goosAliases=%v archAliases=%v\n", goos, goarch, goosAliases, archAliases)
+		_, _ = fmt.Fprintf(stderr, "Preflight: GOOS=%s GOARCH=%s goosAliases=%v archAliases=%v\n", goos, goarch, goosAliases, archAliases) //nolint:errcheck
 
 		tools := []string{"tar"}
 		for _, tool := range tools {
 			if _, err := exec.LookPath(tool); err != nil {
-				fmt.Fprintf(stderr, "missing required tool: %s\n", tool)
+				_, _ = fmt.Fprintf(stderr, "missing required tool: %s\n", tool) //nolint:errcheck
 				return 1
 			}
 		}
@@ -1196,25 +1198,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// Handle --install: set destDir to user bin directory
 	if *install {
 		if *destDir != "" || *output != "" {
-			fmt.Fprintln(stderr, "error: --install is mutually exclusive with --dest-dir and --output")
+			_, _ = fmt.Fprintln(stderr, "error: --install is mutually exclusive with --dest-dir and --output") //nolint:errcheck
 			return 1
 		}
 		path, err := userBinDirPath()
 		if err != nil {
-			fmt.Fprintf(stderr, "error: cannot determine user bin directory: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "error: cannot determine user bin directory: %v\n", err) //nolint:errcheck
 			return 1
 		}
 		*destDir = path
 	}
 
 	if *repo == "" {
-		fmt.Fprintln(stderr, "error: --repo is required")
+		_, _ = fmt.Fprintln(stderr, "error: --repo is required") //nolint:errcheck
 		fs.Usage()
 		return 1
 	}
 
 	if *tag != "" && *latest {
-		fmt.Fprintln(stderr, "error: --tag and --latest are mutually exclusive")
+		_, _ = fmt.Fprintln(stderr, "error: --tag and --latest are mutually exclusive") //nolint:errcheck
 		return 1
 	}
 
@@ -1233,26 +1235,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	resp, err := httpGetWithAuth(url)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: fetching release: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: fetching release: %v\n", err) //nolint:errcheck
 		return 1
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // read-only response, close error non-critical
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		fmt.Fprintf(stderr, "error: API request failed %d: %s\n", resp.StatusCode, string(body))
+		_, _ = fmt.Fprintf(stderr, "error: API request failed %d: %s\n", resp.StatusCode, string(body)) //nolint:errcheck
 		return 1
 	}
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: reading response: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: reading response: %v\n", err) //nolint:errcheck
 		return 1
 	}
 
 	var rel Release
 	if err := json.Unmarshal(respBody, &rel); err != nil {
-		fmt.Fprintf(stderr, "error: parsing JSON: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: parsing JSON: %v\n", err) //nolint:errcheck
 		return 1
 	}
 
@@ -1263,13 +1265,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 		switch decision {
 		case update.DecisionSkip:
-			fmt.Fprintln(stderr, message)
+			_, _ = fmt.Fprintln(stderr, message) //nolint:errcheck
 			return exitCode
 		case update.DecisionRefuse:
-			fmt.Fprintln(stderr, message)
+			_, _ = fmt.Fprintln(stderr, message) //nolint:errcheck
 			return exitCode
 		case update.DecisionProceed, update.DecisionReinstall, update.DecisionDowngrade, update.DecisionDevInstall:
-			fmt.Fprintln(stderr, message)
+			_, _ = fmt.Fprintln(stderr, message) //nolint:errcheck
 			// Continue with update
 		}
 	}
@@ -1291,13 +1293,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	selected, err := selectAsset(&rel, cfg, goos, goarch, *assetMatch, *assetRegex)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 		return 1
 	}
 
 	classification, classifyWarnings, err := classifyAsset(selected.Name, cfg, *assetTypeFlag)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 		return 1
 	}
 
@@ -1338,75 +1340,75 @@ func run(args []string, stdout, stderr io.Writer) int {
 			aflags.dryRun = true // Mark as dry-run in flags
 			record := buildProvenanceRecord(*repo, &rel, assessment, aflags, "")
 			if err := outputProvenance(record, *provenanceFile); err != nil {
-				fmt.Fprintf(stderr, "error: %v\n", err)
+				_, _ = fmt.Fprintf(stderr, "error: %v\n", err) //nolint:errcheck
 				return 1
 			}
 		} else {
 			// --dry-run only: human-readable output to stderr
-			fmt.Fprint(stderr, formatDryRunOutput(*repo, &rel, assessment, selfUpdateInfo))
+			_, _ = fmt.Fprint(stderr, formatDryRunOutput(*repo, &rel, assessment, selfUpdateInfo)) //nolint:errcheck // best-effort output
 		}
 		return 0
 	}
 
 	// Enforce minimum trust if requested.
 	if *trustMinimum < 0 || *trustMinimum > 100 {
-		fmt.Fprintln(stderr, "error: --trust-minimum must be between 0 and 100")
+		_, _ = fmt.Fprintln(stderr, "error: --trust-minimum must be between 0 and 100") //nolint:errcheck
 		return 1
 	}
 	if assessment.Trust.Score < *trustMinimum {
-		fmt.Fprintf(stderr, "error: trust score %d/100 (%s) is below --trust-minimum %d\n", assessment.Trust.Score, assessment.Trust.LevelName, *trustMinimum)
-		fmt.Fprintln(stderr, "trust factors:")
-		fmt.Fprintf(stderr, "  signature:  verifiable=%t validated=%t skipped=%t points=%d\n",
+		_, _ = fmt.Fprintf(stderr, "error: trust score %d/100 (%s) is below --trust-minimum %d\n", assessment.Trust.Score, assessment.Trust.LevelName, *trustMinimum) //nolint:errcheck
+		_, _ = fmt.Fprintln(stderr, "trust factors:")                                                                                                                 //nolint:errcheck
+		_, _ = fmt.Fprintf(stderr, "  signature:  verifiable=%t validated=%t skipped=%t points=%d\n",                                                                 //nolint:errcheck
 			assessment.Trust.Factors.Signature.Verifiable,
 			assessment.Trust.Factors.Signature.Validated,
 			assessment.Trust.Factors.Signature.Skipped,
 			assessment.Trust.Factors.Signature.Points)
-		fmt.Fprintf(stderr, "  checksum:   verifiable=%t validated=%t skipped=%t algo=%s points=%d\n",
+		_, _ = fmt.Fprintf(stderr, "  checksum:   verifiable=%t validated=%t skipped=%t algo=%s points=%d\n", //nolint:errcheck
 			assessment.Trust.Factors.Checksum.Verifiable,
 			assessment.Trust.Factors.Checksum.Validated,
 			assessment.Trust.Factors.Checksum.Skipped,
 			assessment.Trust.Factors.Checksum.Algorithm,
 			assessment.Trust.Factors.Checksum.Points)
-		fmt.Fprintf(stderr, "  transport:  https=%t points=%d\n",
+		_, _ = fmt.Fprintf(stderr, "  transport:  https=%t points=%d\n", //nolint:errcheck
 			assessment.Trust.Factors.Transport.HTTPS,
 			assessment.Trust.Factors.Transport.Points)
-		fmt.Fprintf(stderr, "  algorithm:  name=%s points=%d\n",
+		_, _ = fmt.Fprintf(stderr, "  algorithm:  name=%s points=%d\n", //nolint:errcheck
 			assessment.Trust.Factors.Algorithm.Name,
 			assessment.Trust.Factors.Algorithm.Points)
 		return 1
 	}
 
-	// Print trust and warnings
-	fmt.Fprintf(stderr, "Trust: %d/100 (%s)\n", assessment.Trust.Score, assessment.Trust.LevelName)
+	// Print trust and warnings (best-effort CLI output)
+	_, _ = fmt.Fprintf(stderr, "Trust: %d/100 (%s)\n", assessment.Trust.Score, assessment.Trust.LevelName) //nolint:errcheck
 	for _, w := range assessment.Warnings {
-		fmt.Fprintf(stderr, "warning: %s\n", w)
+		_, _ = fmt.Fprintf(stderr, "warning: %s\n", w) //nolint:errcheck
 	}
 
 	// If no verification artifacts exist, proceed but make the situation explicit.
 	if assessment.Workflow == workflowNone {
-		fmt.Fprintln(stderr, "note: proceeding without verification artifacts provided by the source")
+		_, _ = fmt.Fprintln(stderr, "note: proceeding without verification artifacts provided by the source") //nolint:errcheck
 	}
 
 	tmpDir, err := os.MkdirTemp("", "sfetch-*")
 	if err != nil {
-		fmt.Fprintf(stderr, "error: mkdir temp: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: mkdir temp: %v\n", err) //nolint:errcheck
 		return 1
 	}
-	defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(tmpDir) //nolint:errcheck // best-effort cleanup of temp dir
 
 	assetPath := filepath.Join(tmpDir, selected.Name)
 	if err := download(selected.BrowserDownloadUrl, assetPath); err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 		return 1
 	}
 
 	// Handle --require-minisign validation
 	if *requireMinisign && !assessment.SignatureAvailable {
-		fmt.Fprintln(stderr, "error: --require-minisign specified but no .minisig signature found in release")
+		_, _ = fmt.Fprintln(stderr, "error: --require-minisign specified but no .minisig signature found in release") //nolint:errcheck
 		return 1
 	}
 	if *requireMinisign && assessment.SignatureFormat != sigFormatMinisign {
-		fmt.Fprintf(stderr, "error: --require-minisign specified but signature %s is %s format, not minisign\n",
+		_, _ = fmt.Fprintf(stderr, "error: --require-minisign specified but signature %s is %s format, not minisign\n", //nolint:errcheck
 			assessment.SignatureFile, assessment.SignatureFormat)
 		return 1
 	}
@@ -1420,26 +1422,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch assessment.Workflow {
 	case workflowNone:
 		// No verification artifacts - just download and proceed.
-		fmt.Fprintln(stderr, "Note: no verification artifacts provided by the source")
+		_, _ = fmt.Fprintln(stderr, "Note: no verification artifacts provided by the source") //nolint:errcheck
 
 	case workflowInsecure:
 		// Verification bypass - just download and proceed.
-		fmt.Fprintln(stderr, "WARNING: verification bypass enabled (--insecure)")
+		_, _ = fmt.Fprintln(stderr, "WARNING: verification bypass enabled (--insecure)") //nolint:errcheck
 
 	case workflowA:
 		// Workflow A: Verify signature over checksum file, then verify hash
-		fmt.Fprintf(stderr, "Detected checksum-level signature: %s\n", assessment.SignatureFile)
+		_, _ = fmt.Fprintf(stderr, "Detected checksum-level signature: %s\n", assessment.SignatureFile) //nolint:errcheck
 
 		// Find and download the checksum file
 		checksumAsset := findAssetByName(rel.Assets, assessment.ChecksumFileForSig)
 		if checksumAsset == nil {
-			fmt.Fprintf(stderr, "error: checksum file %s not found\n", assessment.ChecksumFileForSig)
+			_, _ = fmt.Fprintf(stderr, "error: checksum file %s not found\n", assessment.ChecksumFileForSig) //nolint:errcheck
 			return 1
 		}
 
 		checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
 		if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
 
@@ -1447,7 +1449,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		sigAsset = findAssetByName(rel.Assets, assessment.SignatureFile)
 		sigPath = filepath.Join(tmpDir, sigAsset.Name)
 		if err := download(sigAsset.BrowserDownloadUrl, sigPath); err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
 
@@ -1455,7 +1457,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// #nosec G304 -- checksumPath tmp controlled
 		checksumBytes, err = os.ReadFile(checksumPath)
 		if err != nil {
-			fmt.Fprintf(stderr, "read checksum: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "read checksum: %v\n", err) //nolint:errcheck
 			return 1
 		}
 
@@ -1465,29 +1467,29 @@ func run(args []string, stdout, stderr io.Writer) int {
 			case sigFormatMinisign:
 				minisignKeyPath, err := resolveMinisignKey(*minisignPubKey, *minisignKeyURL, *minisignKeyAsset, rel.Assets, tmpDir)
 				if err != nil {
-					fmt.Fprintln(stderr, err)
+					_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 					return 1
 				}
 				if err := verifyMinisignSignature(checksumBytes, sigPath, minisignKeyPath); err != nil {
-					fmt.Fprintln(stderr, err)
+					_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 					return 1
 				}
-				fmt.Fprintln(stderr, "Minisign checksum signature verified OK")
+				_, _ = fmt.Fprintln(stderr, "Minisign checksum signature verified OK") //nolint:errcheck
 
 			case sigFormatPGP:
 				pgpKeyPath, err := resolvePGPKey(*pgpKeyFile, *pgpKeyURL, *pgpKeyAsset, rel.Assets, tmpDir)
 				if err != nil {
-					fmt.Fprintln(stderr, err)
+					_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 					return 1
 				}
 				if err := verifyPGPSignature(checksumPath, sigPath, pgpKeyPath, *gpgBin); err != nil {
-					fmt.Fprintln(stderr, err)
+					_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 					return 1
 				}
-				fmt.Fprintln(stderr, "PGP checksum signature verified OK")
+				_, _ = fmt.Fprintln(stderr, "PGP checksum signature verified OK") //nolint:errcheck
 
 			default:
-				fmt.Fprintf(stderr, "error: unknown signature format for %s\n", assessment.SignatureFile)
+				_, _ = fmt.Fprintf(stderr, "error: unknown signature format for %s\n", assessment.SignatureFile) //nolint:errcheck
 				return 1
 			}
 		}
@@ -1496,13 +1498,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// Workflow B: Per-asset signature
 		sigAsset = findAssetByName(rel.Assets, assessment.SignatureFile)
 		if sigAsset == nil {
-			fmt.Fprintf(stderr, "error: signature file %s not found\n", assessment.SignatureFile)
+			_, _ = fmt.Fprintf(stderr, "error: signature file %s not found\n", assessment.SignatureFile) //nolint:errcheck
 			return 1
 		}
 
 		sigPath = filepath.Join(tmpDir, sigAsset.Name)
 		if err := download(sigAsset.BrowserDownloadUrl, sigPath); err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
 
@@ -1512,13 +1514,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 			if checksumAsset != nil {
 				checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
 				if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
-					fmt.Fprintln(stderr, err)
+					_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 					return 1
 				}
 				// #nosec G304 -- checksumPath tmp controlled
 				checksumBytes, err = os.ReadFile(checksumPath)
 				if err != nil {
-					fmt.Fprintf(stderr, "read checksum: %v\n", err)
+					_, _ = fmt.Fprintf(stderr, "read checksum: %v\n", err) //nolint:errcheck
 					return 1
 				}
 			}
@@ -1526,24 +1528,24 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	case workflowC:
 		// Workflow C: Checksum-only (no signature)
-		fmt.Fprintf(stderr, "Using checksum-only verification (no signature available)\n")
+		_, _ = fmt.Fprintf(stderr, "Using checksum-only verification (no signature available)\n") //nolint:errcheck
 
 		checksumAsset := findAssetByName(rel.Assets, assessment.ChecksumFile)
 		if checksumAsset == nil {
-			fmt.Fprintf(stderr, "error: checksum file %s not found\n", assessment.ChecksumFile)
+			_, _ = fmt.Fprintf(stderr, "error: checksum file %s not found\n", assessment.ChecksumFile) //nolint:errcheck
 			return 1
 		}
 
 		checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
 		if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
 
 		// #nosec G304 -- checksumPath tmp controlled
 		checksumBytes, err = os.ReadFile(checksumPath)
 		if err != nil {
-			fmt.Fprintf(stderr, "read checksum: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "read checksum: %v\n", err) //nolint:errcheck
 			return 1
 		}
 	}
@@ -1551,7 +1553,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// #nosec G304 -- assetPath tmp controlled
 	assetBytes, err := os.ReadFile(assetPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "read asset: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "read asset: %v\n", err) //nolint:errcheck
 		return 1
 	}
 
@@ -1567,7 +1569,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "sha512":
 		h = sha512.New()
 	default:
-		fmt.Fprintf(stderr, "unknown hash algo %q\n", hashAlgo)
+		_, _ = fmt.Fprintf(stderr, "unknown hash algo %q\n", hashAlgo) //nolint:errcheck
 		return 1
 	}
 	h.Write(assetBytes)
@@ -1577,14 +1579,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if checksumBytes != nil {
 		expectedHash, err := extractChecksum(checksumBytes, hashAlgo, selected.Name)
 		if err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
 		if actualHash != strings.ToLower(expectedHash) {
-			fmt.Fprintf(stderr, "checksum mismatch: expected %s, got %s\n", expectedHash, actualHash)
+			_, _ = fmt.Fprintf(stderr, "checksum mismatch: expected %s, got %s\n", expectedHash, actualHash) //nolint:errcheck
 			return 1
 		}
-		fmt.Fprintln(stderr, "Checksum verified OK")
+		_, _ = fmt.Fprintln(stderr, "Checksum verified OK") //nolint:errcheck
 	}
 
 	cd := *cacheDir
@@ -1598,30 +1600,30 @@ func run(args []string, stdout, stderr io.Writer) int {
 	cacheAssetDir := filepath.Join(cd, actualHash)
 	if err := // #nosec G301 -- cacheAssetDir XDG_CACHE_HOME/hash controlled
 		os.MkdirAll(cacheAssetDir, 0o755); err != nil {
-		fmt.Fprintf(stderr, "mkdir cache %s: %v\n", cacheAssetDir, err)
+		_, _ = fmt.Fprintf(stderr, "mkdir cache %s: %v\n", cacheAssetDir, err) //nolint:errcheck
 		return 1
 	}
 	cacheAssetPath := filepath.Join(cacheAssetDir, selected.Name)
 	if err := os.Rename(assetPath, cacheAssetPath); err != nil {
 		if errors.Is(err, syscall.EXDEV) {
 			if errCopy := copyFile(assetPath, cacheAssetPath); errCopy != nil {
-				fmt.Fprintf(stderr, "cache asset: %v\n", errCopy)
+				_, _ = fmt.Fprintf(stderr, "cache asset: %v\n", errCopy) //nolint:errcheck
 				return 1
 			}
 			_ = os.Remove(assetPath)
 		} else {
-			fmt.Fprintf(stderr, "cache asset: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "cache asset: %v\n", err) //nolint:errcheck
 			return 1
 		}
 	}
 	assetPath = cacheAssetPath
-	fmt.Fprintf(stderr, "Cached to %s\n", cacheAssetPath)
+	_, _ = fmt.Fprintf(stderr, "Cached to %s\n", cacheAssetPath) //nolint:errcheck
 
 	// Workflow B: Verify per-asset signature
 	if assessment.Workflow == workflowB && !*skipSig {
 		sigData, err := loadSignature(sigPath)
 		if err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
 
@@ -1629,51 +1631,51 @@ func run(args []string, stdout, stderr io.Writer) int {
 		case sigFormatPGP:
 			pgpKeyPath, err := resolvePGPKey(*pgpKeyFile, *pgpKeyURL, *pgpKeyAsset, rel.Assets, tmpDir)
 			if err != nil {
-				fmt.Fprintln(stderr, err)
+				_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 				return 1
 			}
 			if err := verifyPGPSignature(assetPath, sigPath, pgpKeyPath, *gpgBin); err != nil {
-				fmt.Fprintln(stderr, err)
+				_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 				return 1
 			}
-			fmt.Fprintln(stderr, "PGP signature verified OK")
+			_, _ = fmt.Fprintln(stderr, "PGP signature verified OK") //nolint:errcheck
 
 		case sigFormatMinisign:
 			minisignKeyPath, err := resolveMinisignKey(*minisignPubKey, *minisignKeyURL, *minisignKeyAsset, rel.Assets, tmpDir)
 			if err != nil {
-				fmt.Fprintln(stderr, err)
+				_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 				return 1
 			}
 			if err := verifyMinisignSignature(assetBytes, sigPath, minisignKeyPath); err != nil {
-				fmt.Fprintln(stderr, err)
+				_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 				return 1
 			}
-			fmt.Fprintln(stderr, "Minisign signature verified OK")
+			_, _ = fmt.Fprintln(stderr, "Minisign signature verified OK") //nolint:errcheck
 
 		case sigFormatBinary:
 			normalizedKey, err := normalizeHexKey(*key)
 			if err != nil {
-				fmt.Fprintln(stderr, err)
+				_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 				return 1
 			}
 			pubKeyBytes, err := hex.DecodeString(normalizedKey)
 			if err != nil {
-				fmt.Fprintln(stderr, "invalid ed25519 key provided")
+				_, _ = fmt.Fprintln(stderr, "invalid ed25519 key provided") //nolint:errcheck
 				return 1
 			}
 			if len(pubKeyBytes) != ed25519.PublicKeySize {
-				fmt.Fprintf(stderr, "invalid pubkey size: %d\n", len(pubKeyBytes))
+				_, _ = fmt.Fprintf(stderr, "invalid pubkey size: %d\n", len(pubKeyBytes)) //nolint:errcheck
 				return 1
 			}
 			pub := ed25519.PublicKey(pubKeyBytes)
 			if !ed25519.Verify(pub, assetBytes, sigData.bytes) {
-				fmt.Fprintln(stderr, "signature verification failed")
+				_, _ = fmt.Fprintln(stderr, "signature verification failed") //nolint:errcheck
 				return 1
 			}
-			fmt.Fprintln(stderr, "Signature verified OK")
+			_, _ = fmt.Fprintln(stderr, "Signature verified OK") //nolint:errcheck
 
 		default:
-			fmt.Fprintln(stderr, "error: unsupported signature format")
+			_, _ = fmt.Fprintln(stderr, "error: unsupported signature format") //nolint:errcheck
 			return 1
 		}
 	}
@@ -1687,35 +1689,35 @@ func run(args []string, stdout, stderr io.Writer) int {
 		extractDir := filepath.Join(tmpDir, "extract")
 		if err := // #nosec G301 -- extractDir tmpdir controlled
 			os.Mkdir(extractDir, 0o755); err != nil {
-			fmt.Fprintf(stderr, "mkdir extract: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "mkdir extract: %v\n", err) //nolint:errcheck
 			return 1
 		}
 
 		switch classification.ArchiveFormat {
 		case ArchiveFormatZip:
 			if err := extractZip(assetPath, extractDir); err != nil {
-				fmt.Fprintf(stderr, "extract zip: %v\n", err)
+				_, _ = fmt.Fprintf(stderr, "extract zip: %v\n", err) //nolint:errcheck
 				return 1
 			}
 		case ArchiveFormatTarXz:
 			// #nosec G204 -- assetPath tmp controlled
 			cmd := exec.Command("tar", "xJf", assetPath, "-C", extractDir)
 			if err := cmd.Run(); err != nil {
-				fmt.Fprintf(stderr, "extract archive: %v\n", err)
+				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
 				return 1
 			}
 		case ArchiveFormatTarBz2:
 			// #nosec G204 -- assetPath tmp controlled
 			cmd := exec.Command("tar", "xjf", assetPath, "-C", extractDir)
 			if err := cmd.Run(); err != nil {
-				fmt.Fprintf(stderr, "extract archive: %v\n", err)
+				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
 				return 1
 			}
 		case ArchiveFormatTar:
 			// #nosec G204 -- assetPath tmp controlled
 			cmd := exec.Command("tar", "xf", assetPath, "-C", extractDir)
 			if err := cmd.Run(); err != nil {
-				fmt.Fprintf(stderr, "extract archive: %v\n", err)
+				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
 				return 1
 			}
 		case ArchiveFormatTarGz:
@@ -1724,20 +1726,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 			// #nosec G204 -- assetPath tmp controlled
 			cmd := exec.Command("tar", "xzf", assetPath, "-C", extractDir)
 			if err := cmd.Run(); err != nil {
-				fmt.Fprintf(stderr, "extract archive: %v\n", err)
+				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
 				return 1
 			}
 		}
 
 		binaryPath = filepath.Join(extractDir, binaryName)
 		if _, err := os.Stat(binaryPath); err != nil {
-			fmt.Fprintf(stderr, "binary %s not found in archive\n", binaryName)
+			_, _ = fmt.Fprintf(stderr, "binary %s not found in archive\n", binaryName) //nolint:errcheck
 			return 1
 		}
 
 		if err := // #nosec G302 -- binaryPath extracted tmp chmod +x safe
 			os.Chmod(binaryPath, 0o755); err != nil {
-			fmt.Fprintf(stderr, "chmod: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "chmod: %v\n", err) //nolint:errcheck
 			return 1
 		}
 
@@ -1753,7 +1755,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if binaryPath == "" {
-		fmt.Fprintln(stderr, "error: could not resolve binary path")
+		_, _ = fmt.Fprintln(stderr, "error: could not resolve binary path") //nolint:errcheck
 		return 1
 	}
 
@@ -1764,49 +1766,49 @@ func run(args []string, stdout, stderr io.Writer) int {
 		finalPath = filepath.Join(*destDir, installName)
 	} else {
 		// No destination specified - install to current directory with warning
-		fmt.Fprintf(stderr, "warning: no --dest-dir or --output specified, installing to current directory\n")
-		fmt.Fprintf(stderr, "  hint: use --install to install to %s\n", userBinDirDisplay())
+		_, _ = fmt.Fprintf(stderr, "warning: no --dest-dir or --output specified, installing to current directory\n") //nolint:errcheck
+		_, _ = fmt.Fprintf(stderr, "  hint: use --install to install to %s\n", userBinDirDisplay())                   //nolint:errcheck
 		finalPath = installName
 	}
 
 	if runtime.GOOS == "linux" {
 		dest := filepath.Dir(finalPath)
 		if dest != "." && dest != "" && hostenv.IsNoExecMount(dest) {
-			fmt.Fprintf(stderr, "warning: destination %s appears to be mounted noexec; installed binaries may fail to run\n", dest)
-			fmt.Fprintln(stderr, "  hint: choose a different --dest-dir/--output location; noexec cannot be fixed with chmod")
+			_, _ = fmt.Fprintf(stderr, "warning: destination %s appears to be mounted noexec; installed binaries may fail to run\n", dest) //nolint:errcheck
+			_, _ = fmt.Fprintln(stderr, "  hint: choose a different --dest-dir/--output location; noexec cannot be fixed with chmod")      //nolint:errcheck
 		}
 	}
 
 	if err := // #nosec G301 -- Dir(finalPath) user-controlled safe mkdir tmp
 		os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
-		fmt.Fprintf(stderr, "mkdir %s: %v\n", filepath.Dir(finalPath), err)
+		_, _ = fmt.Fprintf(stderr, "mkdir %s: %v\n", filepath.Dir(finalPath), err) //nolint:errcheck
 		return 1
 	}
 
 	installedPath, err := installFile(binaryPath, finalPath, classification, *selfUpdate)
 	if err != nil {
-		fmt.Fprintf(stderr, "install to %s: %v\n", finalPath, err)
+		_, _ = fmt.Fprintf(stderr, "install to %s: %v\n", finalPath, err) //nolint:errcheck
 		return 1
 	}
 
 	// Windows self-update: target may be locked, write to .new file.
 	if *selfUpdate && runtime.GOOS == "windows" && installedPath != finalPath {
-		fmt.Fprintf(stderr, "target appears locked; new binary written to %s. Close running sfetch and replace manually.\n", installedPath)
-		fmt.Fprintf(stderr, "Release: %s\n", rel.TagName)
-		fmt.Fprintf(stderr, "Installed %s to %s\n", installName, installedPath)
+		_, _ = fmt.Fprintf(stderr, "target appears locked; new binary written to %s. Close running sfetch and replace manually.\n", installedPath) //nolint:errcheck
+		_, _ = fmt.Fprintf(stderr, "Release: %s\n", rel.TagName)                                                                                   //nolint:errcheck
+		_, _ = fmt.Fprintf(stderr, "Installed %s to %s\n", installName, installedPath)                                                             //nolint:errcheck
 		return 0
 	}
 
 	finalPath = installedPath
 
-	fmt.Fprintf(stderr, "Release: %s\n", rel.TagName)
-	fmt.Fprintf(stderr, "Installed %s to %s\n", installName, finalPath)
+	_, _ = fmt.Fprintf(stderr, "Release: %s\n", rel.TagName)                   //nolint:errcheck
+	_, _ = fmt.Fprintf(stderr, "Installed %s to %s\n", installName, finalPath) //nolint:errcheck
 
 	// Output provenance record if requested
 	if *provenance || *provenanceFile != "" {
 		record := buildProvenanceRecord(*repo, &rel, assessment, aflags, actualHash)
 		if err := outputProvenance(record, *provenanceFile); err != nil {
-			fmt.Fprintf(stderr, "warning: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "warning: %v\n", err) //nolint:errcheck
 		}
 	}
 
@@ -1969,7 +1971,7 @@ func extractZip(zipPath, extractDir string) error {
 	if err != nil {
 		return fmt.Errorf("open zip %s: %w", zipPath, err)
 	}
-	defer r.Close()
+	defer r.Close() //nolint:errcheck // read-only zip, close error non-critical
 
 	extractDirClean := filepath.Clean(extractDir)
 	prefix := extractDirClean + string(os.PathSeparator)
@@ -2123,7 +2125,7 @@ func download(url, path string) error {
 	if err != nil {
 		return fmt.Errorf("fetch %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // read-only response, close error non-critical
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -2135,7 +2137,7 @@ func download(url, path string) error {
 	if err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // error checked via write below
 
 	if _, err := io.Copy(f, resp.Body); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
@@ -2617,7 +2619,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("open %s: %w", src, err)
 	}
-	defer in.Close()
+	defer in.Close() //nolint:errcheck // read-only file, close error non-critical
 
 	srcInfo, err := in.Stat()
 	if err != nil {
@@ -2786,7 +2788,7 @@ func downloadKeyFromURL(src string, tmpDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("fetch key %s: %w", src, err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // read-only response, close error non-critical
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("status %d from %s: %s", resp.StatusCode, src, strings.TrimSpace(string(body)))
@@ -2795,7 +2797,7 @@ func downloadKeyFromURL(src string, tmpDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create temp key: %w", err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // error checked via write below
 	if _, err := io.Copy(f, resp.Body); err != nil {
 		return "", fmt.Errorf("write key: %w", err)
 	}
@@ -2914,7 +2916,7 @@ func downloadMinisignKeyFromURL(src string, tmpDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("fetch minisign key %s: %w", src, err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // read-only response, close error non-critical
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("status %d from %s: %s", resp.StatusCode, src, strings.TrimSpace(string(body)))
@@ -2923,7 +2925,7 @@ func downloadMinisignKeyFromURL(src string, tmpDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create temp key: %w", err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // error checked via write below
 	if _, err := io.Copy(f, resp.Body); err != nil {
 		return "", fmt.Errorf("write key: %w", err)
 	}
@@ -3000,7 +3002,7 @@ func fetchExpectedHash(ver, assetName string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("network unavailable: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // read-only response, close error non-critical
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP %d fetching SHA256SUMS", resp.StatusCode)
@@ -3093,13 +3095,14 @@ func printSelfVerify(jsonOutput bool) {
 	// Checksum verification commands
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Verify checksum externally:")
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		fmt.Fprintln(os.Stderr, "  # macOS")
 		fmt.Fprintln(os.Stderr, "  shasum -a 256 $(which sfetch)")
-	} else if runtime.GOOS == "windows" {
+	case "windows":
 		fmt.Fprintln(os.Stderr, "  # Windows (PowerShell)")
 		fmt.Fprintln(os.Stderr, "  Get-FileHash (Get-Command sfetch).Source -Algorithm SHA256")
-	} else {
+	default:
 		fmt.Fprintln(os.Stderr, "  # Linux")
 		fmt.Fprintln(os.Stderr, "  sha256sum $(which sfetch)")
 	}

@@ -55,15 +55,15 @@ func TestIntegrationPGPSignature(t *testing.T) {
 				t.Fatalf("encode release: %v", err)
 			}
 		case "/assets/amd64":
-			w.Write(assetBytes) // fake same bytes
+			_, _ = w.Write(assetBytes) // fake same bytes; error handled by http.ResponseWriter
 		case "/assets/bin":
-			w.Write(assetBytes)
+			_, _ = w.Write(assetBytes) //nolint:errcheck // test handler, error handled by http.ResponseWriter
 		case "/assets/sha":
-			w.Write(shaBytes)
+			_, _ = w.Write(shaBytes) //nolint:errcheck // test handler, error handled by http.ResponseWriter
 		case "/assets/sig":
-			w.Write(sigBytes)
+			_, _ = w.Write(sigBytes) //nolint:errcheck // test handler, error handled by http.ResponseWriter
 		case "/assets/sig-amd64":
-			w.Write(sigBytes)
+			_, _ = w.Write(sigBytes) //nolint:errcheck // test handler, error handled by http.ResponseWriter
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

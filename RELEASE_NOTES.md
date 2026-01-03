@@ -1,4 +1,39 @@
 
+## v0.3.2
+
+### Summary
+stdout/stderr convention fix and comprehensive test coverage improvements.
+
+### Highlights
+
+**stdout/stderr convention**
+- All human-readable output now goes to stderr; stdout reserved for JSON only.
+- Enables clean piping: `sfetch --dry-run --json 2>/dev/null | jq .trust`
+- Affected flags: `--version`, `--version-extended`, `--self-verify`, `--show-trust-anchors`, `--dry-run`, `--helpextended`
+
+**Test coverage expansion**
+- Main package coverage: 39% → 54%
+- 5 test passes covering: pure functions, internal/verify, CLI validation, asset selection, trust score calculation
+
+**shellsentry integration**
+- Added shellsentry to corpus with minisign verification fixtures
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+Or self-update:
+```bash
+sfetch --self-update --yes
+```
+
+### Details
+- See `CHANGELOG.md` for the complete list.
+
+---
+
 ## v0.3.1
 
 ### Summary
@@ -41,17 +76,6 @@ Introduce a numeric trust rating system (0–100) with transparent factor breakd
 **Exit codes**
 - Exit code `0` indicates the requested fetch/install completed (even if the user chose to bypass verification).
 - Non-zero indicates the operation was blocked (e.g., `--trust-minimum`) or failed (download/verification errors).
-
----
-
-## v0.2.9
-
-### Summary
-Fix asset selection for tools with "sig" in their name (e.g., `minisign`, `cosign`) and document install permission behavior.
-
-### Highlights
-- Fixed false positives in supplemental file detection for tool names containing "sig".
-- Documented permission behavior for archives, raw scripts/binaries, and cross-device installs.
 
 ---
 
