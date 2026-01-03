@@ -75,7 +75,7 @@ If no pattern matches, sfetch assigns a score to every asset:
 - +4 when the filename contains any GOOS alias (e.g., `macos`, `osx` for `darwin`).
 - +4 when it contains any GOARCH alias (e.g., `x86_64` for `amd64`).
 - +3 when it contains the binary name.
-- +2 when it uses a known extension. 
+- +2 when it uses a known extension.
 
 The asset with the highest score wins, unless there is a tie (which results in an error). This allows Python wheels, installers, or other packaging formats, as long as they include platform cues.
 

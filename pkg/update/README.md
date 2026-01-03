@@ -47,4 +47,3 @@ for “success/skip” and `1` for “refuse”.
 - Asset selection (GOOS/GOARCH matching, archives vs raw, etc.)
 - Verification workflows (minisign/PGP/ed25519; checksum parsing)
 - Installation (atomic replace, Windows lock fallback, permissions)
-

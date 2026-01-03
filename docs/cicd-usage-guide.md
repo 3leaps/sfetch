@@ -39,14 +39,14 @@ This is fragile and version-dependent—upgrading is recommended.
     set -euo pipefail
     BIN_DIR="$HOME/.local/bin"
     mkdir -p "$BIN_DIR"
-    
+
     # Install sfetch
     curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash -s -- --yes --dir "$BIN_DIR"
     export PATH="$BIN_DIR:$PATH"
-    
+
     # Install your tool (sfetch handles cross-device automatically)
     sfetch --repo owner/repo --latest --dest-dir "$BIN_DIR" --require-minisign
-    
+
     # Verify
     tool --version
 ```
@@ -60,11 +60,11 @@ This is fragile and version-dependent—upgrading is recommended.
     BIN_DIR="$HOME/.local/bin"
     mkdir -p "$BIN_DIR"
     export PATH="$BIN_DIR:$PATH"
-    
+
     # Install sfetch (pinned; choose the minimum version you require)
     SFETCH_VERSION="v0.2.6"
     curl -sSfL "https://github.com/3leaps/sfetch/releases/download/${SFETCH_VERSION}/install-sfetch.sh" | bash -s -- --yes --dir "$BIN_DIR"
-    
+
     # Install tool (pinned)
     sfetch --repo owner/repo --tag v1.2.3 --dest-dir "$BIN_DIR" --require-minisign
 ```
