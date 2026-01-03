@@ -6,9 +6,6 @@ BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 NAME ?= sfetch
 MAIN ?= .
-YAMLLINT ?= yamllint
-JQ ?= jq
-ACTIONLINT ?= actionlint
 
 # LDFLAGS for version injection
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME) -X main.gitCommit=$(GIT_COMMIT)
@@ -38,163 +35,249 @@ SFETCH_PGP_KEY_ID ?=
 SFETCH_GPG_HOMEDIR ?=
 MINISIGN_PUB_NAME ?= sfetch-minisign.pub
 
-.PHONY: all build test clean release-clean install release fmt fmt-check shell-check lint tools prereqs prereqs-advise bootstrap quality gosec gosec-high yamllint-workflows precommit build-all release-download release-checksums release-verify-checksums release-sign release-notes release-upload verify-release-key release-export-minisign-key bootstrap-script version-check version-set version-patch version-minor version-major corpus corpus-all corpus-dryrun corpus-validate
+# Tool installation directory (repo-local)
+BIN_DIR := $(CURDIR)/bin
+
+# Pinned tool versions (minimums; existing installs are respected)
+SFETCH_VERSION := v0.3.1
+GONEAT_VERSION := v0.4.0
+
+# Tool paths (prefer repo-local, fall back to PATH)
+SFETCH = $(shell [ -x "$(BIN_DIR)/sfetch" ] && echo "$(BIN_DIR)/sfetch" || command -v sfetch 2>/dev/null)
+GONEAT = $(shell [ -x "$(BIN_DIR)/goneat" ] && echo "$(BIN_DIR)/goneat" || command -v goneat 2>/dev/null)
 
 CORPUS_DEST ?= test-corpus
 
+.PHONY: all help build test clean install fmt lint assess tools bootstrap bootstrap-force
+.PHONY: precommit prepush version corpus corpus-all corpus-dryrun corpus-validate
+.PHONY: release release-download release-checksums release-verify-checksums release-sign
+.PHONY: release-notes release-upload verify-release-key release-export-minisign-key
+.PHONY: release-clean bootstrap-script build-all gosec gosec-high
+.PHONY: version-check version-set version-patch version-minor version-major
+
 all: build
 
-tools:
-	go install honnef.co/go/tools/cmd/staticcheck@latest
-	go install github.com/securego/gosec/v2/cmd/gosec@latest
-	go install github.com/rhysd/actionlint/cmd/actionlint@latest
+help: ## Show this help
+	@echo "sfetch - secure, verifying binary fetcher for GitHub releases"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Current version: $(VERSION)"
 
-prereqs: tools
-	@echo "Checking prerequisites..."
-	@command -v $(YAMLLINT) >/dev/null 2>&1 || { echo "yamllint not found: brew install yamllint / apt install yamllint / pipx install yamllint" >&2; exit 1; }
-	@command -v shfmt >/dev/null 2>&1 || { echo "shfmt not found: brew install shfmt / go install mvdan.cc/sh/v3/cmd/shfmt@latest" >&2; exit 1; }
-	@command -v shellcheck >/dev/null 2>&1 || echo "shellcheck not found (optional): brew install shellcheck / apt install shellcheck"
-	@command -v $(JQ) >/dev/null 2>&1 || echo "$(JQ) not found (optional): brew install jq / apt install jq"
-	@command -v $(ACTIONLINT) >/dev/null 2>&1 || echo "$(ACTIONLINT) not found (optional): go install github.com/rhysd/actionlint/cmd/actionlint@latest"
-	@echo "All prerequisites available"
+# -----------------------------------------------------------------------------
+# Bootstrap - Trust Anchor Chain
+# -----------------------------------------------------------------------------
+#
+# Trust chain: curl -> sfetch (self-bootstrap) -> goneat
+#
+# sfetch bootstraps itself via curl, then uses itself to install goneat.
+# This demonstrates sfetch eating its own dogfood.
 
-prereqs-advise:
-	@echo "Checking prerequisites (advisory; will not fail)..."
-	@command -v $(YAMLLINT) >/dev/null 2>&1 || echo "yamllint not found: brew install yamllint / apt install yamllint / pipx install yamllint" >&2
-	@command -v shfmt >/dev/null 2>&1 || echo "shfmt not found: brew install shfmt / go install mvdan.cc/sh/v3/cmd/shfmt@latest" >&2
-	@command -v shellcheck >/dev/null 2>&1 || echo "shellcheck not found (optional): brew install shellcheck / apt install shellcheck" >&2
-	@command -v $(JQ) >/dev/null 2>&1 || echo "$(JQ) not found (optional): brew install jq / apt install jq" >&2
-	@command -v $(ACTIONLINT) >/dev/null 2>&1 || echo "$(ACTIONLINT) not found (optional): go install github.com/rhysd/actionlint/cmd/actionlint@latest" >&2
-	@echo "Bootstrap checks complete"
-
-bootstrap: tools prereqs-advise
-
-fmt:
-	go fmt ./...
-	@if command -v shfmt >/dev/null 2>&1; then \
-		shfmt -w -i 4 -ci scripts/*.sh; \
-	fi
-
-fmt-check:
-	@files=$$(git ls-files '*.go'); \
-	if [ -n "$$files" ]; then \
-		missing=$$(git ls-files -z '*.go' | xargs -0 gofmt -l); \
-		if [ -n "$$missing" ]; then \
-			echo "gofmt required for:"; \
-			echo "$$missing"; \
-			exit 1; \
-		fi; \
-	fi
-
-shell-check:
-	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found: brew install shellcheck" >&2; exit 1; }
-	@command -v shfmt >/dev/null 2>&1 || { echo "shfmt not found: brew install shfmt" >&2; exit 1; }
-	shellcheck scripts/*.sh
-	@if ! shfmt -d -i 4 -ci scripts/*.sh >/dev/null 2>&1; then \
-		echo "shfmt formatting required for scripts/*.sh - run 'make fmt'"; \
-		shfmt -d -i 4 -ci scripts/*.sh; \
+bootstrap: ## Install development tools via trust chain
+	@echo "Bootstrapping sfetch development environment..."
+	@echo ""
+	@# Step 0: Verify curl is available (required trust anchor)
+	@if ! command -v curl >/dev/null 2>&1; then \
+		echo "[!!] curl not found (required for bootstrap)"; \
+		echo ""; \
+		echo "Install curl for your platform:"; \
+		echo "  macOS:  brew install curl"; \
+		echo "  Ubuntu: sudo apt install curl"; \
+		echo "  Fedora: sudo dnf install curl"; \
 		exit 1; \
 	fi
-
-lint: tools
-	go vet ./...
-	go vet ./scripts
-	staticcheck ./...
-	staticcheck ./scripts
-	go run github.com/santhosh-tekuri/jsonschema/cmd/jv@latest testdata/corpus.schema.json testdata/corpus.json
-	@$(MAKE) lint-workflows
-
-test:
-	go test -v -race ./...
-
-gosec: tools
-	gosec ./...
-
-gosec-high: tools
-	gosec -confidence high -exclude G301,G302,G107,G304 ./...
-
-yamllint-workflows:
-	@if command -v $(YAMLLINT) >/dev/null 2>&1; then \
-		$(YAMLLINT) .github/workflows; \
+	@echo "[ok] curl found"
+	@echo ""
+	@# Step 1: Install sfetch via curl (self-bootstrap trust anchor)
+	@mkdir -p "$(BIN_DIR)"
+	@if [ ! -x "$(BIN_DIR)/sfetch" ] && ! command -v sfetch >/dev/null 2>&1; then \
+		echo "[..] Installing sfetch $(SFETCH_VERSION) (self-bootstrap)..."; \
+		curl -fsSL https://github.com/3leaps/sfetch/releases/download/$(SFETCH_VERSION)/install-sfetch.sh | bash -s -- --dest "$(BIN_DIR)"; \
 	else \
-		echo "$(YAMLLINT) not found (optional): run 'make prereqs' for install guidance" >&2; \
+		echo "[ok] sfetch already installed"; \
+	fi
+	@# Verify sfetch
+	@SFETCH_BIN=""; \
+	if [ -x "$(BIN_DIR)/sfetch" ]; then SFETCH_BIN="$(BIN_DIR)/sfetch"; \
+	elif command -v sfetch >/dev/null 2>&1; then SFETCH_BIN="$$(command -v sfetch)"; fi; \
+	if [ -z "$$SFETCH_BIN" ]; then echo "[!!] sfetch installation failed"; exit 1; fi; \
+	echo "[ok] sfetch: $$SFETCH_BIN"
+	@echo ""
+	@# Step 2: Install goneat via sfetch (dogfooding!)
+	@SFETCH_BIN=""; \
+	if [ -x "$(BIN_DIR)/sfetch" ]; then SFETCH_BIN="$(BIN_DIR)/sfetch"; \
+	elif command -v sfetch >/dev/null 2>&1; then SFETCH_BIN="$$(command -v sfetch)"; fi; \
+	if [ ! -x "$(BIN_DIR)/goneat" ] && ! command -v goneat >/dev/null 2>&1; then \
+		echo "[..] Installing goneat $(GONEAT_VERSION) via sfetch..."; \
+		$$SFETCH_BIN --repo fulmenhq/goneat --tag $(GONEAT_VERSION) --dest-dir "$(BIN_DIR)"; \
+	else \
+		echo "[ok] goneat already installed"; \
+	fi
+	@# Verify goneat
+	@GONEAT_BIN=""; \
+	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
+	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
+	if [ -z "$$GONEAT_BIN" ]; then echo "[!!] goneat installation failed"; exit 1; fi; \
+	echo "[ok] goneat: $$($$GONEAT_BIN version 2>&1 | head -n1)"
+	@echo ""
+	@# Step 3: Install foundation tools via goneat
+	@echo "[..] Installing foundation tools via goneat..."
+	@GONEAT_BIN=""; \
+	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
+	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
+	$$GONEAT_BIN doctor tools --scope foundation --install --yes 2>/dev/null || \
+		echo "[!!] goneat doctor tools failed, some tools may need manual installation"
+	@echo ""
+	@echo "[ok] Bootstrap complete"
+	@echo ""
+	@echo "Repo-local tools installed to $(BIN_DIR)"
+	@echo "Run 'make build' to build sfetch"
+
+bootstrap-force: ## Force reinstall all tools
+	@rm -f "$(BIN_DIR)/sfetch" "$(BIN_DIR)/goneat"
+	@$(MAKE) bootstrap
+
+tools: ## Verify external tools are available
+	@echo "Verifying tools..."
+	@GONEAT_BIN=""; \
+	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
+	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
+	if [ -n "$$GONEAT_BIN" ]; then \
+		$$GONEAT_BIN doctor tools --scope foundation 2>&1 || true; \
+	else \
+		echo "[!!] goneat not found (run 'make bootstrap')"; \
+		echo ""; \
+		echo "Fallback checks:"; \
+		if command -v go >/dev/null 2>&1; then echo "[ok] go: $$(go version | cut -d' ' -f3)"; else echo "[!!] go not found"; fi; \
+		if command -v staticcheck >/dev/null 2>&1; then echo "[ok] staticcheck found"; else echo "[!!] staticcheck not found"; fi; \
+	fi
+	@echo ""
+
+# -----------------------------------------------------------------------------
+# Format, Lint, Assess (via goneat)
+# -----------------------------------------------------------------------------
+
+fmt: ## Format code (Go + shell via goneat)
+	@GONEAT_BIN=""; \
+	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
+	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
+	if [ -n "$$GONEAT_BIN" ]; then \
+		$$GONEAT_BIN assess --categories format --fix; \
+	else \
+		go fmt ./...; \
+		echo "[!!] goneat not found, shell/markdown formatting skipped (run 'make bootstrap')"; \
 	fi
 
-actionlint-workflows:
-	@if command -v $(ACTIONLINT) >/dev/null 2>&1; then \
-		$(ACTIONLINT) .github/workflows/*.yml; \
+lint: ## Run linters (via goneat)
+	@GONEAT_BIN=""; \
+	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
+	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
+	if [ -n "$$GONEAT_BIN" ]; then \
+		$$GONEAT_BIN assess --categories lint --check; \
 	else \
-		echo "$(ACTIONLINT) not found (optional): run 'make tools' or install via 'go install github.com/rhysd/actionlint/cmd/actionlint@latest'" >&2; \
+		echo "[!!] goneat not found (run 'make bootstrap')"; \
+		go vet ./...; \
 	fi
 
-lint-workflows: yamllint-workflows actionlint-workflows
+assess: ## Run goneat assess (format, lint, security)
+	@GONEAT_BIN=""; \
+	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
+	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
+	if [ -z "$$GONEAT_BIN" ]; then echo "[!!] goneat not found (run 'make bootstrap')"; exit 1; fi; \
+	$$GONEAT_BIN assess --categories format,lint,security --format concise
 
-# Corpus targets are opt-in (not part of quality/precommit) because they
-# require authenticated GitHub API calls. Run manually during release prep:
-#   GITHUB_TOKEN=<token> make corpus        # fast repos, dry-run
-#   GITHUB_TOKEN=<token> make corpus-all    # all repos including slow
-corpus: build
-	@mkdir -p $(CORPUS_DEST)
-	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
-	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --dest $(CORPUS_DEST) --sfetch-bin $(BUILD_ARTIFACT)
+# -----------------------------------------------------------------------------
+# Build, Test, Quality
+# -----------------------------------------------------------------------------
 
-corpus-dryrun: build
-	@mkdir -p $(CORPUS_DEST)
-	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
-	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --dest $(CORPUS_DEST) --sfetch-bin $(BUILD_ARTIFACT)
-
-corpus-all: build
-	@mkdir -p $(CORPUS_DEST)
-	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
-	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --include-slow --dest $(CORPUS_DEST) --sfetch-bin $(BUILD_ARTIFACT)
-
-corpus-validate: build
-	@mkdir -p $(CORPUS_DEST)
-	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
-	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --include-slow --dest $(CORPUS_DEST) --sfetch-bin $(BUILD_ARTIFACT)
-
-
-quality: prereqs fmt-check shell-check lint test gosec-high build-all yamllint-workflows
-
-precommit: quality
-
-build:
-	mkdir -p bin
+build: ## Build for current platform
+	@mkdir -p bin
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build \
 		-ldflags="$(LDFLAGS)" \
 		-trimpath \
 		-o $(BUILD_ARTIFACT) $(MAIN)
+	@echo "[ok] Built $(BUILD_ARTIFACT)"
 
-build-all:
-	mkdir -p dist/release
+build-all: ## Build for all platforms
+	@mkdir -p dist/release
 	GOOS=darwin GOARCH=amd64  CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o dist/release/$(NAME)-darwin-amd64     $(MAIN)
 	GOOS=darwin GOARCH=arm64  CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o dist/release/$(NAME)-darwin-arm64     $(MAIN)
 	GOOS=linux  GOARCH=amd64  CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o dist/release/$(NAME)-linux-amd64      $(MAIN)
 	GOOS=linux  GOARCH=arm64  CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o dist/release/$(NAME)-linux-arm64      $(MAIN)
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o dist/release/$(NAME)-windows-amd64.exe $(MAIN)
+	@echo "[ok] Built all platforms to dist/release/"
 
-release: build-all
-	# TODO: GitHub release automation
+test: ## Run tests
+	go test -v -race ./...
+
+gosec: ## Run gosec security scanner
+	gosec ./...
+
+gosec-high: ## Run gosec (high confidence only)
+	gosec -confidence high -exclude G301,G302,G107,G304 ./...
+
+# -----------------------------------------------------------------------------
+# Pre-commit / Pre-push (via goneat hooks)
+# -----------------------------------------------------------------------------
+
+precommit: ## Run pre-commit checks (goneat assess + Go tests + build)
+	@GONEAT_BIN=""; \
+	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
+	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
+	if [ -z "$$GONEAT_BIN" ]; then echo "[!!] goneat not found (run 'make bootstrap')"; exit 1; fi; \
+	$$GONEAT_BIN assess --categories format,lint --check --fail-on critical
+	go run github.com/santhosh-tekuri/jsonschema/cmd/jv@latest testdata/corpus.schema.json testdata/corpus.json
+	go test -v -race ./...
+	$(MAKE) gosec-high
+	$(MAKE) build-all
+	@echo "[ok] Pre-commit checks passed"
+
+prepush: precommit ## Run pre-push checks (same as precommit + security)
+	@GONEAT_BIN=""; \
+	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
+	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
+	$$GONEAT_BIN assess --categories format,lint,security --check --fail-on high
+	@echo "[ok] Pre-push checks passed"
+
+# -----------------------------------------------------------------------------
+# Corpus Testing
+# -----------------------------------------------------------------------------
+
+corpus: build ## Run corpus tests (dry-run, fast repos)
+	@mkdir -p $(CORPUS_DEST)
+	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
+	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --dest $(CORPUS_DEST) --sfetch-bin $(BUILD_ARTIFACT)
+
+corpus-dryrun: corpus ## Alias for corpus
+
+corpus-all: build ## Run corpus tests (all repos including slow)
+	@mkdir -p $(CORPUS_DEST)
+	@echo "Note: set GITHUB_TOKEN to avoid API rate limits"
+	go run ./scripts/run-corpus.go --manifest testdata/corpus.json --dry-run --include-slow --dest $(CORPUS_DEST) --sfetch-bin $(BUILD_ARTIFACT)
+
+corpus-validate: corpus-all ## Alias for corpus-all
+
+# -----------------------------------------------------------------------------
+# Release
+# -----------------------------------------------------------------------------
+
+release: build-all ## Prepare release (build all platforms)
 	@echo "Release preparation for $(VERSION)"
 	@echo "Build all platforms and prepare assets"
 
-release-download:
+release-download: ## Download release assets for signing
 	@mkdir -p $(DIST_RELEASE)
 	./scripts/download-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
-bootstrap-script:
+bootstrap-script: ## Copy install script into release directory
 	@mkdir -p $(DIST_RELEASE)
 	cp scripts/install-sfetch.sh $(DIST_RELEASE)/install-sfetch.sh
-	@echo "✅ Copied install-sfetch.sh to $(DIST_RELEASE)"
+	@echo "[ok] Copied install-sfetch.sh to $(DIST_RELEASE)"
 
-release-checksums: bootstrap-script
+release-checksums: bootstrap-script ## Generate SHA256SUMS and SHA2-512SUMS
 	go run ./scripts/cmd/generate-checksums --dir $(DIST_RELEASE)
 
-# Backwards compatibility alias
-release-sha256: release-checksums
-
-# Verify local checksums match downloaded release (for auditing signed releases)
-release-verify-checksums:
+release-verify-checksums: ## Verify checksums in dist/release
 	@if [ ! -d "$(DIST_RELEASE)" ]; then echo "error: $(DIST_RELEASE) not found (run make release-download first)" >&2; exit 1; fi
 	@echo "Verifying checksums in $(DIST_RELEASE)..."
 	@cd $(DIST_RELEASE) && \
@@ -206,9 +289,9 @@ release-verify-checksums:
 		echo "=== SHA2-512SUMS ===" && \
 		shasum -a 512 -c SHA2-512SUMS 2>&1 | grep -v ': OK$$' || echo "All SHA512 checksums OK"; \
 	fi
-	@echo "✅ Checksum verification complete"
+	@echo "[ok] Checksum verification complete"
 
-release-notes:
+release-notes: ## Copy release notes into dist/release
 	@if [ -z "$(RELEASE_TAG)" ]; then echo "error: RELEASE_TAG not set" >&2; exit 1; fi
 	@mkdir -p $(DIST_RELEASE)
 	@src="docs/releases/$(RELEASE_TAG).md"; \
@@ -217,20 +300,17 @@ release-notes:
 		exit 1; \
 	fi; \
 	cp "$$src" "$(DIST_RELEASE)/release-notes-$(RELEASE_TAG).md"
-	@echo "✅ Release notes copied to $(DIST_RELEASE)"
+	@echo "[ok] Release notes copied to $(DIST_RELEASE)"
 
-# Note: SFETCH_GPG_HOMEDIR should be set by user if using custom GPG homedir
-# This is not persisted and only affects the signing operation
-release-sign: release-checksums
+release-sign: release-checksums ## Sign checksum manifests
 	SFETCH_MINISIGN_KEY=$(SFETCH_MINISIGN_KEY) SFETCH_PGP_KEY_ID=$(SFETCH_PGP_KEY_ID) SFETCH_GPG_HOMEDIR=$(SFETCH_GPG_HOMEDIR) ./scripts/sign-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
-release-export-key:
+release-export-key: ## Export PGP public key to dist/release
 	SFETCH_GPG_HOMEDIR=$(SFETCH_GPG_HOMEDIR) ./scripts/export-release-key.sh $(SFETCH_PGP_KEY_ID) $(DIST_RELEASE)
 
-release-export-minisign-key: build
+release-export-minisign-key: build ## Copy minisign public key to dist/release
 	@if [ -z "$(SFETCH_MINISIGN_KEY)" ] && [ -z "$(SFETCH_MINISIGN_PUB)" ]; then echo "SFETCH_MINISIGN_KEY or SFETCH_MINISIGN_PUB not set" >&2; exit 1; fi
 	@mkdir -p $(DIST_RELEASE)
-	@# Use explicit pub path if set, otherwise derive from secret key path
 	@if [ -n "$(SFETCH_MINISIGN_PUB)" ]; then \
 		pubkey="$(SFETCH_MINISIGN_PUB)"; \
 	else \
@@ -240,58 +320,56 @@ release-export-minisign-key: build
 		echo "Verifying $$pubkey is a valid minisign public key..."; \
 		./$(BUILD_ARTIFACT) --verify-minisign-pubkey "$$pubkey" || exit 1; \
 		cp "$$pubkey" "$(DIST_RELEASE)/$(MINISIGN_PUB_NAME)"; \
-		echo "✅ Copied minisign public key to $(DIST_RELEASE)/$(MINISIGN_PUB_NAME)"; \
+		echo "[ok] Copied minisign public key to $(DIST_RELEASE)/$(MINISIGN_PUB_NAME)"; \
 	else \
 		echo "error: public key $$pubkey not found" >&2; \
 		exit 1; \
 	fi
 
-verify-minisign-pubkey: build
-	@if [ -z "$(FILE)" ]; then echo "usage: make verify-minisign-pubkey FILE=path/to/key.pub" >&2; exit 1; fi
-	./$(BUILD_ARTIFACT) --verify-minisign-pubkey "$(FILE)"
-
-verify-release-key:
+verify-release-key: ## Verify PGP key is public-only
 	./scripts/verify-public-key.sh $(DIST_RELEASE)/$(PUBLIC_KEY_NAME)
 
-# release-upload: Uploads ALL assets with --clobber for idempotency.
-# Re-uploads binaries even though CI built them (same files, ~15MB).
-# This ensures fixes can be applied by simply re-running the target.
-release-upload: release-notes verify-release-key
+release-upload: release-notes verify-release-key ## Upload assets and update release notes
 	./scripts/upload-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
-release-clean:
+release-clean: ## Remove dist/release contents
 	rm -rf $(DIST_RELEASE)
-	@echo "Cleaned $(DIST_RELEASE)"
+	@echo "[ok] Cleaned $(DIST_RELEASE)"
 
-clean:
-	rm -rf bin/ dist/ coverage.out
+# -----------------------------------------------------------------------------
+# Install / Clean
+# -----------------------------------------------------------------------------
 
-install: build
+install: build ## Install to INSTALL_BINDIR
 	@mkdir -p "$(INSTALL_BINDIR)"
 	cp "$(BUILD_ARTIFACT)" "$(INSTALL_TARGET)"
 ifeq ($(GOOS),windows)
-	@echo "Installed $(NAME)$(EXT) to $(INSTALL_TARGET). Ensure this directory is on your PATH."
+	@echo "[ok] Installed $(NAME)$(EXT) to $(INSTALL_TARGET)"
 else
 	chmod 755 "$(INSTALL_TARGET)"
-	@echo "Installed $(NAME)$(EXT) to $(INSTALL_TARGET). Add it to your PATH if needed."
+	@echo "[ok] Installed $(NAME)$(EXT) to $(INSTALL_TARGET)"
 endif
 
-# Version management targets
-# Usage: make version-patch  (0.2.0 -> 0.2.1)
-#        make version-minor  (0.2.0 -> 0.3.0)
-#        make version-major  (0.2.0 -> 1.0.0)
-#        make version-set V=1.2.3
-#        make version-check  (show current version)
+clean: ## Clean build artifacts
+	rm -rf bin/ dist/ coverage.out
+	@echo "[ok] Cleaned build artifacts"
 
-version-check:
+# -----------------------------------------------------------------------------
+# Version Management
+# -----------------------------------------------------------------------------
+
+version: ## Show current version
+	@echo "$(VERSION)"
+
+version-check: ## Show current version (verbose)
 	@echo "Current version: $(VERSION)"
 
-version-set:
+version-set: ## Set version (usage: make version-set V=X.Y.Z)
 	@if [ -z "$(V)" ]; then echo "usage: make version-set V=X.Y.Z" >&2; exit 1; fi
 	@echo "$(V)" > VERSION
-	@echo "Version set to $(V)"
+	@echo "[ok] Version set to $(V)"
 
-version-patch:
+version-patch: ## Bump patch version
 	@current=$(VERSION); \
 	major=$$(echo $$current | cut -d. -f1); \
 	minor=$$(echo $$current | cut -d. -f2); \
@@ -299,21 +377,21 @@ version-patch:
 	newpatch=$$((patch + 1)); \
 	newver="$$major.$$minor.$$newpatch"; \
 	echo "$$newver" > VERSION; \
-	echo "Version bumped: $$current -> $$newver"
+	echo "[ok] Version bumped: $$current -> $$newver"
 
-version-minor:
+version-minor: ## Bump minor version
 	@current=$(VERSION); \
 	major=$$(echo $$current | cut -d. -f1); \
 	minor=$$(echo $$current | cut -d. -f2); \
 	newminor=$$((minor + 1)); \
 	newver="$$major.$$newminor.0"; \
 	echo "$$newver" > VERSION; \
-	echo "Version bumped: $$current -> $$newver"
+	echo "[ok] Version bumped: $$current -> $$newver"
 
-version-major:
+version-major: ## Bump major version
 	@current=$(VERSION); \
 	major=$$(echo $$current | cut -d. -f1); \
 	newmajor=$$((major + 1)); \
 	newver="$$newmajor.0.0"; \
 	echo "$$newver" > VERSION; \
-	echo "Version bumped: $$current -> $$newver"
+	echo "[ok] Version bumped: $$current -> $$newver"

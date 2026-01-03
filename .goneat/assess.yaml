@@ -1,0 +1,85 @@
+---
+# goneat assess configuration for sfetch
+# See: goneat docs show user-guide/commands/assess
+#
+# sfetch uses goneat as its DX tool for format/lint/security checks.
+# Run: goneat assess --categories format,lint,security
+version: 1
+lint:
+  # YAML linting for workflows and config files
+  yamllint:
+    enabled: true
+    strict: true
+    paths:
+      - ".github/workflows/**/*.yml"
+      - ".github/workflows/**/*.yaml"
+      - ".goneat/**/*.yaml"
+    ignore: []
+  # Shell script linting (shfmt for format, shellcheck opt-in)
+  shell:
+    shfmt:
+      enabled: true
+      fix: false  # Check only by default; use --fix to apply
+      args: ["-i", "4", "-ci"]  # 4-space indent, case indent
+    shellcheck:
+      enabled: true  # sfetch uses shellcheck
+      path: ""
+    paths:
+      - "scripts/*.sh"
+    ignore:
+      - "**/testdata/**"
+      - ".plans/**"
+      - "dist/**"
+  # GitHub Actions workflow linting
+  github_actions:
+    actionlint:
+      enabled: true
+      paths:
+        - ".github/workflows/**/*.yml"
+        - ".github/workflows/**/*.yaml"
+      ignore: []
+  # Makefile linting (relaxed - bootstrap targets can be complex)
+  make:
+    checkmake:
+      enabled: true
+      config:
+        max_body_length: 70  # Bootstrap targets need room
+        min_phony_targets:
+          - all
+          - build
+          - clean
+          - test
+    paths:
+      - "Makefile"
+    ignore: []
+# Format configuration
+format:
+  # EOF and whitespace checks
+  eof:
+    enabled: true
+    enforce_single_newline: true
+  trailing_whitespace:
+    enabled: true
+  # Markdown formatting
+  markdown:
+    enabled: true
+    paths:
+      - "**/*.md"
+    ignore:
+      - ".plans/**"
+      - "**/node_modules/**"
+  # JSON formatting
+  json:
+    enabled: true
+    paths:
+      - "**/*.json"
+    ignore:
+      - "go.sum"
+  # YAML formatting
+  yaml:
+    enabled: true
+    paths:
+      - "**/*.yaml"
+      - "**/*.yml"
+    ignore:
+      - "**/node_modules/**"
