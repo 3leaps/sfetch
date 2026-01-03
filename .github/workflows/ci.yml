@@ -38,8 +38,16 @@ jobs:
             --require-minisign
           ./bin/goneat version
 
+      - name: Install development tools via goneat
+        run: |
+          export PATH="$PWD/bin:$PATH"
+          goneat doctor tools --scope foundation --install --yes || true
+          goneat doctor tools --scope security --install --yes || true
+
       - name: Quality
-        run: make precommit
+        run: |
+          export PATH="$PWD/bin:$PATH"
+          make precommit
 
       - name: Test install script
         run: bash scripts/install-sfetch.sh --dry-run
