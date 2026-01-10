@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-01-10
+
+### Added
+- **Arbitrary URL fetch:** New `--url` mode (or positional URL) with HTTPS-first defaults and optional `--allow-http` override.
+- **Raw GitHub content:** Added `--github-raw owner/repo@ref:path` for raw files hosted in GitHub repos.
+- **URL safety controls:** `--follow-redirects`, `--max-redirects`, `--allowed-content-types`, and `--allow-unknown-content-type` gates.
+- **GitHub URL upgrade:** Release asset URLs automatically route through the GitHub release verification flow.
+- **Provenance redirects:** URL provenance now records redirect chains.
+- **Corpus expansion:** Added URL and format coverage with optional HTTP test cases.
+
+### Documentation
+- Added URL, GitHub raw, and safety flag guidance in `README.md` and quickstart.
+
+### Security
+- Block URL credentials by default to avoid leaking user info during redirects.
+
 ## [0.3.4] - 2026-01-10
 
 ### Added
