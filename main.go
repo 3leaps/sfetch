@@ -13,10 +13,12 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -306,6 +308,8 @@ type ProvenanceSource struct {
 	Type       string             `json:"type"`
 	Repository string             `json:"repository,omitempty"`
 	Release    *ProvenanceRelease `json:"release,omitempty"`
+	URL        string             `json:"url,omitempty"`
+	Redirects  []string           `json:"redirects,omitempty"`
 }
 
 type ProvenanceRelease struct {
@@ -851,6 +855,104 @@ func buildProvenanceRecord(repo string, rel *Release, assessment *VerificationAs
 	return record
 }
 
+func buildURLProvenanceRecord(sourceURL, repo string, asset *Asset, assessment *VerificationAssessment, flags assessmentFlags, computedHash string, redirects []string) *ProvenanceRecord {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	record := &ProvenanceRecord{
+		Schema:        "https://github.com/3leaps/sfetch/schemas/provenance.schema.json",
+		Version:       "1.0.0",
+		Timestamp:     now,
+		SfetchVersion: version,
+		Source: ProvenanceSource{
+			Type: "url",
+			URL:  sourceURL,
+		},
+		TrustLevel: assessment.TrustLevel,
+		Trust:      assessment.Trust,
+		Warnings:   assessment.Warnings,
+		Flags: ProvenanceFlags{
+			SkipSig:         flags.skipSig,
+			SkipChecksum:    flags.skipChecksum,
+			Insecure:        flags.insecure,
+			RequireMinisign: flags.requireMinisign,
+			PreferPerAsset:  flags.preferPerAsset,
+			DryRun:          flags.dryRun,
+		},
+	}
+
+	if len(redirects) > 0 {
+		record.Source.Redirects = append([]string(nil), redirects...)
+	}
+	if repo != "" {
+		record.Source.Repository = repo
+	}
+
+	if asset != nil {
+		record.Asset = ProvenanceAsset{
+			Name: asset.Name,
+			Size: asset.Size,
+			URL:  asset.BrowserDownloadUrl,
+		}
+		if computedHash != "" {
+			record.Asset.ComputedChecksum = &ProvenanceHash{
+				Algorithm: "sha256",
+				Value:     computedHash,
+			}
+		}
+	}
+
+	sigStatus := ProvenanceSigStatus{
+		Available: assessment.SignatureAvailable,
+		Verified:  false,
+		Skipped:   flags.skipSig || flags.insecure,
+	}
+	if assessment.SignatureAvailable {
+		sigStatus.Format = assessment.SignatureFormat
+		sigStatus.File = assessment.SignatureFile
+		if !flags.skipSig && !flags.insecure && assessment.Workflow != workflowC {
+			sigStatus.Verified = true
+		}
+	} else {
+		sigStatus.Reason = "no signature available for raw content"
+	}
+	if flags.skipSig {
+		sigStatus.Reason = "--skip-sig flag"
+	}
+	if flags.insecure {
+		sigStatus.Reason = "--insecure flag"
+	}
+
+	csStatus := ProvenanceCSStatus{
+		Available: assessment.ChecksumAvailable,
+		Verified:  false,
+		Skipped:   flags.skipChecksum || flags.insecure,
+	}
+	if assessment.ChecksumAvailable {
+		csStatus.Algorithm = assessment.ChecksumAlgorithm
+		csStatus.File = assessment.ChecksumFile
+		csStatus.Type = assessment.ChecksumType
+		if !flags.skipChecksum && !flags.insecure {
+			csStatus.Verified = true
+		}
+	} else {
+		csStatus.Reason = "no checksum available for raw content"
+	}
+	if flags.skipChecksum {
+		csStatus.Reason = "--skip-checksum flag"
+	}
+	if flags.insecure {
+		csStatus.Reason = "--insecure flag"
+	}
+
+	record.Verification = ProvenanceVerify{
+		Workflow:  assessment.Workflow,
+		Signature: sigStatus,
+		Checksum:  csStatus,
+	}
+
+	return record
+}
+
 // outputProvenance writes the provenance record to the specified destination.
 func outputProvenance(record *ProvenanceRecord, toFile string) error {
 	data, err := json.MarshalIndent(record, "", "  ")
@@ -1024,8 +1126,517 @@ func applyProxyConfig(cfg proxyConfig) error {
 	return nil
 }
 
+type githubRawSpec struct {
+	Repo      string
+	Ref       string
+	Path      string
+	URL       string
+	AssetName string
+}
+
+type urlSpec struct {
+	URL       string
+	AssetName string
+}
+
+func parseGitHubRawSpec(spec string) (githubRawSpec, error) {
+	trimmed := strings.TrimSpace(spec)
+	if trimmed == "" {
+		return githubRawSpec{}, fmt.Errorf("--github-raw must not be empty")
+	}
+	parts := strings.SplitN(trimmed, ":", 2)
+	if len(parts) != 2 {
+		return githubRawSpec{}, fmt.Errorf("--github-raw must be in owner/repo@ref:path format")
+	}
+	repoRef := strings.TrimSpace(parts[0])
+	rawPath := strings.TrimSpace(parts[1])
+	if repoRef == "" || rawPath == "" {
+		return githubRawSpec{}, fmt.Errorf("--github-raw must be in owner/repo@ref:path format")
+	}
+	repoParts := strings.SplitN(repoRef, "@", 2)
+	if len(repoParts) != 2 {
+		return githubRawSpec{}, fmt.Errorf("--github-raw must include @ref")
+	}
+	repo := strings.TrimSpace(repoParts[0])
+	ref := strings.TrimSpace(repoParts[1])
+	if repo == "" || ref == "" {
+		return githubRawSpec{}, fmt.Errorf("--github-raw must include owner/repo and ref")
+	}
+	if !strings.Contains(repo, "/") {
+		return githubRawSpec{}, fmt.Errorf("--github-raw repo must be owner/repo")
+	}
+	cleanedPath, err := sanitizeGitHubRawPath(rawPath)
+	if err != nil {
+		return githubRawSpec{}, err
+	}
+	assetName := path.Base(cleanedPath)
+	if assetName == "." || assetName == "/" {
+		return githubRawSpec{}, fmt.Errorf("--github-raw path must include a filename")
+	}
+	url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", repo, ref, cleanedPath)
+
+	return githubRawSpec{
+		Repo:      repo,
+		Ref:       ref,
+		Path:      cleanedPath,
+		URL:       url,
+		AssetName: assetName,
+	}, nil
+}
+
+func sanitizeGitHubRawPath(rawPath string) (string, error) {
+	for _, segment := range strings.Split(rawPath, "/") {
+		if segment == ".." || segment == "." {
+			return "", fmt.Errorf("--github-raw path must not include dot segments")
+		}
+	}
+	cleanedPath := path.Clean("/" + rawPath)
+	if strings.HasPrefix(cleanedPath, "/..") {
+		return "", fmt.Errorf("--github-raw path must not escape the repository")
+	}
+	cleanedPath = strings.TrimPrefix(cleanedPath, "/")
+	if cleanedPath == "" || cleanedPath == "." {
+		return "", fmt.Errorf("--github-raw path must not be empty")
+	}
+	return cleanedPath, nil
+}
+
+func parseGitHubRawURL(raw string) (githubRawSpec, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return githubRawSpec{}, fmt.Errorf("invalid URL %q: %w", raw, err)
+	}
+	if !strings.EqualFold(parsed.Scheme, "https") {
+		return githubRawSpec{}, fmt.Errorf("raw GitHub URL must use https")
+	}
+	if !strings.EqualFold(parsed.Host, "raw.githubusercontent.com") {
+		return githubRawSpec{}, fmt.Errorf("not a raw GitHub URL")
+	}
+	segments := strings.Split(strings.TrimPrefix(parsed.Path, "/"), "/")
+	if len(segments) < 4 {
+		return githubRawSpec{}, fmt.Errorf("raw GitHub URL must be owner/repo/ref/path")
+	}
+	owner := segments[0]
+	repo := segments[1]
+	ref := segments[2]
+	filePath := strings.Join(segments[3:], "/")
+	if owner == "" || repo == "" || ref == "" || filePath == "" {
+		return githubRawSpec{}, fmt.Errorf("raw GitHub URL must be owner/repo/ref/path")
+	}
+	cleanedPath, err := sanitizeGitHubRawPath(filePath)
+	if err != nil {
+		return githubRawSpec{}, err
+	}
+	assetName := path.Base(cleanedPath)
+	if assetName == "." || assetName == "/" {
+		return githubRawSpec{}, fmt.Errorf("raw GitHub URL must include a filename")
+	}
+	return githubRawSpec{
+		Repo:      fmt.Sprintf("%s/%s", owner, repo),
+		Ref:       ref,
+		Path:      cleanedPath,
+		URL:       parsed.String(),
+		AssetName: assetName,
+	}, nil
+}
+
+func parseURLSpec(raw string, allowHTTP bool) (urlSpec, *githubRawSpec, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return urlSpec{}, nil, fmt.Errorf("--url must not be empty")
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return urlSpec{}, nil, fmt.Errorf("invalid URL %q: %w", raw, err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return urlSpec{}, nil, fmt.Errorf("invalid URL %q: missing scheme or host", raw)
+	}
+	if strings.EqualFold(parsed.Host, "raw.githubusercontent.com") {
+		rawSpec, err := parseGitHubRawURL(parsed.String())
+		if err != nil {
+			return urlSpec{}, nil, err
+		}
+		return urlSpec{}, &rawSpec, nil
+	}
+	if !strings.EqualFold(parsed.Scheme, "https") {
+		if !allowHTTP && strings.EqualFold(parsed.Scheme, "http") {
+			return urlSpec{}, nil, fmt.Errorf("--url requires https scheme (use --allow-http to override)")
+		}
+		if !strings.EqualFold(parsed.Scheme, "http") {
+			return urlSpec{}, nil, fmt.Errorf("--url requires http or https scheme")
+		}
+	}
+	assetName := path.Base(parsed.Path)
+	if assetName == "." || assetName == "/" || assetName == "" {
+		assetName = "download"
+	}
+	return urlSpec{
+		URL:       parsed.String(),
+		AssetName: assetName,
+	}, nil, nil
+}
+
+type urlFetchOptions struct {
+	allowHTTP               bool
+	followRedirects         bool
+	maxRedirects            int
+	allowedContentTypes     []string
+	allowUnknownContentType bool
+}
+
+type urlFetchResult struct {
+	finalURL    string
+	redirects   []string
+	contentType string
+	size        int64
+}
+
+var defaultAllowedContentTypes = []string{
+	"text/",
+	"application/octet-stream",
+	"application/x-executable",
+	"application/x-sh",
+	"application/x-shellscript",
+	"application/x-tar",
+	"application/gzip",
+	"application/x-gzip",
+	"application/zip",
+	"application/x-zip-compressed",
+	"application/x-bzip2",
+	"application/x-xz",
+	"application/json",
+	"application/xml",
+}
+
+func parseAllowedContentTypes(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return append([]string(nil), defaultAllowedContentTypes...)
+	}
+	parts := strings.Split(raw, ",")
+	allowed := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.ToLower(strings.TrimSpace(part))
+		if trimmed == "" {
+			continue
+		}
+		allowed = append(allowed, trimmed)
+	}
+	if len(allowed) == 0 {
+		return append([]string(nil), defaultAllowedContentTypes...)
+	}
+	return allowed
+}
+
+func contentTypeAllowed(contentType string, allowed []string) bool {
+	if strings.TrimSpace(contentType) == "" {
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	}
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	for _, allowedType := range allowed {
+		if allowedType == "" {
+			continue
+		}
+		if strings.HasSuffix(allowedType, "/") {
+			if strings.HasPrefix(mediaType, allowedType) {
+				return true
+			}
+			continue
+		}
+		if mediaType == allowedType {
+			return true
+		}
+	}
+	return false
+}
+
+func newURLClient(opts urlFetchOptions, redirects *[]string) *http.Client {
+	client := &http.Client{Timeout: 30 * time.Second}
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if !opts.followRedirects {
+			return http.ErrUseLastResponse
+		}
+		if opts.maxRedirects < 0 {
+			return fmt.Errorf("max redirects must be >= 0")
+		}
+		if len(via) > opts.maxRedirects {
+			return fmt.Errorf("stopped after %d redirects", opts.maxRedirects)
+		}
+		if !opts.allowHTTP && !strings.EqualFold(req.URL.Scheme, "https") {
+			return fmt.Errorf("redirect to non-https URL %s blocked", req.URL.String())
+		}
+		*redirects = append(*redirects, req.URL.String())
+		return nil
+	}
+	return client
+}
+
+func doURLRequest(method, target string, opts urlFetchOptions) (*http.Response, []string, error) {
+	redirects := []string{}
+	client := newURLClient(opts, &redirects)
+
+	req, err := http.NewRequest(method, target, nil)
+	if err != nil {
+		return nil, redirects, err
+	}
+	req.Header.Set("User-Agent", fmt.Sprintf("sfetch/%s", version))
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, redirects, err
+	}
+	return resp, redirects, nil
+}
+
+func probeURL(target string, opts urlFetchOptions) (urlFetchResult, error) {
+	resp, redirects, err := doURLRequest(http.MethodHead, target, opts)
+	if err != nil {
+		return urlFetchResult{redirects: redirects}, err
+	}
+	defer resp.Body.Close() //nolint:errcheck // read-only response, close error non-critical
+
+	if resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotImplemented {
+		resp, redirects, err = doURLRequest(http.MethodGet, target, opts)
+		if err != nil {
+			return urlFetchResult{redirects: redirects}, err
+		}
+		defer resp.Body.Close() //nolint:errcheck // read-only response, close error non-critical
+	}
+
+	if resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode < http.StatusBadRequest {
+		location := resp.Header.Get("Location")
+		if location != "" {
+			redirects = append(redirects, location)
+		}
+		return urlFetchResult{redirects: redirects, finalURL: resp.Request.URL.String()}, fmt.Errorf("redirect blocked (use --follow-redirects)")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return urlFetchResult{redirects: redirects, finalURL: resp.Request.URL.String()}, fmt.Errorf("status %d from %s", resp.StatusCode, target)
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if !opts.allowUnknownContentType && !contentTypeAllowed(contentType, opts.allowedContentTypes) {
+		return urlFetchResult{redirects: redirects, finalURL: resp.Request.URL.String(), contentType: contentType}, fmt.Errorf("content type %q not allowed", contentType)
+	}
+
+	return urlFetchResult{
+		finalURL:    resp.Request.URL.String(),
+		redirects:   redirects,
+		contentType: contentType,
+		size:        resp.ContentLength,
+	}, nil
+}
+
+func downloadURL(target, dest string, opts urlFetchOptions) (urlFetchResult, error) {
+	resp, redirects, err := doURLRequest(http.MethodGet, target, opts)
+	if err != nil {
+		return urlFetchResult{redirects: redirects}, err
+	}
+	defer resp.Body.Close() //nolint:errcheck // read-only response, close error non-critical
+
+	if resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode < http.StatusBadRequest {
+		location := resp.Header.Get("Location")
+		if location != "" {
+			redirects = append(redirects, location)
+		}
+		return urlFetchResult{redirects: redirects, finalURL: resp.Request.URL.String()}, fmt.Errorf("redirect blocked (use --follow-redirects)")
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return urlFetchResult{redirects: redirects, finalURL: resp.Request.URL.String()}, fmt.Errorf("status %d from %s: %s", resp.StatusCode, target, string(body))
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if !opts.allowUnknownContentType && !contentTypeAllowed(contentType, opts.allowedContentTypes) {
+		return urlFetchResult{redirects: redirects, finalURL: resp.Request.URL.String(), contentType: contentType}, fmt.Errorf("content type %q not allowed", contentType)
+	}
+
+	// #nosec G304 -- path tmp controlled
+	f, err := os.Create(dest)
+	if err != nil {
+		return urlFetchResult{redirects: redirects, finalURL: resp.Request.URL.String(), contentType: contentType}, fmt.Errorf("create %s: %w", dest, err)
+	}
+	defer f.Close() //nolint:errcheck // error checked via write below
+
+	size, err := io.Copy(f, resp.Body)
+	if err != nil {
+		return urlFetchResult{redirects: redirects, finalURL: resp.Request.URL.String(), contentType: contentType}, fmt.Errorf("write %s: %w", dest, err)
+	}
+
+	return urlFetchResult{
+		finalURL:    resp.Request.URL.String(),
+		redirects:   redirects,
+		contentType: contentType,
+		size:        size,
+	}, nil
+}
+
+func assessRawGitHub(asset *Asset, flags assessmentFlags) *VerificationAssessment {
+	return assessURL(asset, flags, true)
+}
+
+func assessURL(asset *Asset, flags assessmentFlags, httpsUsed bool) *VerificationAssessment {
+	assessment := &VerificationAssessment{
+		SelectedAsset: asset,
+		Warnings:      []string{},
+	}
+
+	if flags.insecure {
+		assessment.Workflow = workflowInsecure
+		assessment.Warnings = append(assessment.Warnings, "No verification performed (--insecure flag)")
+	} else {
+		assessment.Workflow = workflowNone
+	}
+
+	in := trustScoreInput{
+		SignatureVerifiable: false,
+		SignatureValidated:  false,
+		SignatureSkipped:    flags.skipSig || flags.insecure,
+		ChecksumVerifiable:  false,
+		ChecksumValidated:   false,
+		ChecksumSkipped:     flags.skipChecksum || flags.insecure,
+		HTTPSUsed:           httpsUsed,
+		InsecureFlag:        flags.insecure,
+	}
+
+	assessment.Trust = computeTrustScore(in)
+	assessment.TrustLevel = legacyTrustLevelFromTrust(assessment.Trust)
+
+	if !httpsUsed {
+		assessment.Warnings = append(assessment.Warnings, "URL uses http (transport not encrypted)")
+	}
+
+	return assessment
+}
+
+func formatRawDryRunOutput(spec githubRawSpec, assessment *VerificationAssessment) string {
+	var sb strings.Builder
+
+	sb.WriteString("\nsfetch dry-run assessment\n")
+	sb.WriteString("─────────────────────────\n")
+	sb.WriteString("Source:     github raw\n")
+	sb.WriteString(fmt.Sprintf("Repository: %s\n", spec.Repo))
+	sb.WriteString(fmt.Sprintf("Ref:        %s\n", spec.Ref))
+	sb.WriteString(fmt.Sprintf("Path:       %s\n", spec.Path))
+	sb.WriteString(fmt.Sprintf("URL:        %s\n", spec.URL))
+
+	if assessment.SelectedAsset != nil {
+		sb.WriteString(fmt.Sprintf("Asset:      %s\n", assessment.SelectedAsset.Name))
+	}
+
+	sb.WriteString("\nVerification available:\n")
+	sb.WriteString("  Signature:  none\n")
+	sb.WriteString("  Checksum:   none\n")
+
+	sb.WriteString("\nVerification plan:\n")
+	sb.WriteString(fmt.Sprintf("  Workflow:   %s\n", describeWorkflow(assessment.Workflow)))
+	sb.WriteString(fmt.Sprintf("  Trust:      %d/100 (%s)\n", assessment.Trust.Score, assessment.Trust.LevelName))
+
+	sb.WriteString("\nTrust factors:\n")
+	sb.WriteString(fmt.Sprintf("  Signature:  verifiable=%t validated=%t skipped=%t points=%d\n",
+		assessment.Trust.Factors.Signature.Verifiable,
+		assessment.Trust.Factors.Signature.Validated,
+		assessment.Trust.Factors.Signature.Skipped,
+		assessment.Trust.Factors.Signature.Points))
+	sb.WriteString(fmt.Sprintf("  Checksum:   verifiable=%t validated=%t skipped=%t algo=%s points=%d\n",
+		assessment.Trust.Factors.Checksum.Verifiable,
+		assessment.Trust.Factors.Checksum.Validated,
+		assessment.Trust.Factors.Checksum.Skipped,
+		assessment.Trust.Factors.Checksum.Algorithm,
+		assessment.Trust.Factors.Checksum.Points))
+	sb.WriteString(fmt.Sprintf("  Transport:  https=%t points=%d\n",
+		assessment.Trust.Factors.Transport.HTTPS,
+		assessment.Trust.Factors.Transport.Points))
+	sb.WriteString(fmt.Sprintf("  Algorithm:  name=%s points=%d\n",
+		assessment.Trust.Factors.Algorithm.Name,
+		assessment.Trust.Factors.Algorithm.Points))
+
+	if len(assessment.Warnings) > 0 {
+		sb.WriteString("\nWarnings:\n")
+		for _, w := range assessment.Warnings {
+			sb.WriteString(fmt.Sprintf("  - %s\n", w))
+		}
+	}
+
+	return sb.String()
+}
+
+func formatURLDryRunOutput(spec urlSpec, result urlFetchResult, assessment *VerificationAssessment) string {
+	var sb strings.Builder
+
+	sb.WriteString("\nsfetch dry-run assessment\n")
+	sb.WriteString("─────────────────────────\n")
+	sb.WriteString("Source:     url\n")
+	sb.WriteString(fmt.Sprintf("URL:        %s\n", spec.URL))
+	if result.finalURL != "" && result.finalURL != spec.URL {
+		sb.WriteString(fmt.Sprintf("Final URL:  %s\n", result.finalURL))
+	}
+	if len(result.redirects) > 0 {
+		sb.WriteString("Redirects:\n")
+		for _, redirect := range result.redirects {
+			sb.WriteString(fmt.Sprintf("  - %s\n", redirect))
+		}
+	}
+	if result.contentType != "" {
+		sb.WriteString(fmt.Sprintf("Content-Type: %s\n", result.contentType))
+	}
+
+	if assessment.SelectedAsset != nil {
+		sb.WriteString(fmt.Sprintf("Asset:      %s\n", assessment.SelectedAsset.Name))
+	}
+
+	sb.WriteString("\nVerification available:\n")
+	sb.WriteString("  Signature:  none\n")
+	sb.WriteString("  Checksum:   none\n")
+
+	sb.WriteString("\nVerification plan:\n")
+	sb.WriteString(fmt.Sprintf("  Workflow:   %s\n", describeWorkflow(assessment.Workflow)))
+	sb.WriteString(fmt.Sprintf("  Trust:      %d/100 (%s)\n", assessment.Trust.Score, assessment.Trust.LevelName))
+
+	sb.WriteString("\nTrust factors:\n")
+	sb.WriteString(fmt.Sprintf("  Signature:  verifiable=%t validated=%t skipped=%t points=%d\n",
+		assessment.Trust.Factors.Signature.Verifiable,
+		assessment.Trust.Factors.Signature.Validated,
+		assessment.Trust.Factors.Signature.Skipped,
+		assessment.Trust.Factors.Signature.Points))
+	sb.WriteString(fmt.Sprintf("  Checksum:   verifiable=%t validated=%t skipped=%t algo=%s points=%d\n",
+		assessment.Trust.Factors.Checksum.Verifiable,
+		assessment.Trust.Factors.Checksum.Validated,
+		assessment.Trust.Factors.Checksum.Skipped,
+		assessment.Trust.Factors.Checksum.Algorithm,
+		assessment.Trust.Factors.Checksum.Points))
+	sb.WriteString(fmt.Sprintf("  Transport:  https=%t points=%d\n",
+		assessment.Trust.Factors.Transport.HTTPS,
+		assessment.Trust.Factors.Transport.Points))
+	sb.WriteString(fmt.Sprintf("  Algorithm:  name=%s points=%d\n",
+		assessment.Trust.Factors.Algorithm.Name,
+		assessment.Trust.Factors.Algorithm.Points))
+
+	if len(assessment.Warnings) > 0 {
+		sb.WriteString("\nWarnings:\n")
+		for _, w := range assessment.Warnings {
+			sb.WriteString(fmt.Sprintf("  - %s\n", w))
+		}
+	}
+
+	return sb.String()
+}
+
+func normalizeArgs(args []string) []string {
+	if len(args) > 1 && !strings.HasPrefix(args[0], "-") && strings.Contains(args[0], "://") {
+		return append(args[1:], args[0])
+	}
+	return args
+}
+
 func run(args []string, stdout, stderr io.Writer) int {
+	args = normalizeArgs(args)
 	fs := flag.NewFlagSet("sfetch", flag.ContinueOnError)
+
 	fs.SetOutput(io.Discard)
 
 	repo := fs.String("repo", "", "GitHub repo owner/repo")
@@ -1038,6 +1649,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	destDir := fs.String("dest-dir", "", "destination directory")
 	output := fs.String("output", "", "output path")
 	cacheDir := fs.String("cache-dir", "", "cache directory")
+	githubRaw := fs.String("github-raw", "", "fetch raw GitHub content owner/repo@ref:path")
+	urlFlag := fs.String("url", "", "fetch arbitrary URL (https only by default)")
+	allowHTTP := fs.Bool("allow-http", false, "allow http:// URLs (unsafe)")
+	followRedirects := fs.Bool("follow-redirects", false, "follow URL redirects (disabled by default)")
+	maxRedirects := fs.Int("max-redirects", 5, "maximum redirects to follow when --follow-redirects is set")
+	allowedContentTypes := fs.String("allowed-content-types", "", "comma-separated content types to allow for --url")
+	allowUnknownContentType := fs.Bool("allow-unknown-content-type", false, "allow unknown content types for --url")
 	httpProxy := fs.String("http-proxy", "", "HTTP proxy URL (overrides HTTP_PROXY)")
 	httpsProxy := fs.String("https-proxy", "", "HTTPS proxy URL (overrides HTTPS_PROXY)")
 	noProxy := fs.String("no-proxy", "", "comma-separated proxy bypass list (overrides NO_PROXY)")
@@ -1092,12 +1710,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(out, "Usage: sfetch [flags]\n\n") //nolint:errcheck // help output best-effort
 
 		_, _ = fmt.Fprintln(out, "Selection:") //nolint:errcheck
-		for _, name := range []string{"repo", "tag", "latest", "asset-match", "asset-regex", "asset-type", "binary-name", "output", "dest-dir", "install", "cache-dir"} {
+		for _, name := range []string{"repo", "github-raw", "url", "tag", "latest", "asset-match", "asset-regex", "asset-type", "binary-name", "output", "dest-dir", "install", "cache-dir"} {
 			printFlag(name)
 		}
 
 		_, _ = fmt.Fprintln(out, "\nNetwork:") //nolint:errcheck
 		for _, name := range []string{"http-proxy", "https-proxy", "no-proxy"} {
+			printFlag(name)
+		}
+
+		_, _ = fmt.Fprintln(out, "\nURL safety:") //nolint:errcheck
+		for _, name := range []string{"allow-http", "follow-redirects", "max-redirects", "allowed-content-types", "allow-unknown-content-type"} {
 			printFlag(name)
 		}
 
@@ -1271,6 +1894,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	if len(fs.Args()) > 0 {
+		if *repo == "" && *githubRaw == "" && strings.TrimSpace(*urlFlag) == "" {
+			if len(fs.Args()) > 1 {
+				_, _ = fmt.Fprintln(stderr, "error: only one positional URL is supported") //nolint:errcheck
+				return 1
+			}
+			*urlFlag = fs.Arg(0)
+		} else {
+			_, _ = fmt.Fprintln(stderr, "error: unexpected positional arguments") //nolint:errcheck
+			return 1
+		}
+	}
+
 	// Handle --install: set destDir to user bin directory
 	if *install {
 		if *destDir != "" || *output != "" {
@@ -1283,6 +1919,601 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		*destDir = path
+	}
+
+	var parsedURL *urlSpec
+	if urlInput := strings.TrimSpace(*urlFlag); urlInput != "" {
+		if *selfUpdate {
+			_, _ = fmt.Fprintln(stderr, "error: --url cannot be used with --self-update") //nolint:errcheck
+			return 1
+		}
+		if *githubRaw != "" {
+			_, _ = fmt.Fprintln(stderr, "error: --url cannot be used with --github-raw") //nolint:errcheck
+			return 1
+		}
+		if *repo != "" || *tag != "" || *latest {
+			_, _ = fmt.Fprintln(stderr, "error: --url is mutually exclusive with --repo/--tag/--latest") //nolint:errcheck
+			return 1
+		}
+		if *assetMatch != "" || *assetRegex != "" {
+			_, _ = fmt.Fprintln(stderr, "error: --url cannot be used with --asset-match/--asset-regex") //nolint:errcheck
+			return 1
+		}
+
+		spec, rawSpec, err := parseURLSpec(urlInput, *allowHTTP)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "error:", err) //nolint:errcheck
+			return 1
+		}
+		if rawSpec != nil {
+			*githubRaw = fmt.Sprintf("%s@%s:%s", rawSpec.Repo, rawSpec.Ref, rawSpec.Path)
+		} else {
+			parsedURL = &spec
+		}
+	}
+
+	if parsedURL != nil {
+		urlOpts := urlFetchOptions{
+			allowHTTP:               *allowHTTP,
+			followRedirects:         *followRedirects,
+			maxRedirects:            *maxRedirects,
+			allowedContentTypes:     parseAllowedContentTypes(*allowedContentTypes),
+			allowUnknownContentType: *allowUnknownContentType,
+		}
+		if urlOpts.followRedirects && urlOpts.maxRedirects < 0 {
+			_, _ = fmt.Fprintln(stderr, "error: --max-redirects must be >= 0") //nolint:errcheck
+			return 1
+		}
+
+		cfg := configForURL(parsedURL.AssetName, *binaryNameFlag)
+		selected := &Asset{
+			Name:               parsedURL.AssetName,
+			BrowserDownloadUrl: parsedURL.URL,
+			Size:               0,
+		}
+
+		classification, classifyWarnings, err := classifyAsset(selected.Name, cfg, *assetTypeFlag)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
+			return 1
+		}
+
+		// Build assessment flags from CLI
+		aflags := assessmentFlags{
+			skipSig:         *skipSig,
+			skipChecksum:    *skipChecksum,
+			insecure:        *insecure,
+			preferPerAsset:  *preferPerAsset,
+			requireMinisign: *requireMinisign,
+
+			minisignKeyConfigured: *minisignPubKey != "" || *minisignKeyURL != "" || *minisignKeyAsset != "",
+			pgpKeyConfigured:      *pgpKeyFile != "" || *pgpKeyURL != "" || *pgpKeyAsset != "",
+			ed25519KeyConfigured:  *key != "",
+			gpgBin:                *gpgBin,
+		}
+
+		parsedScheme := strings.ToLower(strings.TrimSpace(parsedURL.URL))
+		httpsUsed := strings.HasPrefix(parsedScheme, "https://")
+		assessment := assessURL(selected, aflags, httpsUsed)
+		assessment.Warnings = append(classifyWarnings, assessment.Warnings...)
+
+		if aflags.minisignKeyConfigured || aflags.pgpKeyConfigured || aflags.ed25519KeyConfigured {
+			assessment.Warnings = append(assessment.Warnings, "verification keys are ignored for --url (no signatures available)")
+		}
+
+		var probeResult urlFetchResult
+		var probeErr error
+		if *dryRun || *provenance || *provenanceFile != "" {
+			result, err := probeURL(parsedURL.URL, urlOpts)
+			probeResult = result
+			if err != nil {
+				probeErr = err
+			}
+		}
+		if probeErr != nil && !*dryRun {
+			_, _ = fmt.Fprintln(stderr, "error:", probeErr) //nolint:errcheck
+			return 1
+		}
+		if probeErr != nil {
+			assessment.Warnings = append(assessment.Warnings, probeErr.Error())
+		}
+
+		if *dryRun {
+			if *provenance || *provenanceFile != "" {
+				aflags.dryRun = true
+				record := buildURLProvenanceRecord(parsedURL.URL, "", selected, assessment, aflags, "", probeResult.redirects)
+				if err := outputProvenance(record, *provenanceFile); err != nil {
+					_, _ = fmt.Fprintf(stderr, "error: %v\n", err) //nolint:errcheck
+					return 1
+				}
+			} else {
+				_, _ = fmt.Fprint(stderr, formatURLDryRunOutput(*parsedURL, probeResult, assessment)) //nolint:errcheck // best-effort output
+			}
+			if probeErr != nil {
+				return 1
+			}
+			return 0
+		}
+
+		if *trustMinimum < 0 || *trustMinimum > 100 {
+			_, _ = fmt.Fprintln(stderr, "error: --trust-minimum must be between 0 and 100") //nolint:errcheck
+			return 1
+		}
+		if assessment.Trust.Score < *trustMinimum {
+			_, _ = fmt.Fprintf(stderr, "error: trust score %d/100 (%s) is below --trust-minimum %d\n", assessment.Trust.Score, assessment.Trust.LevelName, *trustMinimum) //nolint:errcheck
+			_, _ = fmt.Fprintln(stderr, "trust factors:")                                                                                                                 //nolint:errcheck
+			_, _ = fmt.Fprintf(stderr, "  signature:  verifiable=%t validated=%t skipped=%t points=%d\n",                                                                 //nolint:errcheck
+				assessment.Trust.Factors.Signature.Verifiable,
+				assessment.Trust.Factors.Signature.Validated,
+				assessment.Trust.Factors.Signature.Skipped,
+				assessment.Trust.Factors.Signature.Points)
+			_, _ = fmt.Fprintf(stderr, "  checksum:   verifiable=%t validated=%t skipped=%t algo=%s points=%d\n", //nolint:errcheck
+				assessment.Trust.Factors.Checksum.Verifiable,
+				assessment.Trust.Factors.Checksum.Validated,
+				assessment.Trust.Factors.Checksum.Skipped,
+				assessment.Trust.Factors.Checksum.Algorithm,
+				assessment.Trust.Factors.Checksum.Points)
+			_, _ = fmt.Fprintf(stderr, "  transport:  https=%t points=%d\n", //nolint:errcheck
+				assessment.Trust.Factors.Transport.HTTPS,
+				assessment.Trust.Factors.Transport.Points)
+			_, _ = fmt.Fprintf(stderr, "  algorithm:  name=%s points=%d\n", //nolint:errcheck
+				assessment.Trust.Factors.Algorithm.Name,
+				assessment.Trust.Factors.Algorithm.Points)
+			return 1
+		}
+
+		_, _ = fmt.Fprintf(stderr, "Trust: %d/100 (%s)\n", assessment.Trust.Score, assessment.Trust.LevelName) //nolint:errcheck
+		for _, w := range assessment.Warnings {
+			_, _ = fmt.Fprintf(stderr, "warning: %s\n", w) //nolint:errcheck
+		}
+
+		if assessment.Workflow == workflowNone {
+			_, _ = fmt.Fprintln(stderr, "note: proceeding without verification artifacts provided by the source") //nolint:errcheck
+		}
+
+		tmpDir, err := os.MkdirTemp("", "sfetch-*")
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "error: mkdir temp: %v\n", err) //nolint:errcheck
+			return 1
+		}
+		defer os.RemoveAll(tmpDir) //nolint:errcheck // best-effort cleanup of temp dir
+
+		assetPath := filepath.Join(tmpDir, selected.Name)
+		downloadResult, err := downloadURL(selected.BrowserDownloadUrl, assetPath, urlOpts)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
+			return 1
+		}
+
+		// #nosec G304 -- assetPath tmp controlled
+		assetBytes, err := os.ReadFile(assetPath)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "read asset: %v\n", err) //nolint:errcheck
+			return 1
+		}
+		selected.Size = int64(len(assetBytes))
+
+		hashAlgo := cfg.HashAlgo
+		var h hash.Hash
+		switch hashAlgo {
+		case "sha256":
+			h = sha256.New()
+		case "sha512":
+			h = sha512.New()
+		default:
+			_, _ = fmt.Fprintf(stderr, "unknown hash algo %q\n", hashAlgo) //nolint:errcheck
+			return 1
+		}
+		h.Write(assetBytes)
+		actualHash := hex.EncodeToString(h.Sum(nil))
+
+		binaryName := cfg.BinaryName
+		installName := binaryName
+		var binaryPath string
+
+		switch classification.Type {
+		case AssetTypeArchive:
+			extractDir := filepath.Join(tmpDir, "extract")
+			if err := // #nosec G301 -- extractDir tmpdir controlled
+				os.Mkdir(extractDir, 0o755); err != nil {
+				_, _ = fmt.Fprintf(stderr, "mkdir extract: %v\n", err) //nolint:errcheck
+				return 1
+			}
+
+			switch classification.ArchiveFormat {
+			case ArchiveFormatZip:
+				if err := extractZip(assetPath, extractDir); err != nil {
+					_, _ = fmt.Fprintf(stderr, "extract zip: %v\n", err) //nolint:errcheck
+					return 1
+				}
+			case ArchiveFormatTarXz:
+				// #nosec G204 -- assetPath tmp controlled
+				cmd := exec.Command("tar", "xJf", assetPath, "-C", extractDir)
+				if err := cmd.Run(); err != nil {
+					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
+					return 1
+				}
+			case ArchiveFormatTarBz2:
+				// #nosec G204 -- assetPath tmp controlled
+				cmd := exec.Command("tar", "xjf", assetPath, "-C", extractDir)
+				if err := cmd.Run(); err != nil {
+					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
+					return 1
+				}
+			case ArchiveFormatTar:
+				// #nosec G204 -- assetPath tmp controlled
+				cmd := exec.Command("tar", "xf", assetPath, "-C", extractDir)
+				if err := cmd.Run(); err != nil {
+					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
+					return 1
+				}
+			case ArchiveFormatTarGz:
+				fallthrough
+			default:
+				// #nosec G204 -- assetPath tmp controlled
+				cmd := exec.Command("tar", "xzf", assetPath, "-C", extractDir)
+				if err := cmd.Run(); err != nil {
+					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
+					return 1
+				}
+			}
+
+			binaryPath = filepath.Join(extractDir, binaryName)
+			if _, err := os.Stat(binaryPath); err != nil {
+				_, _ = fmt.Fprintf(stderr, "binary %s not found in archive\n", binaryName) //nolint:errcheck
+				return 1
+			}
+
+			if err := // #nosec G302 -- binaryPath extracted tmp chmod +x safe
+				os.Chmod(binaryPath, 0o755); err != nil {
+				_, _ = fmt.Fprintf(stderr, "chmod: %v\n", err) //nolint:errcheck
+				return 1
+			}
+
+		case AssetTypePackage:
+			installName = selected.Name
+			binaryPath = assetPath
+		case AssetTypeRaw:
+			installName = selected.Name
+			binaryPath = assetPath
+		default:
+			installName = selected.Name
+			binaryPath = assetPath
+		}
+
+		if binaryPath == "" {
+			_, _ = fmt.Fprintln(stderr, "error: could not resolve binary path") //nolint:errcheck
+			return 1
+		}
+
+		var finalPath string
+		if *output != "" {
+			finalPath = *output
+		} else if *destDir != "" {
+			finalPath = filepath.Join(*destDir, installName)
+		} else {
+			_, _ = fmt.Fprintf(stderr, "warning: no --dest-dir or --output specified, installing to current directory\n") //nolint:errcheck
+			_, _ = fmt.Fprintf(stderr, "  hint: use --install to install to %s\n", userBinDirDisplay())                   //nolint:errcheck
+			finalPath = installName
+		}
+
+		if runtime.GOOS == "linux" {
+			dest := filepath.Dir(finalPath)
+			if dest != "." && dest != "" && hostenv.IsNoExecMount(dest) {
+				_, _ = fmt.Fprintf(stderr, "warning: destination %s appears to be mounted noexec; installed binaries may fail to run\n", dest) //nolint:errcheck
+				_, _ = fmt.Fprintln(stderr, "  hint: choose a different --dest-dir/--output location; noexec cannot be fixed with chmod")      //nolint:errcheck
+			}
+		}
+
+		if err := // #nosec G301 -- Dir(finalPath) user-controlled safe mkdir tmp
+			os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
+			_, _ = fmt.Fprintf(stderr, "mkdir %s: %v\n", filepath.Dir(finalPath), err) //nolint:errcheck
+			return 1
+		}
+
+		installedPath, err := installFile(binaryPath, finalPath, classification, false)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "install to %s: %v\n", finalPath, err) //nolint:errcheck
+			return 1
+		}
+		finalPath = installedPath
+
+		_, _ = fmt.Fprintln(stderr, "Source: url")                                 //nolint:errcheck
+		_, _ = fmt.Fprintf(stderr, "URL: %s\n", parsedURL.URL)                     //nolint:errcheck
+		_, _ = fmt.Fprintf(stderr, "Installed %s to %s\n", installName, finalPath) //nolint:errcheck
+
+		if classification.IsScript {
+			_, _ = fmt.Fprintln(stderr, "Review before running:")       //nolint:errcheck
+			_, _ = fmt.Fprintf(stderr, "  less %s\n", finalPath)        //nolint:errcheck
+			_, _ = fmt.Fprintf(stderr, "  bash -x %s\n", finalPath)     //nolint:errcheck
+			_, _ = fmt.Fprintf(stderr, "  shellsentry %s\n", finalPath) //nolint:errcheck
+		}
+
+		if *provenance || *provenanceFile != "" {
+			record := buildURLProvenanceRecord(parsedURL.URL, "", selected, assessment, aflags, actualHash, downloadResult.redirects)
+			if err := outputProvenance(record, *provenanceFile); err != nil {
+				_, _ = fmt.Fprintf(stderr, "warning: %v\n", err) //nolint:errcheck
+			}
+		}
+
+		return 0
+	}
+
+	if *githubRaw != "" {
+		if *selfUpdate {
+			_, _ = fmt.Fprintln(stderr, "error: --github-raw cannot be used with --self-update") //nolint:errcheck
+			return 1
+		}
+		if *repo != "" || *tag != "" || *latest {
+			_, _ = fmt.Fprintln(stderr, "error: --github-raw is mutually exclusive with --repo/--tag/--latest") //nolint:errcheck
+			return 1
+		}
+		if *assetMatch != "" || *assetRegex != "" {
+			_, _ = fmt.Fprintln(stderr, "error: --github-raw cannot be used with --asset-match/--asset-regex") //nolint:errcheck
+			return 1
+		}
+
+		spec, err := parseGitHubRawSpec(*githubRaw)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "error:", err) //nolint:errcheck
+			return 1
+		}
+
+		cfg := getConfig(spec.Repo)
+		if *binaryNameFlag != "" {
+			cfg.BinaryName = *binaryNameFlag
+		}
+
+		selected := &Asset{
+			Name:               spec.AssetName,
+			BrowserDownloadUrl: spec.URL,
+			Size:               0,
+		}
+
+		classification, classifyWarnings, err := classifyAsset(selected.Name, cfg, *assetTypeFlag)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
+			return 1
+		}
+
+		// Build assessment flags from CLI
+		aflags := assessmentFlags{
+			skipSig:         *skipSig,
+			skipChecksum:    *skipChecksum,
+			insecure:        *insecure,
+			preferPerAsset:  *preferPerAsset,
+			requireMinisign: *requireMinisign,
+
+			minisignKeyConfigured: *minisignPubKey != "" || *minisignKeyURL != "" || *minisignKeyAsset != "",
+			pgpKeyConfigured:      *pgpKeyFile != "" || *pgpKeyURL != "" || *pgpKeyAsset != "",
+			ed25519KeyConfigured:  *key != "",
+			gpgBin:                *gpgBin,
+		}
+
+		assessment := assessRawGitHub(selected, aflags)
+		assessment.Warnings = append(classifyWarnings, assessment.Warnings...)
+
+		if aflags.minisignKeyConfigured || aflags.pgpKeyConfigured || aflags.ed25519KeyConfigured {
+			assessment.Warnings = append(assessment.Warnings, "verification keys are ignored for --github-raw (no signatures available)")
+		}
+
+		if *dryRun {
+			if *provenance || *provenanceFile != "" {
+				aflags.dryRun = true
+				record := buildURLProvenanceRecord(spec.URL, spec.Repo, selected, assessment, aflags, "", nil)
+				if err := outputProvenance(record, *provenanceFile); err != nil {
+					_, _ = fmt.Fprintf(stderr, "error: %v\n", err) //nolint:errcheck
+					return 1
+				}
+			} else {
+				_, _ = fmt.Fprint(stderr, formatRawDryRunOutput(spec, assessment)) //nolint:errcheck // best-effort output
+			}
+			return 0
+		}
+
+		if *trustMinimum < 0 || *trustMinimum > 100 {
+			_, _ = fmt.Fprintln(stderr, "error: --trust-minimum must be between 0 and 100") //nolint:errcheck
+			return 1
+		}
+		if assessment.Trust.Score < *trustMinimum {
+			_, _ = fmt.Fprintf(stderr, "error: trust score %d/100 (%s) is below --trust-minimum %d\n", assessment.Trust.Score, assessment.Trust.LevelName, *trustMinimum) //nolint:errcheck
+			_, _ = fmt.Fprintln(stderr, "trust factors:")                                                                                                                 //nolint:errcheck
+			_, _ = fmt.Fprintf(stderr, "  signature:  verifiable=%t validated=%t skipped=%t points=%d\n",                                                                 //nolint:errcheck
+				assessment.Trust.Factors.Signature.Verifiable,
+				assessment.Trust.Factors.Signature.Validated,
+				assessment.Trust.Factors.Signature.Skipped,
+				assessment.Trust.Factors.Signature.Points)
+			_, _ = fmt.Fprintf(stderr, "  checksum:   verifiable=%t validated=%t skipped=%t algo=%s points=%d\n", //nolint:errcheck
+				assessment.Trust.Factors.Checksum.Verifiable,
+				assessment.Trust.Factors.Checksum.Validated,
+				assessment.Trust.Factors.Checksum.Skipped,
+				assessment.Trust.Factors.Checksum.Algorithm,
+				assessment.Trust.Factors.Checksum.Points)
+			_, _ = fmt.Fprintf(stderr, "  transport:  https=%t points=%d\n", //nolint:errcheck
+				assessment.Trust.Factors.Transport.HTTPS,
+				assessment.Trust.Factors.Transport.Points)
+			_, _ = fmt.Fprintf(stderr, "  algorithm:  name=%s points=%d\n", //nolint:errcheck
+				assessment.Trust.Factors.Algorithm.Name,
+				assessment.Trust.Factors.Algorithm.Points)
+			return 1
+		}
+
+		_, _ = fmt.Fprintf(stderr, "Trust: %d/100 (%s)\n", assessment.Trust.Score, assessment.Trust.LevelName) //nolint:errcheck
+		for _, w := range assessment.Warnings {
+			_, _ = fmt.Fprintf(stderr, "warning: %s\n", w) //nolint:errcheck
+		}
+
+		if assessment.Workflow == workflowNone {
+			_, _ = fmt.Fprintln(stderr, "note: proceeding without verification artifacts provided by the source") //nolint:errcheck
+		}
+
+		tmpDir, err := os.MkdirTemp("", "sfetch-*")
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "error: mkdir temp: %v\n", err) //nolint:errcheck
+			return 1
+		}
+		defer os.RemoveAll(tmpDir) //nolint:errcheck // best-effort cleanup of temp dir
+
+		assetPath := filepath.Join(tmpDir, selected.Name)
+		if err := download(selected.BrowserDownloadUrl, assetPath); err != nil {
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
+			return 1
+		}
+
+		// #nosec G304 -- assetPath tmp controlled
+		assetBytes, err := os.ReadFile(assetPath)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "read asset: %v\n", err) //nolint:errcheck
+			return 1
+		}
+		selected.Size = int64(len(assetBytes))
+
+		hashAlgo := cfg.HashAlgo
+		var h hash.Hash
+		switch hashAlgo {
+		case "sha256":
+			h = sha256.New()
+		case "sha512":
+			h = sha512.New()
+		default:
+			_, _ = fmt.Fprintf(stderr, "unknown hash algo %q\n", hashAlgo) //nolint:errcheck
+			return 1
+		}
+		h.Write(assetBytes)
+		actualHash := hex.EncodeToString(h.Sum(nil))
+
+		binaryName := cfg.BinaryName
+		installName := binaryName
+		var binaryPath string
+
+		switch classification.Type {
+		case AssetTypeArchive:
+			extractDir := filepath.Join(tmpDir, "extract")
+			if err := // #nosec G301 -- extractDir tmpdir controlled
+				os.Mkdir(extractDir, 0o755); err != nil {
+				_, _ = fmt.Fprintf(stderr, "mkdir extract: %v\n", err) //nolint:errcheck
+				return 1
+			}
+
+			switch classification.ArchiveFormat {
+			case ArchiveFormatZip:
+				if err := extractZip(assetPath, extractDir); err != nil {
+					_, _ = fmt.Fprintf(stderr, "extract zip: %v\n", err) //nolint:errcheck
+					return 1
+				}
+			case ArchiveFormatTarXz:
+				// #nosec G204 -- assetPath tmp controlled
+				cmd := exec.Command("tar", "xJf", assetPath, "-C", extractDir)
+				if err := cmd.Run(); err != nil {
+					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
+					return 1
+				}
+			case ArchiveFormatTarBz2:
+				// #nosec G204 -- assetPath tmp controlled
+				cmd := exec.Command("tar", "xjf", assetPath, "-C", extractDir)
+				if err := cmd.Run(); err != nil {
+					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
+					return 1
+				}
+			case ArchiveFormatTar:
+				// #nosec G204 -- assetPath tmp controlled
+				cmd := exec.Command("tar", "xf", assetPath, "-C", extractDir)
+				if err := cmd.Run(); err != nil {
+					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
+					return 1
+				}
+			case ArchiveFormatTarGz:
+				fallthrough
+			default:
+				// #nosec G204 -- assetPath tmp controlled
+				cmd := exec.Command("tar", "xzf", assetPath, "-C", extractDir)
+				if err := cmd.Run(); err != nil {
+					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
+					return 1
+				}
+			}
+
+			binaryPath = filepath.Join(extractDir, binaryName)
+			if _, err := os.Stat(binaryPath); err != nil {
+				_, _ = fmt.Fprintf(stderr, "binary %s not found in archive\n", binaryName) //nolint:errcheck
+				return 1
+			}
+
+			if err := // #nosec G302 -- binaryPath extracted tmp chmod +x safe
+				os.Chmod(binaryPath, 0o755); err != nil {
+				_, _ = fmt.Fprintf(stderr, "chmod: %v\n", err) //nolint:errcheck
+				return 1
+			}
+
+		case AssetTypePackage:
+			installName = selected.Name
+			binaryPath = assetPath
+		case AssetTypeRaw:
+			installName = selected.Name
+			binaryPath = assetPath
+		default:
+			installName = selected.Name
+			binaryPath = assetPath
+		}
+
+		if binaryPath == "" {
+			_, _ = fmt.Fprintln(stderr, "error: could not resolve binary path") //nolint:errcheck
+			return 1
+		}
+
+		var finalPath string
+		if *output != "" {
+			finalPath = *output
+		} else if *destDir != "" {
+			finalPath = filepath.Join(*destDir, installName)
+		} else {
+			_, _ = fmt.Fprintf(stderr, "warning: no --dest-dir or --output specified, installing to current directory\n") //nolint:errcheck
+			_, _ = fmt.Fprintf(stderr, "  hint: use --install to install to %s\n", userBinDirDisplay())                   //nolint:errcheck
+			finalPath = installName
+		}
+
+		if runtime.GOOS == "linux" {
+			dest := filepath.Dir(finalPath)
+			if dest != "." && dest != "" && hostenv.IsNoExecMount(dest) {
+				_, _ = fmt.Fprintf(stderr, "warning: destination %s appears to be mounted noexec; installed binaries may fail to run\n", dest) //nolint:errcheck
+				_, _ = fmt.Fprintln(stderr, "  hint: choose a different --dest-dir/--output location; noexec cannot be fixed with chmod")      //nolint:errcheck
+			}
+		}
+
+		if err := // #nosec G301 -- Dir(finalPath) user-controlled safe mkdir tmp
+			os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
+			_, _ = fmt.Fprintf(stderr, "mkdir %s: %v\n", filepath.Dir(finalPath), err) //nolint:errcheck
+			return 1
+		}
+
+		installedPath, err := installFile(binaryPath, finalPath, classification, false)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "install to %s: %v\n", finalPath, err) //nolint:errcheck
+			return 1
+		}
+		finalPath = installedPath
+
+		_, _ = fmt.Fprintln(stderr, "Source: github raw")                          //nolint:errcheck
+		_, _ = fmt.Fprintf(stderr, "Repository: %s\n", spec.Repo)                  //nolint:errcheck
+		_, _ = fmt.Fprintf(stderr, "Ref: %s\n", spec.Ref)                          //nolint:errcheck
+		_, _ = fmt.Fprintf(stderr, "Path: %s\n", spec.Path)                        //nolint:errcheck
+		_, _ = fmt.Fprintf(stderr, "Installed %s to %s\n", installName, finalPath) //nolint:errcheck
+
+		if classification.IsScript {
+			_, _ = fmt.Fprintln(stderr, "Review before running:")       //nolint:errcheck
+			_, _ = fmt.Fprintf(stderr, "  less %s\n", finalPath)        //nolint:errcheck
+			_, _ = fmt.Fprintf(stderr, "  bash -x %s\n", finalPath)     //nolint:errcheck
+			_, _ = fmt.Fprintf(stderr, "  shellsentry %s\n", finalPath) //nolint:errcheck
+		}
+
+		if *provenance || *provenanceFile != "" {
+			record := buildURLProvenanceRecord(spec.URL, spec.Repo, selected, assessment, aflags, actualHash, nil)
+			if err := outputProvenance(record, *provenanceFile); err != nil {
+				_, _ = fmt.Fprintf(stderr, "warning: %v\n", err) //nolint:errcheck
+			}
+		}
+
+		return 0
 	}
 
 	if *repo == "" {
@@ -1911,6 +3142,26 @@ func inferBinaryName(repo string) string {
 		return parts[1]
 	}
 	return repo // fallback to full string if no slash
+}
+
+func inferBinaryNameFromAssetName(assetName string) string {
+	if assetName == "" {
+		return defaults.BinaryName
+	}
+	trimmed := trimExtensionCI(assetName, defaults.ArchiveExtensions)
+	if trimmed == "" {
+		return assetName
+	}
+	return trimmed
+}
+
+func configForURL(assetName string, binaryOverride string) *RepoConfig {
+	cfg := defaults
+	cfg.BinaryName = inferBinaryNameFromAssetName(assetName)
+	if binaryOverride != "" {
+		cfg.BinaryName = binaryOverride
+	}
+	return &cfg
 }
 
 type AssetClassification struct {

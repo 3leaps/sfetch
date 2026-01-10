@@ -6,6 +6,7 @@
     "expectedWorkflow": "A",
     "expectSuccess": true,
     "tier": "fast",
+    "category": "release",
     "note": "Minisign checksum-level signature"
   },
   {
@@ -15,6 +16,7 @@
     "expectedWorkflow": "A",
     "expectSuccess": true,
     "tier": "fast",
+    "category": "release",
     "note": "Shellsentry binary - minisign checksum-level signature (SHA2-512SUMS)"
   },
   {
@@ -24,6 +26,7 @@
     "expectedWorkflow": "A",
     "expectSuccess": true,
     "tier": "fast",
+    "category": "release",
     "note": "Shellsentry installer script - minisign checksum-level signature"
   },
   {
@@ -33,6 +36,7 @@
     "expectedWorkflow": "B",
     "expectSuccess": true,
     "tier": "fast",
+    "category": "release",
     "note": "Per-asset minisign (.minisig sidecar)"
   },
   {
@@ -42,6 +46,7 @@
     "expectedWorkflow": "C",
     "expectSuccess": true,
     "tier": "fast",
+    "category": "release",
     "note": "Checksum-only (checksums.txt)"
   },
   {
@@ -51,6 +56,7 @@
     "expectedWorkflow": "C",
     "expectSuccess": true,
     "tier": "fast",
+    "category": "release",
     "note": "Versioned checksum file (fzf_X.Y.Z_checksums.txt)"
   },
   {
@@ -60,37 +66,8 @@
     "expectedWorkflow": "none",
     "expectSuccess": true,
     "tier": "fast",
+    "category": "release",
     "note": "No checksums/signatures; should be workflow none"
-  },
-  {
-    "repo": "https://claude.ai/install.sh",
-    "tag": "n/a",
-    "assetMatch": "install.sh",
-    "expectedWorkflow": "none",
-    "expectSuccess": false,
-    "tier": "fast",
-    "note": "Claude Code installer script pattern (not GitHub release assets; expected failure until generalized URL + raw GitHub content acquisition)",
-    "pattern": "curl -fsSL https://claude.ai/install.sh | bash"
-  },
-  {
-    "repo": "https://get.docker.com",
-    "tag": "n/a",
-    "assetMatch": "get-docker.sh",
-    "expectedWorkflow": "none",
-    "expectSuccess": false,
-    "tier": "fast",
-    "note": "Docker convenience installer (often requires sudo / system package installs). Track as a common curl|sh pattern; expected failure until generalized URL acquisition",
-    "pattern": "curl -fsSL https://get.docker.com | sh"
-  },
-  {
-    "repo": "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3",
-    "tag": "n/a",
-    "assetMatch": "get-helm-3",
-    "expectedWorkflow": "none",
-    "expectSuccess": false,
-    "tier": "fast",
-    "note": "Helm install script (often uses sudo to write /usr/local/bin). Track as a common curl|bash pattern; expected failure until raw GitHub content acquisition",
-    "pattern": "curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
   },
   {
     "repo": "BurntSushi/ripgrep",
@@ -99,6 +76,7 @@
     "expectedWorkflow": "C",
     "expectSuccess": true,
     "tier": "fast",
+    "category": "release",
     "note": "Per-asset checksum-only (no signature detected)"
   },
   {
@@ -108,7 +86,8 @@
     "expectedWorkflow": "none",
     "expectSuccess": true,
     "tier": "fast",
-    "note": "No verification artifacts detected (expected to remain low trust until supported)"
+    "category": "release",
+    "note": "No verification artifacts detected"
   },
   {
     "repo": "gohugoio/hugo",
@@ -117,6 +96,7 @@
     "expectedWorkflow": "C",
     "expectSuccess": true,
     "tier": "fast",
+    "category": "release",
     "note": "checksums only (hugo_0.152.2_checksums.txt)"
   },
   {
@@ -126,6 +106,287 @@
     "expectedWorkflow": "A",
     "expectSuccess": true,
     "tier": "fast",
+    "category": "release",
     "note": "Installer script (checksums + minisign)"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3",
+    "tag": "n/a",
+    "assetMatch": "get-helm-3",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "github-raw",
+    "note": "Helm install script",
+    "pattern": "curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh",
+    "tag": "n/a",
+    "assetMatch": "install.sh",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "github-raw",
+    "note": "nvm (Node Version Manager) installer - 81k+ stars",
+    "pattern": "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh",
+    "tag": "n/a",
+    "assetMatch": "install.sh",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "github-raw",
+    "note": "oh-my-zsh installer - 176k+ stars, no releases",
+    "pattern": "sh -c \"$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\""
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/pyenv/pyenv-installer/master/bin/pyenv-installer",
+    "tag": "n/a",
+    "assetMatch": "pyenv-installer",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "github-raw",
+    "note": "pyenv-installer - Python version manager bootstrap",
+    "pattern": "curl -fsSL https://raw.githubusercontent.com/pyenv/pyenv-installer/master/bin/pyenv-installer | bash"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/3leaps/sfetch/main/scripts/install-sfetch.sh",
+    "tag": "n/a",
+    "assetMatch": "install-sfetch.sh",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "github-raw",
+    "note": "OVERLAP TEST: sfetch installer via --github-raw (trust 25) vs release (trust 100)"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/3leaps/shellsentry/main/scripts/install-shellsentry.sh",
+    "tag": "n/a",
+    "assetMatch": "install-shellsentry.sh",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "github-raw",
+    "note": "OVERLAP TEST: shellsentry installer via --github-raw (trust 25) vs release (trust 100)"
+  },
+  {
+    "repo": "https://claude.ai/install.sh",
+    "tag": "n/a",
+    "assetMatch": "install.sh",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "url",
+    "note": "Claude Code installer - redirects to GCS",
+    "pattern": "curl -fsSL https://claude.ai/install.sh | bash"
+  },
+  {
+    "repo": "https://get.docker.com",
+    "tag": "n/a",
+    "assetMatch": "get-docker.sh",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "url",
+    "note": "Docker convenience installer",
+    "pattern": "curl -fsSL https://get.docker.com | sh"
+  },
+  {
+    "repo": "https://sh.rustup.rs",
+    "tag": "n/a",
+    "assetMatch": "rustup-init.sh",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "url",
+    "note": "Rust/rustup installer",
+    "pattern": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+  },
+  {
+    "repo": "https://httpbin.org/ip",
+    "tag": "n/a",
+    "assetMatch": "ip",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "url",
+    "note": "httpbin IP echo - small JSON response"
+  },
+  {
+    "repo": "https://jsonplaceholder.typicode.com/users",
+    "tag": "n/a",
+    "assetMatch": "users",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "url",
+    "note": "JSONPlaceholder API - JSON array response"
+  },
+  {
+    "repo": "https://curl.se/download/curl-8.5.0.tar.gz",
+    "tag": "n/a",
+    "assetMatch": "curl-8.5.0.tar.gz",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "slow",
+    "category": "url",
+    "note": "curl source tarball - checksum available at .sha256"
+  },
+  {
+    "repo": "http://neverssl.com",
+    "tag": "n/a",
+    "assetMatch": "neverssl.html",
+    "expectedWorkflow": "none",
+    "expectSuccess": false,
+    "tier": "fast",
+    "category": "url",
+    "note": "HTTP blocked by default - captive portal buster site"
+  },
+  {
+    "repo": "http://neverssl.com",
+    "tag": "n/a",
+    "assetMatch": "neverssl.html",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "allowHTTP": true,
+    "tier": "fast",
+    "category": "url",
+    "note": "HTTP allowed with --allow-http - captive portal buster site"
+  },
+  {
+    "repo": "http://httpforever.com",
+    "tag": "n/a",
+    "assetMatch": "httpforever.html",
+    "expectedWorkflow": "none",
+    "expectSuccess": false,
+    "tier": "fast",
+    "category": "url",
+    "note": "HTTP blocked by default - reliably insecure connection"
+  },
+  {
+    "repo": "http://httpforever.com",
+    "tag": "n/a",
+    "assetMatch": "httpforever.html",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "allowHTTP": true,
+    "tier": "fast",
+    "category": "url",
+    "note": "HTTP allowed with --allow-http - reliably insecure connection"
+  },
+  {
+    "repo": "http://nossl.sh",
+    "tag": "n/a",
+    "assetMatch": "nossl.txt",
+    "expectedWorkflow": "none",
+    "expectSuccess": false,
+    "tier": "fast",
+    "category": "url",
+    "note": "HTTP blocked by default - returns IP as plain text"
+  },
+  {
+    "repo": "http://nossl.sh",
+    "tag": "n/a",
+    "assetMatch": "nossl.txt",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "allowHTTP": true,
+    "tier": "fast",
+    "category": "url",
+    "note": "HTTP allowed with --allow-http - returns IP as plain text"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/public-apis/public-apis/master/README.md",
+    "tag": "n/a",
+    "assetMatch": "README.md",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "format-test",
+    "note": "Large markdown file - tests text content fetch"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/alexschiller/file-format-commons/master/files/ffc.json",
+    "tag": "n/a",
+    "assetMatch": "ffc.json",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "format-test",
+    "note": "Sample JSON file"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/alexschiller/file-format-commons/master/files/ffc.csv",
+    "tag": "n/a",
+    "assetMatch": "ffc.csv",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "format-test",
+    "note": "Sample CSV file"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/alexschiller/file-format-commons/master/files/ffc.xlsx",
+    "tag": "n/a",
+    "assetMatch": "ffc.xlsx",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "format-test",
+    "note": "Sample XLSX spreadsheet"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/alexschiller/file-format-commons/master/files/ffc.eps",
+    "tag": "n/a",
+    "assetMatch": "ffc.eps",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "format-test",
+    "note": "Sample EPS vector graphic"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/alexschiller/file-format-commons/master/files/ffc.pdf",
+    "tag": "n/a",
+    "assetMatch": "ffc.pdf",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "format-test",
+    "note": "Sample PDF document"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/alexschiller/file-format-commons/master/files/ffc.xml",
+    "tag": "n/a",
+    "assetMatch": "ffc.xml",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "format-test",
+    "note": "Sample XML file"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/alexschiller/file-format-commons/master/files/ffc.png",
+    "tag": "n/a",
+    "assetMatch": "ffc.png",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "format-test",
+    "note": "Sample PNG image"
+  },
+  {
+    "repo": "https://raw.githubusercontent.com/datasets/co2-fossil-global/master/global.csv",
+    "tag": "n/a",
+    "assetMatch": "global.csv",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "format-test",
+    "note": "CO2 dataset CSV - real-world data file"
   }
 ]

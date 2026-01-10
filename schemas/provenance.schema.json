@@ -68,6 +68,14 @@
           "type": "string",
           "format": "uri",
           "description": "Direct download URL (URL sources only)"
+        },
+        "redirects": {
+          "type": "array",
+          "description": "Redirect chain observed during URL fetch",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
         }
       }
     },

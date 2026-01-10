@@ -5,8 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"strings"
 )
 
@@ -18,8 +20,10 @@ type corpusEntry struct {
 	ExpectedWorkflow string `json:"expectedWorkflow"`
 	ExpectSuccess    bool   `json:"expectSuccess"`
 	Tier             string `json:"tier"`
+	Category         string `json:"category"`
 	Note             string `json:"note"`
 	Pattern          string `json:"pattern"`
+	AllowHTTP        bool   `json:"allowHTTP"`
 }
 
 type result struct {
@@ -94,12 +98,32 @@ func main() {
 }
 
 func runEntry(e corpusEntry, dryRunOnly bool, dest, sfetchBin string) result {
-	args := []string{"--repo", e.Repo, "--tag", e.Tag}
-	if e.AssetMatch != "" {
-		args = append(args, "--asset-match", e.AssetMatch)
-	}
-	if e.AssetRegex != "" {
-		args = append(args, "--asset-regex", e.AssetRegex)
+	args := []string{}
+	mode := "release" // default: --repo
+	rawSpec := ""
+
+	// Determine fetch mode based on URL type
+	if spec, err := rawGitHubSpecFromURL(e.Repo); err == nil {
+		// raw.githubusercontent.com → --github-raw
+		mode = "github-raw"
+		rawSpec = spec
+		args = append(args, "--github-raw", rawSpec)
+	} else if isGenericURL(e.Repo) {
+		// Other http/https URLs → --url
+		mode = "url"
+		args = append(args, "--url", e.Repo, "--follow-redirects")
+		if e.AllowHTTP {
+			args = append(args, "--allow-http")
+		}
+	} else {
+		// owner/repo format → --repo + --tag
+		args = append(args, "--repo", e.Repo, "--tag", e.Tag)
+		if e.AssetMatch != "" {
+			args = append(args, "--asset-match", e.AssetMatch)
+		}
+		if e.AssetRegex != "" {
+			args = append(args, "--asset-regex", e.AssetRegex)
+		}
 	}
 
 	args = append(args, "--dry-run")
@@ -124,12 +148,23 @@ func runEntry(e corpusEntry, dryRunOnly bool, dest, sfetchBin string) result {
 
 	// Optional full download when requested and expecting success
 	if !dryRunOnly && e.ExpectSuccess {
-		dlArgs := []string{"--repo", e.Repo, "--tag", e.Tag, "--dest-dir", dest}
-		if e.AssetMatch != "" {
-			dlArgs = append(dlArgs, "--asset-match", e.AssetMatch)
-		}
-		if e.AssetRegex != "" {
-			dlArgs = append(dlArgs, "--asset-regex", e.AssetRegex)
+		var dlArgs []string
+		switch mode {
+		case "github-raw":
+			dlArgs = []string{"--github-raw", rawSpec, "--dest-dir", dest}
+		case "url":
+			dlArgs = []string{"--url", e.Repo, "--follow-redirects", "--dest-dir", dest}
+			if e.AllowHTTP {
+				dlArgs = append(dlArgs, "--allow-http")
+			}
+		default:
+			dlArgs = []string{"--repo", e.Repo, "--tag", e.Tag, "--dest-dir", dest}
+			if e.AssetMatch != "" {
+				dlArgs = append(dlArgs, "--asset-match", e.AssetMatch)
+			}
+			if e.AssetRegex != "" {
+				dlArgs = append(dlArgs, "--asset-regex", e.AssetRegex)
+			}
 		}
 		runCmd(sfetchBin, dlArgs...)
 	}
@@ -200,6 +235,42 @@ func validateEntries(entries []corpusEntry) error {
 	return nil
 }
 
+func rawGitHubSpecFromURL(raw string) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	if !strings.EqualFold(parsed.Host, "raw.githubusercontent.com") {
+		return "", fmt.Errorf("not raw GitHub content")
+	}
+	cleanedPath := path.Clean(parsed.Path)
+	segments := strings.Split(strings.TrimPrefix(cleanedPath, "/"), "/")
+	if len(segments) < 4 {
+		return "", fmt.Errorf("invalid raw GitHub URL")
+	}
+	owner := segments[0]
+	repo := segments[1]
+	ref := segments[2]
+	filePath := strings.Join(segments[3:], "/")
+	if owner == "" || repo == "" || ref == "" || filePath == "" {
+		return "", fmt.Errorf("invalid raw GitHub URL")
+	}
+	return fmt.Sprintf("%s/%s@%s:%s", owner, repo, ref, filePath), nil
+}
+
+// isGenericURL returns true if the string is an http/https URL (not raw.githubusercontent.com)
+func isGenericURL(s string) bool {
+	if !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") {
+		return false
+	}
+	parsed, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	// Exclude raw.githubusercontent.com (handled by --github-raw)
+	return !strings.EqualFold(parsed.Host, "raw.githubusercontent.com")
+}
+
 func firstSet(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
@@ -209,7 +280,7 @@ func firstSet(values ...string) string {
 	return ""
 }
 
-func fatalf(format string, args ...interface{}) {
+func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
 }

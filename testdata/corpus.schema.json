@@ -14,8 +14,17 @@
       "expectedWorkflow": {"type": "string", "enum": ["A", "B", "C", "none", "insecure"]},
       "expectSuccess": {"type": "boolean"},
       "tier": {"type": "string", "enum": ["fast", "slow"]},
+      "category": {
+        "type": "string",
+        "enum": ["release", "github-raw", "url", "format-test"],
+        "description": "Entry category for filtering: release (GitHub releases), github-raw (raw repo content), url (arbitrary URLs), format-test (file format testing)"
+      },
       "note": {"type": "string"},
-      "pattern": {"type": "string"}
+      "pattern": {"type": "string"},
+      "allowHTTP": {
+        "type": "boolean",
+        "description": "Pass --allow-http flag to sfetch (for testing HTTP-only URLs)"
+      }
     },
     "anyOf": [
       {"required": ["assetMatch"]},

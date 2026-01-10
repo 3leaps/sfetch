@@ -533,6 +533,30 @@ func TestCLIFlagValidation(t *testing.T) {
 			wantStderr: "--repo is required",
 		},
 		{
+			name:       "github-raw bypasses repo requirement",
+			args:       []string{"--github-raw", "foo/bar@main:install.sh", "--dry-run", "--skip-tools-check"},
+			wantCode:   0,
+			wantStderr: "sfetch dry-run assessment",
+		},
+		{
+			name:       "url bypasses repo requirement",
+			args:       []string{"--url", "https://example.com/", "--dry-run", "--skip-tools-check"},
+			wantCode:   0,
+			wantStderr: "sfetch dry-run assessment",
+		},
+		{
+			name:       "positional url",
+			args:       []string{"https://example.com/", "--dry-run", "--skip-tools-check"},
+			wantCode:   0,
+			wantStderr: "sfetch dry-run assessment",
+		},
+		{
+			name:       "url conflicts with repo",
+			args:       []string{"--url", "https://example.com/", "--repo", "foo/bar", "--dry-run", "--skip-tools-check"},
+			wantCode:   1,
+			wantStderr: "--url is mutually exclusive",
+		},
+		{
 			name:       "unknown flag",
 			args:       []string{"--nonexistent-flag"},
 			wantCode:   2,
@@ -594,7 +618,7 @@ func TestCLIFlagHelpOutput(t *testing.T) {
 	}
 
 	// Help should document key flags
-	flags := []string{"--repo", "--tag", "--latest", "--insecure", "--dry-run", "--install"}
+	flags := []string{"--repo", "--github-raw", "--url", "--allow-http", "--follow-redirects", "--tag", "--latest", "--insecure", "--dry-run", "--install"}
 	for _, flag := range flags {
 		if !strings.Contains(output, strings.TrimPrefix(flag, "--")) {
 			t.Errorf("help output missing flag %q", flag)
@@ -3069,8 +3093,95 @@ func TestAliasList(t *testing.T) {
 					}
 				}
 				if !found {
-					t.Errorf("aliasList(%q) missing %q; got %v", tt.value, want, got)
+					t.Errorf("aliasList(%q) missing %q", tt.value, want)
 				}
+			}
+		})
+	}
+}
+
+func TestParseURLSpec(t *testing.T) {
+
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		input       string
+		allowHTTP   bool
+		wantURL     urlSpec
+		wantRaw     *githubRawSpec
+		wantErrText string
+	}{
+		{
+			name:    "https_url",
+			input:   "https://example.com/install.sh",
+			wantURL: urlSpec{URL: "https://example.com/install.sh", AssetName: "install.sh"},
+		},
+		{
+			name:    "https_url_no_name",
+			input:   "https://example.com",
+			wantURL: urlSpec{URL: "https://example.com", AssetName: "download"},
+		},
+		{
+			name:  "raw_github_url",
+			input: "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3",
+			wantRaw: &githubRawSpec{
+				Repo:      "helm/helm",
+				Ref:       "main",
+				Path:      "scripts/get-helm-3",
+				URL:       "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3",
+				AssetName: "get-helm-3",
+			},
+		},
+		{
+			name:        "http_url_rejected",
+			input:       "http://example.com/install.sh",
+			wantErrText: "https",
+		},
+		{
+			name:      "http_url_allowed",
+			input:     "http://example.com/install.sh",
+			allowHTTP: true,
+			wantURL:   urlSpec{URL: "http://example.com/install.sh", AssetName: "install.sh"},
+		},
+		{
+			name:        "invalid_url",
+			input:       "://bad",
+			wantErrText: "invalid URL",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, raw, err := parseURLSpec(tc.input, tc.allowHTTP)
+			if tc.wantErrText != "" {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				if !strings.Contains(err.Error(), tc.wantErrText) {
+					t.Fatalf("expected error containing %q, got %q", tc.wantErrText, err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.wantRaw != nil {
+				if raw == nil {
+					t.Fatalf("expected raw spec")
+				}
+				if *raw != *tc.wantRaw {
+					t.Fatalf("raw spec = %+v, want %+v", *raw, *tc.wantRaw)
+				}
+				return
+			}
+			if raw != nil {
+				t.Fatalf("unexpected raw spec")
+			}
+			if got != tc.wantURL {
+				t.Fatalf("url spec = %+v, want %+v", got, tc.wantURL)
 			}
 		})
 	}
@@ -3881,5 +3992,79 @@ func TestApplyProxyConfig(t *testing.T) {
 		if got := os.Getenv(key); got != cfg.NoProxy {
 			t.Fatalf("%s = %q, want %q", key, got, cfg.NoProxy)
 		}
+	}
+}
+
+func TestParseGitHubRawSpec(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		want    githubRawSpec
+		wantErr bool
+	}{
+		{
+			name:  "valid",
+			input: "Homebrew/install@HEAD:install.sh",
+			want: githubRawSpec{
+				Repo:      "Homebrew/install",
+				Ref:       "HEAD",
+				Path:      "install.sh",
+				URL:       "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
+				AssetName: "install.sh",
+			},
+		},
+		{
+			name:  "nested_path",
+			input: "helm/helm@main:scripts/get-helm-3",
+			want: githubRawSpec{
+				Repo:      "helm/helm",
+				Ref:       "main",
+				Path:      "scripts/get-helm-3",
+				URL:       "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3",
+				AssetName: "get-helm-3",
+			},
+		},
+		{
+			name:    "missing_colon",
+			input:   "owner/repo@ref",
+			wantErr: true,
+		},
+		{
+			name:    "missing_at",
+			input:   "owner/repo:path",
+			wantErr: true,
+		},
+		{
+			name:    "missing_repo",
+			input:   "@ref:path",
+			wantErr: true,
+		},
+		{
+			name:    "path_escape",
+			input:   "owner/repo@ref:../secrets.txt",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseGitHubRawSpec(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("parseGitHubRawSpec(%q) = %+v, want %+v", tc.input, got, tc.want)
+			}
+		})
 	}
 }

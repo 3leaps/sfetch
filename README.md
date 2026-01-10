@@ -42,6 +42,27 @@ See [docs/security.md](docs/security.md).
 ### Asset Discovery
 Auto-selects via heuristics ([docs/pattern-matching.md](docs/pattern-matching.md)) and classifies assets (archives vs raw scripts/binaries vs package-like). Raw files skip extraction; scripts/binaries are chmod'd on macOS/Linux. Use `--asset-match` for glob/substring selection or `--asset-regex` for advanced regex.
 
+### Raw GitHub content
+Use `--github-raw owner/repo@ref:path` to fetch raw files from GitHub repositories (e.g., install scripts).
+
+```bash
+sfetch --github-raw Homebrew/install@HEAD:install.sh --dest-dir /tmp
+```
+
+### Arbitrary URLs
+Fetch arbitrary URLs with `--url` or a positional URL. HTTPS is enforced by default; redirects are blocked unless explicitly enabled. Raw GitHub URLs are routed through the GitHub raw flow.
+
+```bash
+sfetch --url https://get.docker.com --output ./get-docker.sh
+```
+
+URL safety flags:
+- `--allow-http` to allow `http://` URLs (unsafe)
+- `--follow-redirects` with `--max-redirects` (default 5)
+- `--allowed-content-types` to restrict MIME types
+- `--allow-unknown-content-type` to bypass content type checks
+- `--dry-run` and provenance output include redirect details
+
 ### Install permissions
 - **Archives** (`.tar.gz`, `.zip`, etc.): Permissions from the archive are preserved. Executables packaged with `0755` remain executable after extraction.
 - **Raw scripts/binaries** (e.g., `install.sh`, `kubectl`): Automatically set to `0755` on macOS/Linux to ensure executability.

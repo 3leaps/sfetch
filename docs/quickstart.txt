@@ -23,6 +23,9 @@ Install a signed release from GitHub in three steps:
 Examples:
   sfetch -repo fulmenhq/goneat -latest -dest-dir ./bin -pgp-key-file fulmen-release.asc
   sfetch -repo 3leaps/sfetch -latest -asset-match "install-sfetch.sh" -dest-dir /tmp
+  sfetch -github-raw Homebrew/install@HEAD:install.sh -dest-dir /tmp
+  sfetch -url https://get.docker.com -output /tmp/get-docker.sh
+  sfetch https://get.docker.com -output /tmp/get-docker.sh
 
 PGP key lookup order:
  1. `-pgp-key-file /path/to/key.asc` (if it starts with http/https, the file is downloaded first)
