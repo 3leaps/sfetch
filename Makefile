@@ -51,7 +51,7 @@ CORPUS_DEST ?= test-corpus
 .PHONY: all help build test clean install fmt lint assess tools bootstrap bootstrap-force
 .PHONY: precommit prepush version corpus corpus-all corpus-dryrun corpus-validate
 .PHONY: release release-download release-checksums release-verify-checksums release-sign
-.PHONY: release-notes release-upload verify-release-key release-export-minisign-key
+.PHONY: release-notes release-upload verify-release-key verify-minisign-pubkey release-export-minisign-key
 .PHONY: release-clean bootstrap-script build-all gosec gosec-high
 .PHONY: version-check version-set version-patch version-minor version-major
 
@@ -328,6 +328,11 @@ release-export-minisign-key: build ## Copy minisign public key to dist/release
 
 verify-release-key: ## Verify PGP key is public-only
 	./scripts/verify-public-key.sh $(DIST_RELEASE)/$(PUBLIC_KEY_NAME)
+
+verify-minisign-pubkey: build ## Verify minisign public key (usage: make verify-minisign-pubkey FILE=path/to/key.pub)
+	@if [ -z "$(FILE)" ]; then echo "usage: make verify-minisign-pubkey FILE=path/to/key.pub" >&2; exit 1; fi
+	@if [ ! -f "$(FILE)" ]; then echo "error: file $(FILE) not found" >&2; exit 1; fi
+	./$(BUILD_ARTIFACT) --verify-minisign-pubkey "$(FILE)"
 
 release-upload: release-notes verify-release-key ## Upload assets and update release notes
 	./scripts/upload-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
