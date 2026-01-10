@@ -7,6 +7,21 @@ status: draft
 
 # Agentic Attribution & Standards
 
+## Operating Model
+
+| Aspect | Setting                                  |
+| ------ | ---------------------------------------- |
+| Mode   | Supervised (human reviews before commit) |
+| Role   | Development Lead (`devlead`)             |
+
+Supervised sessions do not have persistent identity. The supervising maintainer
+(see `MAINTAINERS.md`) is the Committer-of-Record for all commits.
+
+## Roles
+
+sfetch keeps a lightweight local role catalog for offline use: `docs/agent-roles.md`.
+Default to `devlead`, and use specialized roles only when the task requires it.
+
 ## Commit Message Template (REQUIRED)
 
 **All AI-assisted commits MUST end with these three lines:**
