@@ -3810,3 +3810,76 @@ func TestTrustScoreFactorsCopied(t *testing.T) {
 		t.Errorf("Transport.HTTPS not copied")
 	}
 }
+
+func TestNormalizeProxyURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{"empty", "", "", false},
+		{"http", "http://proxy.local:8080", "http://proxy.local:8080", false},
+		{"https", "https://proxy.local", "https://proxy.local", false},
+		{"missing_scheme", "proxy.local:8080", "", true},
+		{"missing_host", "http://", "", true},
+		{"unsupported_scheme", "socks5://proxy.local:1080", "", true},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := normalizeProxyURL(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q", tc.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("normalizeProxyURL(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestApplyProxyConfig(t *testing.T) {
+	cfg := proxyConfig{
+		HTTPProxy:  "http://proxy.local:8080",
+		HTTPSProxy: "https://secure.proxy:8443",
+		NoProxy:    "localhost,127.0.0.1",
+	}
+
+	t.Setenv("HTTP_PROXY", "")
+	t.Setenv("http_proxy", "")
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("https_proxy", "")
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
+
+	if err := applyProxyConfig(cfg); err != nil {
+		t.Fatalf("applyProxyConfig: %v", err)
+	}
+
+	for _, key := range []string{"HTTP_PROXY", "http_proxy"} {
+		if got := os.Getenv(key); got != cfg.HTTPProxy {
+			t.Fatalf("%s = %q, want %q", key, got, cfg.HTTPProxy)
+		}
+	}
+	for _, key := range []string{"HTTPS_PROXY", "https_proxy"} {
+		if got := os.Getenv(key); got != cfg.HTTPSProxy {
+			t.Fatalf("%s = %q, want %q", key, got, cfg.HTTPSProxy)
+		}
+	}
+	for _, key := range []string{"NO_PROXY", "no_proxy"} {
+		if got := os.Getenv(key); got != cfg.NoProxy {
+			t.Fatalf("%s = %q, want %q", key, got, cfg.NoProxy)
+		}
+	}
+}

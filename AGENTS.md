@@ -87,6 +87,7 @@ Keep docs minimal; focus on tests for assurance.
 ### DO NOT
 - **Push code without maintainer approval** - All changes must be reviewed before pushing to main
 - **Push code except at tag and release merge points** - Only push when creating releases or merging approved release branches
+- **Stage or commit `.plans/` files** - The `.plans/` directory is gitignored; it contains local planning docs that are not part of the repo
 - Commit directly to main branch - Use feature branches and pull requests
 - Skip security testing for verification-related changes
 - Use `fmt.Print*` in verification logic (use `fmt.Fprintf(os.Stderr, ...)` instead)

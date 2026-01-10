@@ -14,6 +14,7 @@ import (
 	"hash"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -965,6 +966,64 @@ func apiBaseURLWithDefault(defaultBase string) string {
 	return strings.TrimRight(base, "/")
 }
 
+type proxyConfig struct {
+	HTTPProxy  string
+	HTTPSProxy string
+	NoProxy    string
+}
+
+func normalizeProxyURL(raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid proxy URL %q: %w", raw, err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("invalid proxy URL %q: missing scheme or host", raw)
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", fmt.Errorf("invalid proxy URL %q: unsupported scheme %q", raw, parsed.Scheme)
+	}
+	return parsed.String(), nil
+}
+
+func setProxyEnv(upperKey, lowerKey, value string) error {
+	if err := os.Setenv(upperKey, value); err != nil {
+		return err
+	}
+	return os.Setenv(lowerKey, value)
+}
+
+func applyProxyConfig(cfg proxyConfig) error {
+	if cfg.HTTPProxy != "" {
+		proxyURL, err := normalizeProxyURL(cfg.HTTPProxy)
+		if err != nil {
+			return fmt.Errorf("--http-proxy: %w", err)
+		}
+		if err := setProxyEnv("HTTP_PROXY", "http_proxy", proxyURL); err != nil {
+			return fmt.Errorf("set HTTP proxy: %w", err)
+		}
+	}
+	if cfg.HTTPSProxy != "" {
+		proxyURL, err := normalizeProxyURL(cfg.HTTPSProxy)
+		if err != nil {
+			return fmt.Errorf("--https-proxy: %w", err)
+		}
+		if err := setProxyEnv("HTTPS_PROXY", "https_proxy", proxyURL); err != nil {
+			return fmt.Errorf("set HTTPS proxy: %w", err)
+		}
+	}
+	if cfg.NoProxy != "" {
+		if err := setProxyEnv("NO_PROXY", "no_proxy", cfg.NoProxy); err != nil {
+			return fmt.Errorf("set NO_PROXY: %w", err)
+		}
+	}
+	return nil
+}
+
 func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sfetch", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -979,6 +1038,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	destDir := fs.String("dest-dir", "", "destination directory")
 	output := fs.String("output", "", "output path")
 	cacheDir := fs.String("cache-dir", "", "cache directory")
+	httpProxy := fs.String("http-proxy", "", "HTTP proxy URL (overrides HTTP_PROXY)")
+	httpsProxy := fs.String("https-proxy", "", "HTTPS proxy URL (overrides HTTPS_PROXY)")
+	noProxy := fs.String("no-proxy", "", "comma-separated proxy bypass list (overrides NO_PROXY)")
 	preferPerAsset := fs.Bool("prefer-per-asset", false, "prefer per-asset signatures over checksum-level signatures (Workflow B over A)")
 	requireMinisign := fs.Bool("require-minisign", false, "require minisign signature verification (fail if unavailable)")
 	skipSig := fs.Bool("skip-sig", false, "skip signature verification (testing only)")
@@ -1034,6 +1096,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			printFlag(name)
 		}
 
+		_, _ = fmt.Fprintln(out, "\nNetwork:") //nolint:errcheck
+		for _, name := range []string{"http-proxy", "https-proxy", "no-proxy"} {
+			printFlag(name)
+		}
+
 		_, _ = fmt.Fprintln(out, "\nVerification:") //nolint:errcheck
 		for _, name := range []string{"minisign-key", "minisign-key-url", "minisign-key-asset", "pgp-key-file", "pgp-key-url", "pgp-key-asset", "gpg-bin", "key", "prefer-per-asset", "require-minisign", "skip-sig", "skip-checksum", "insecure"} {
 			printFlag(name)
@@ -1063,6 +1130,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck // best-effort error output
 		fs.Usage()
 		return 2
+	}
+
+	if err := applyProxyConfig(proxyConfig{
+		HTTPProxy:  strings.TrimSpace(*httpProxy),
+		HTTPSProxy: strings.TrimSpace(*httpsProxy),
+		NoProxy:    strings.TrimSpace(*noProxy),
+	}); err != nil {
+		_, _ = fmt.Fprintln(stderr, "error:", err) //nolint:errcheck // best-effort error output
+		return 1
 	}
 
 	// Handle --self-verify: print verification instructions and exit

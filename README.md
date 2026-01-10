@@ -47,6 +47,24 @@ Auto-selects via heuristics ([docs/pattern-matching.md](docs/pattern-matching.md
 - **Raw scripts/binaries** (e.g., `install.sh`, `kubectl`): Automatically set to `0755` on macOS/Linux to ensure executability.
 - **Cross-device installs**: When `--dest-dir` is on a different filesystem than the temp directory (common in containers), sfetch falls back to copy and preserves the source permissions.
 
+### Proxy support
+sfetch honors standard proxy environment variables and provides CLI flags for explicit control.
+
+**Environment variables** (case-insensitive, zero-config):
+- `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+
+**CLI flags** (override env when present):
+- `--http-proxy <url>`, `--https-proxy <url>`, `--no-proxy <csv>`
+
+```bash
+# Via environment (common in CI/enterprise)
+export HTTPS_PROXY=http://proxy.corp.example:8080
+sfetch --repo 3leaps/sfetch --latest --dest-dir ~/.local/bin
+
+# Via flags (explicit override)
+sfetch --repo 3leaps/sfetch --latest --https-proxy http://localhost:8888 --dest-dir /tmp
+```
+
 ### Signature verification
 
 **Minisign** - pure-Go, no external dependencies

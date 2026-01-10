@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-01-10
+
+### Added
+- **Proxy support:** New `--http-proxy`, `--https-proxy`, and `--no-proxy` flags with environment variable overrides (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`) for proxied networks.
+- **Proxy validation tests:** Added coverage for proxy URL validation and env overrides.
+
+### Documentation
+- Documented proxy support in `README.md`.
+
+## [0.3.3] - 2026-01-10
+
+### Documentation
+- Added a local agent role catalog and operating model guidance for supervised sessions.
+
 ## [0.3.2] - 2026-01-02
 
 ### Added
@@ -80,7 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.6] - 2025-12-14
 
 ### Fixed
-- **Cross-device installs/caching (EXDEV):** When `--dest-dir` or `--cache-dir` is on a different filesystem than the temp directory (common in containerized CI), sfetch now falls back to copy when `rename(2)` fails with “invalid cross-device link”.
+- **Cross-device installs/caching (EXDEV):** When `--dest-dir` or `--cache-dir` is on a different filesystem than the temp directory (common in containerized CI), sfetch now falls back to copy when `rename(2)` fails with "invalid cross-device link".
 
 ### Changed
 - Refactored internals to improve auditability and testability (moved logic into `internal/*` and introduced an injectable CLI entrypoint); CLI behavior is intended to be unchanged.
@@ -105,68 +119,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `SFETCH_MINISIGN_PUB` for explicit public key path.
 - Dev builds no longer require `--self-update-force` to proceed (easier exit path for developers).
 
-## [0.2.4] - 2025-12-12
-
-### Fixed
-- **Self-update checksum mismatch:** Fixed self-update and fetch failing when SHA2-512SUMS is preferred over SHA256SUMS. Added `detectChecksumAlgorithm()` to infer hash algorithm from checksum filename patterns.
-
-## [0.2.3] - 2025-12-12
-
-### Changed
-- **Installer parsing:** Prefer `jq` (if present) for GitHub release JSON parsing; dependency-free fallback retained.
-- **Make bootstrap:** `make bootstrap` now advisory via `prereqs-advise`; `make prereqs` remains strict.
-
-### Fixed
-- **Signing script GPG support:** Added `GPG_HOMEDIR` environment variable support for custom GPG homedirs. Uses `env GNUPGHOME=...` to avoid polluting user's global GPG settings.
-
-### Security
-- Added threat-model comments for pre-extraction path traversal scanning and unzip listing portability in installer.
-
-### Documentation
-- Updated docs to reflect checksum-only opt-in and signature defaults.
-- Added DO/DONOT section to `AGENTS.md` with push approval and release merge policies.
-- Updated `RELEASE_CHECKLIST.md` to document all required environment variables including `GPG_HOMEDIR`.
-
-## [0.2.2] - 2025-12-12
-
-### Added
-- **Smart asset selection (Phase 1):** Rule-driven tie-breaking eliminates need for `--asset-match` or `--asset-regex` in most cases.
-  - Platform exclusions: `.exe` filtered on darwin/linux automatically.
-  - Case-insensitive platform/arch token matching: `macOS`, `Darwin`, `MACOS` all match darwin.
-  - Raw-over-archive preference: `yt-dlp_macos` preferred over `yt-dlp_macos.zip`.
-  - Schema-validated rules: `schemas/inference-rules.schema.json` + embedded `inference-rules.json`.
-- **Expanded checksum/signature discovery:** Added `SHA2-256SUMS`, `SHA2-512SUMS`, `SHA512SUMS` patterns and their signature variants (`.minisig`, `.asc`, `.sig`) to support repos like yt-dlp that use non-standard naming.
-- **Heuristic `.sig` handling:** Checksum-level `.sig` files (e.g., `SHA2-256SUMS.sig`) are treated as PGP signatures; per-asset `.sig` files remain ed25519.
-- **SHA2-512SUMS generation:** Release process now generates both `SHA256SUMS` and `SHA2-512SUMS` for dual-hash verification.
-- **Self-update workflow:** Secure self-update capability with `--self-update`, `--self-update-force`, and `--self-update-dir` flags. Uses existing verification pipeline, enforces major-version guard, and provides Windows lock fallback.
-
-### Changed
-- Asset selection flow now applies inference rules before falling back to legacy scoring heuristics.
-- `findChecksumSignature` now strips `.sig` extension in addition to `.minisig` and `.asc`.
-- `signatureFormatFromExtension` uses context-aware heuristic: `*SUMS.sig` → PGP, other `.sig` → ed25519.
-- Replaced shell-based checksum generator (`scripts/generate-sha256sums.sh`) with Go command (`scripts/cmd/generate-checksums`).
-- Signing/upload scripts updated to handle both SHA256SUMS and SHA2-512SUMS.
-
-### Fixed
-- Test `TestInferenceRulesDocumentValidates` now correctly unmarshals JSON before schema validation.
-- Makefile `shell-check` target now uses same shfmt flags (`-i 4 -ci`) as `fmt` target.
-
-## [0.2.1] - 2025-12-10
-
-### Added
-- **Self-verify & trust anchors:** `--self-verify` prints deterministic release URLs, expected asset/hash (with offline fallback), platform-specific checksum commands, minisign/PGP commands, embedded pubkey, and warning that a compromised binary could lie. `--show-trust-anchors` exposes the embedded minisign key (JSON/plain).
-- **Real-world corpus (opt-in):** Manifest + runner to exercise common release patterns via `make corpus-dryrun`.
-
-## [0.2.0] - 2025-12-09
-
-### Added
-- **Verification Assessment & Provenance**: `--dry-run`, `--provenance`, `--provenance-file` for structured JSON audit trails.
-- **Workflow C (checksum-only)**: Support for repos that publish checksums without signatures.
-- **Asset classification & raw installs**: Scripts and standalone binaries skip extraction; chmod on macOS/Linux.
-- **Minisign enhancements**: `--minisign-key-url`, `--minisign-key-asset`, `--require-minisign`, `--prefer-per-asset`, auto-detection of `.pub` files.
-- **Trust levels**: Computed trust assessment (high/medium/low/none) based on verification performed.
-- **Versioning**: Adopted Semantic Versioning; `VERSION` file as single source of truth.
-
 ---
 
-For older releases, see `docs/releases/`.
+> **Maintenance note:** This file is pruned to the latest 10 releases. For older entries, see `docs/releases/`.
