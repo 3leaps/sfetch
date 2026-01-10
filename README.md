@@ -50,7 +50,7 @@ sfetch --github-raw Homebrew/install@HEAD:install.sh --dest-dir /tmp
 ```
 
 ### Arbitrary URLs
-Fetch arbitrary URLs with `--url` or a positional URL. HTTPS is enforced by default; redirects are blocked unless explicitly enabled. Raw GitHub URLs are routed through the GitHub raw flow.
+Fetch arbitrary URLs with `--url` or a positional URL. HTTPS is enforced by default; redirects are blocked unless explicitly enabled. Raw GitHub URLs are routed through the GitHub raw flow, and GitHub release asset URLs are upgraded to the release verification path.
 
 ```bash
 sfetch --url https://get.docker.com --output ./get-docker.sh

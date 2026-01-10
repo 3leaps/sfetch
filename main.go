@@ -1139,6 +1139,12 @@ type urlSpec struct {
 	AssetName string
 }
 
+type releaseURLSpec struct {
+	Repo  string
+	Tag   string
+	Asset string
+}
+
 func parseGitHubRawSpec(spec string) (githubRawSpec, error) {
 	trimmed := strings.TrimSpace(spec)
 	if trimmed == "" {
@@ -1240,31 +1246,43 @@ func parseGitHubRawURL(raw string) (githubRawSpec, error) {
 	}, nil
 }
 
-func parseURLSpec(raw string, allowHTTP bool) (urlSpec, *githubRawSpec, error) {
+func parseURLSpec(raw string, allowHTTP bool) (urlSpec, *githubRawSpec, *releaseURLSpec, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return urlSpec{}, nil, fmt.Errorf("--url must not be empty")
+		return urlSpec{}, nil, nil, fmt.Errorf("--url must not be empty")
 	}
 	parsed, err := url.Parse(trimmed)
 	if err != nil {
-		return urlSpec{}, nil, fmt.Errorf("invalid URL %q: %w", raw, err)
+		return urlSpec{}, nil, nil, fmt.Errorf("invalid URL %q: %w", raw, err)
 	}
 	if parsed.Scheme == "" || parsed.Host == "" {
-		return urlSpec{}, nil, fmt.Errorf("invalid URL %q: missing scheme or host", raw)
+		return urlSpec{}, nil, nil, fmt.Errorf("invalid URL %q: missing scheme or host", raw)
+	}
+	if parsed.User != nil {
+		return urlSpec{}, nil, nil, fmt.Errorf("URL must not include user credentials")
 	}
 	if strings.EqualFold(parsed.Host, "raw.githubusercontent.com") {
 		rawSpec, err := parseGitHubRawURL(parsed.String())
 		if err != nil {
-			return urlSpec{}, nil, err
+			return urlSpec{}, nil, nil, err
 		}
-		return urlSpec{}, &rawSpec, nil
+		return urlSpec{}, &rawSpec, nil, nil
+	}
+	if strings.EqualFold(parsed.Host, "github.com") {
+		if !strings.EqualFold(parsed.Scheme, "https") {
+			return urlSpec{}, nil, nil, fmt.Errorf("GitHub URLs must use https")
+		}
+		if releaseSpec, ok := parseGitHubReleaseURL(parsed.Path); ok {
+			releaseSpec.Asset = strings.TrimSpace(releaseSpec.Asset)
+			return urlSpec{}, nil, &releaseSpec, nil
+		}
 	}
 	if !strings.EqualFold(parsed.Scheme, "https") {
 		if !allowHTTP && strings.EqualFold(parsed.Scheme, "http") {
-			return urlSpec{}, nil, fmt.Errorf("--url requires https scheme (use --allow-http to override)")
+			return urlSpec{}, nil, nil, fmt.Errorf("--url requires https scheme (use --allow-http to override)")
 		}
 		if !strings.EqualFold(parsed.Scheme, "http") {
-			return urlSpec{}, nil, fmt.Errorf("--url requires http or https scheme")
+			return urlSpec{}, nil, nil, fmt.Errorf("--url requires http or https scheme")
 		}
 	}
 	assetName := path.Base(parsed.Path)
@@ -1274,7 +1292,33 @@ func parseURLSpec(raw string, allowHTTP bool) (urlSpec, *githubRawSpec, error) {
 	return urlSpec{
 		URL:       parsed.String(),
 		AssetName: assetName,
-	}, nil, nil
+	}, nil, nil, nil
+}
+
+func parseGitHubReleaseURL(rawPath string) (releaseURLSpec, bool) {
+	trimmed := strings.TrimPrefix(rawPath, "/")
+	segments := strings.Split(trimmed, "/")
+	if len(segments) < 6 {
+		return releaseURLSpec{}, false
+	}
+	owner := segments[0]
+	repo := segments[1]
+	if owner == "" || repo == "" {
+		return releaseURLSpec{}, false
+	}
+	if segments[2] != "releases" || segments[3] != "download" {
+		return releaseURLSpec{}, false
+	}
+	tag := segments[4]
+	asset := strings.Join(segments[5:], "/")
+	if tag == "" || asset == "" {
+		return releaseURLSpec{}, false
+	}
+	return releaseURLSpec{
+		Repo:  fmt.Sprintf("%s/%s", owner, repo),
+		Tag:   tag,
+		Asset: asset,
+	}, true
 }
 
 type urlFetchOptions struct {
@@ -1940,13 +1984,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 
-		spec, rawSpec, err := parseURLSpec(urlInput, *allowHTTP)
+		spec, rawSpec, releaseSpec, err := parseURLSpec(urlInput, *allowHTTP)
 		if err != nil {
 			_, _ = fmt.Fprintln(stderr, "error:", err) //nolint:errcheck
 			return 1
 		}
 		if rawSpec != nil {
 			*githubRaw = fmt.Sprintf("%s@%s:%s", rawSpec.Repo, rawSpec.Ref, rawSpec.Path)
+		} else if releaseSpec != nil {
+			*repo = releaseSpec.Repo
+			*tag = releaseSpec.Tag
+			*assetMatch = releaseSpec.Asset
+			_, _ = fmt.Fprintf(stderr, "note: URL maps to GitHub release asset; using --repo %s --tag %s\n", releaseSpec.Repo, releaseSpec.Tag) //nolint:errcheck
 		} else {
 			parsedURL = &spec
 		}

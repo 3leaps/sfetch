@@ -3110,6 +3110,7 @@ func TestParseURLSpec(t *testing.T) {
 		allowHTTP   bool
 		wantURL     urlSpec
 		wantRaw     *githubRawSpec
+		wantRelease *releaseURLSpec
 		wantErrText string
 	}{
 		{
@@ -3134,6 +3135,15 @@ func TestParseURLSpec(t *testing.T) {
 			},
 		},
 		{
+			name:  "release_asset_url",
+			input: "https://github.com/cli/cli/releases/download/v2.53.0/gh_2.53.0_macOS_arm64.zip",
+			wantRelease: &releaseURLSpec{
+				Repo:  "cli/cli",
+				Tag:   "v2.53.0",
+				Asset: "gh_2.53.0_macOS_arm64.zip",
+			},
+		},
+		{
 			name:        "http_url_rejected",
 			input:       "http://example.com/install.sh",
 			wantErrText: "https",
@@ -3149,13 +3159,18 @@ func TestParseURLSpec(t *testing.T) {
 			input:       "://bad",
 			wantErrText: "invalid URL",
 		},
+		{
+			name:        "url_with_credentials",
+			input:       "https://user:pass@example.com/install.sh",
+			wantErrText: "credentials",
+		},
 	}
 
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, raw, err := parseURLSpec(tc.input, tc.allowHTTP)
+			got, raw, release, err := parseURLSpec(tc.input, tc.allowHTTP)
 			if tc.wantErrText != "" {
 				if err == nil {
 					t.Fatalf("expected error")
@@ -3177,8 +3192,17 @@ func TestParseURLSpec(t *testing.T) {
 				}
 				return
 			}
-			if raw != nil {
-				t.Fatalf("unexpected raw spec")
+			if tc.wantRelease != nil {
+				if release == nil {
+					t.Fatalf("expected release spec")
+				}
+				if *release != *tc.wantRelease {
+					t.Fatalf("release spec = %+v, want %+v", *release, *tc.wantRelease)
+				}
+				return
+			}
+			if raw != nil || release != nil {
+				t.Fatalf("unexpected spec")
 			}
 			if got != tc.wantURL {
 				t.Fatalf("url spec = %+v, want %+v", got, tc.wantURL)
