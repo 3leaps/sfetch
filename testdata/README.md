@@ -52,6 +52,22 @@ Some content is accessible via multiple methods with different trust levels:
 
 **Future direction:** When the same content is accessible via multiple paths, sfetch should prefer the path with the highest trust score. The corpus tracks these overlap cases with notes like "OVERLAP TEST" to validate this behavior.
 
+### Smart URL Selection
+
+When given a GitHub release download URL via `--url`, sfetch automatically detects and upgrades to `--repo` mode for better verification:
+
+```bash
+# Input: direct download URL
+sfetch --url "https://github.com/3leaps/sfetch/releases/download/v0.2.0/sfetch_darwin_arm64.tar.gz"
+
+# Detected: GitHub release pattern
+# note: URL maps to GitHub release asset; using --repo 3leaps/sfetch --tag v0.2.0
+
+# Result: Trust 100/100 (minisign + checksum) instead of Trust 25/100 (HTTPS only)
+```
+
+Corpus entries marked "SMART URL" test this auto-upgrade behavior.
+
 ### HTTP Testing
 
 The corpus includes HTTP-only test sites for verifying sfetch's security defaults:

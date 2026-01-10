@@ -237,6 +237,36 @@
     "note": "curl source tarball - checksum available at .sha256"
   },
   {
+    "repo": "https://github.com/3leaps/sfetch/releases/download/v0.2.0/sfetch_darwin_arm64.tar.gz",
+    "tag": "n/a",
+    "assetMatch": "sfetch_darwin_arm64.tar.gz",
+    "expectedWorkflow": "A",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "url",
+    "note": "SMART URL: auto-upgrades to --repo 3leaps/sfetch (trust 25 → 100)"
+  },
+  {
+    "repo": "https://github.com/junegunn/fzf/releases/download/v0.56.3/fzf-0.56.3-darwin_arm64.tar.gz",
+    "tag": "n/a",
+    "assetMatch": "fzf-0.56.3-darwin_arm64.tar.gz",
+    "expectedWorkflow": "C",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "url",
+    "note": "SMART URL: auto-upgrades to --repo junegunn/fzf (trust 25 → 45)"
+  },
+  {
+    "repo": "https://github.com/cli/cli/releases/download/v2.53.0/gh_2.53.0_macOS_arm64.zip",
+    "tag": "n/a",
+    "assetMatch": "gh_2.53.0_macOS_arm64.zip",
+    "expectedWorkflow": "none",
+    "expectSuccess": true,
+    "tier": "fast",
+    "category": "url",
+    "note": "SMART URL: auto-upgrades to --repo cli/cli (no verification available)"
+  },
+  {
     "repo": "http://neverssl.com",
     "tag": "n/a",
     "assetMatch": "neverssl.html",
