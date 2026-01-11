@@ -22,6 +22,9 @@ URL acquisition upgrades: fetch arbitrary URLs safely, support raw GitHub conten
 **Corpus updates**
 - Expanded URL and format coverage with explicit HTTP allowlist cases
 
+**Documentation**
+- Updated docs and README to improve awareness of v0.4.0 features including Smart URL routing, security defaults, and sfetch + shellsentry workflow
+
 ### Install
 
 ```bash

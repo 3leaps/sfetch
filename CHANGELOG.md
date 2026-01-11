@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 - Added URL, GitHub raw, and safety flag guidance in `README.md` and quickstart.
+- Updated docs and README to improve awareness of v0.4.0 features including Smart URL routing, security defaults, and sfetch + shellsentry workflow.
 
 ### Security
 - Block URL credentials by default to avoid leaking user info during redirects.
