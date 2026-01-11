@@ -961,7 +961,7 @@ func outputProvenance(record *ProvenanceRecord, toFile string) error {
 	}
 
 	if toFile != "" {
-		// #nosec G306 -- provenance file is user-specified output
+		// #nosec G306 -- SDR-005: provenance file is user-specified output
 		if err := os.WriteFile(toFile, data, 0o644); err != nil {
 			return fmt.Errorf("write provenance file: %w", err)
 		}
@@ -976,7 +976,7 @@ func outputProvenance(record *ProvenanceRecord, toFile string) error {
 // Returns nil if valid, error describing the problem otherwise.
 // Detects: wrong format, secret key, signature file, or other content.
 func ValidateMinisignPubkey(path string) error {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- SDR-001: CLI file path input
 	if err != nil {
 		return fmt.Errorf("read file: %w", err)
 	}
@@ -1499,7 +1499,7 @@ func downloadURL(target, dest string, opts urlFetchOptions) (urlFetchResult, err
 		return urlFetchResult{redirects: redirects, finalURL: resp.Request.URL.String(), contentType: contentType}, fmt.Errorf("content type %q not allowed", contentType)
 	}
 
-	// #nosec G304 -- path tmp controlled
+	// #nosec G304 -- SDR-001: temp file path
 	f, err := os.Create(dest)
 	if err != nil {
 		return urlFetchResult{redirects: redirects, finalURL: resp.Request.URL.String(), contentType: contentType}, fmt.Errorf("create %s: %w", dest, err)
@@ -2134,7 +2134,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 
-		// #nosec G304 -- assetPath tmp controlled
+		// #nosec G304 -- SDR-001: temp asset path
 		assetBytes, err := os.ReadFile(assetPath)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "read asset: %v\n", err) //nolint:errcheck
@@ -2163,8 +2163,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		switch classification.Type {
 		case AssetTypeArchive:
 			extractDir := filepath.Join(tmpDir, "extract")
-			if err := // #nosec G301 -- extractDir tmpdir controlled
-				os.Mkdir(extractDir, 0o755); err != nil {
+			// #nosec G301 -- SDR-002: temp extraction dir
+			if err := os.Mkdir(extractDir, 0o755); err != nil {
 				_, _ = fmt.Fprintf(stderr, "mkdir extract: %v\n", err) //nolint:errcheck
 				return 1
 			}
@@ -2213,8 +2213,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return 1
 			}
 
-			if err := // #nosec G302 -- binaryPath extracted tmp chmod +x safe
-				os.Chmod(binaryPath, 0o755); err != nil {
+			// #nosec G302 -- SDR-003: executable needs +x
+			if err := os.Chmod(binaryPath, 0o755); err != nil {
 				_, _ = fmt.Fprintf(stderr, "chmod: %v\n", err) //nolint:errcheck
 				return 1
 			}
@@ -2254,8 +2254,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 
-		if err := // #nosec G301 -- Dir(finalPath) user-controlled safe mkdir tmp
-			os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
+		// #nosec G301 -- SDR-002: user destination dir
+		if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
 			_, _ = fmt.Fprintf(stderr, "mkdir %s: %v\n", filepath.Dir(finalPath), err) //nolint:errcheck
 			return 1
 		}
@@ -2409,7 +2409,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 
-		// #nosec G304 -- assetPath tmp controlled
+		// #nosec G304 -- SDR-001: temp asset path
 		assetBytes, err := os.ReadFile(assetPath)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "read asset: %v\n", err) //nolint:errcheck
@@ -2438,8 +2438,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		switch classification.Type {
 		case AssetTypeArchive:
 			extractDir := filepath.Join(tmpDir, "extract")
-			if err := // #nosec G301 -- extractDir tmpdir controlled
-				os.Mkdir(extractDir, 0o755); err != nil {
+			// #nosec G301 -- SDR-002: temp extraction dir
+			if err := os.Mkdir(extractDir, 0o755); err != nil {
 				_, _ = fmt.Fprintf(stderr, "mkdir extract: %v\n", err) //nolint:errcheck
 				return 1
 			}
@@ -2488,8 +2488,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return 1
 			}
 
-			if err := // #nosec G302 -- binaryPath extracted tmp chmod +x safe
-				os.Chmod(binaryPath, 0o755); err != nil {
+			// #nosec G302 -- SDR-003: executable needs +x
+			if err := os.Chmod(binaryPath, 0o755); err != nil {
 				_, _ = fmt.Fprintf(stderr, "chmod: %v\n", err) //nolint:errcheck
 				return 1
 			}
@@ -2529,8 +2529,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 
-		if err := // #nosec G301 -- Dir(finalPath) user-controlled safe mkdir tmp
-			os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
+		// #nosec G301 -- SDR-002: user destination dir
+		if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
 			_, _ = fmt.Fprintf(stderr, "mkdir %s: %v\n", filepath.Dir(finalPath), err) //nolint:errcheck
 			return 1
 		}
@@ -2810,7 +2810,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 
 		// Read checksum file for verification
-		// #nosec G304 -- checksumPath tmp controlled
+		// #nosec G304 -- SDR-001: temp checksum path
 		checksumBytes, err = os.ReadFile(checksumPath)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "read checksum: %v\n", err) //nolint:errcheck
@@ -2873,7 +2873,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 					_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 					return 1
 				}
-				// #nosec G304 -- checksumPath tmp controlled
+				// #nosec G304 -- SDR-001: temp checksum path
 				checksumBytes, err = os.ReadFile(checksumPath)
 				if err != nil {
 					_, _ = fmt.Fprintf(stderr, "read checksum: %v\n", err) //nolint:errcheck
@@ -2898,7 +2898,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 
-		// #nosec G304 -- checksumPath tmp controlled
+		// #nosec G304 -- SDR-001: temp checksum path
 		checksumBytes, err = os.ReadFile(checksumPath)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "read checksum: %v\n", err) //nolint:errcheck
@@ -2906,7 +2906,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	// #nosec G304 -- assetPath tmp controlled
+	// #nosec G304 -- SDR-001: temp asset path
 	assetBytes, err := os.ReadFile(assetPath)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "read asset: %v\n", err) //nolint:errcheck
@@ -2954,8 +2954,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	cacheAssetDir := filepath.Join(cd, actualHash)
-	if err := // #nosec G301 -- cacheAssetDir XDG_CACHE_HOME/hash controlled
-		os.MkdirAll(cacheAssetDir, 0o755); err != nil {
+	// #nosec G301 -- SDR-002: cache directory
+	if err := os.MkdirAll(cacheAssetDir, 0o755); err != nil {
 		_, _ = fmt.Fprintf(stderr, "mkdir cache %s: %v\n", cacheAssetDir, err) //nolint:errcheck
 		return 1
 	}
@@ -3043,8 +3043,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch classification.Type {
 	case AssetTypeArchive:
 		extractDir := filepath.Join(tmpDir, "extract")
-		if err := // #nosec G301 -- extractDir tmpdir controlled
-			os.Mkdir(extractDir, 0o755); err != nil {
+		// #nosec G301 -- SDR-002: temp extraction dir
+		if err := os.Mkdir(extractDir, 0o755); err != nil {
 			_, _ = fmt.Fprintf(stderr, "mkdir extract: %v\n", err) //nolint:errcheck
 			return 1
 		}
@@ -3093,8 +3093,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 
-		if err := // #nosec G302 -- binaryPath extracted tmp chmod +x safe
-			os.Chmod(binaryPath, 0o755); err != nil {
+		// #nosec G302 -- SDR-003: executable needs +x
+		if err := os.Chmod(binaryPath, 0o755); err != nil {
 			_, _ = fmt.Fprintf(stderr, "chmod: %v\n", err) //nolint:errcheck
 			return 1
 		}
@@ -3135,8 +3135,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	if err := // #nosec G301 -- Dir(finalPath) user-controlled safe mkdir tmp
-		os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
+	// #nosec G301 -- SDR-002: user destination dir
+	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
 		_, _ = fmt.Fprintf(stderr, "mkdir %s: %v\n", filepath.Dir(finalPath), err) //nolint:errcheck
 		return 1
 	}
@@ -3380,12 +3380,14 @@ func extractZip(zipPath, extractDir string) error {
 		}
 
 		if f.FileInfo().IsDir() {
+			// #nosec G301 -- SDR-002: tar extraction dir
 			if err := os.MkdirAll(destPathClean, 0o755); err != nil {
 				return fmt.Errorf("mkdir %s: %w", destPathClean, err)
 			}
 			continue
 		}
 
+		// #nosec G301 -- SDR-002: tar extraction dir
 		if err := os.MkdirAll(filepath.Dir(destPathClean), 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", filepath.Dir(destPathClean), err)
 		}
@@ -3395,12 +3397,14 @@ func extractZip(zipPath, extractDir string) error {
 			return fmt.Errorf("open %s in zip: %w", f.Name, err)
 		}
 
+		// #nosec G302 -- SDR-003: extracted file permissions
 		out, err := os.OpenFile(destPathClean, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 		if err != nil {
 			_ = rc.Close()
 			return fmt.Errorf("create %s: %w", destPathClean, err)
 		}
 
+		// #nosec G110 -- SDR-004: user-initiated archive extraction
 		if _, err := io.Copy(out, rc); err != nil {
 			_ = out.Close()
 			_ = rc.Close()
@@ -3508,7 +3512,7 @@ func download(url, path string) error {
 		return fmt.Errorf("status %d from %s: %s", resp.StatusCode, url, string(body))
 	}
 
-	// #nosec G304 -- path tmp controlled
+	// #nosec G304 -- SDR-001: temp file path
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
@@ -3972,6 +3976,7 @@ func installFileWithRename(src, dst string, classification AssetClassification, 
 				return "", errCopy
 			}
 			if classification.Type == AssetTypeRaw && runtime.GOOS != "windows" && classification.NeedsChmod {
+				// #nosec G302 -- SDR-003: executable needs +x
 				if errChmod := os.Chmod(dst, 0o755); errChmod != nil {
 					return "", errChmod
 				}
@@ -3982,6 +3987,7 @@ func installFileWithRename(src, dst string, classification AssetClassification, 
 	}
 
 	if classification.Type == AssetTypeRaw && runtime.GOOS != "windows" && classification.NeedsChmod {
+		// #nosec G302 -- SDR-003: executable needs +x
 		if err := os.Chmod(dst, 0o755); err != nil {
 			return "", err
 		}
@@ -3991,7 +3997,7 @@ func installFileWithRename(src, dst string, classification AssetClassification, 
 }
 
 func copyFile(src, dst string) error {
-	in, err := os.Open(src)
+	in, err := os.Open(src) // #nosec G304 -- SDR-001: CLI file path input
 	if err != nil {
 		return fmt.Errorf("open %s: %w", src, err)
 	}
@@ -4002,12 +4008,13 @@ func copyFile(src, dst string) error {
 		return fmt.Errorf("stat %s: %w", src, err)
 	}
 
+	// #nosec G301 -- SDR-002: user destination dir
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
 	}
 
 	tmp := dst + ".tmp"
-	out, err := os.Create(tmp)
+	out, err := os.Create(tmp) // #nosec G304 -- SDR-001: CLI file path input
 	if err != nil {
 		return fmt.Errorf("create %s: %w", tmp, err)
 	}

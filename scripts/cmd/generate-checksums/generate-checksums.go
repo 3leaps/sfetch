@@ -171,7 +171,7 @@ func isArtifact(name string) bool {
 
 func writeChecksums(dir string, files []string, job checksumJob) error {
 	outPath := filepath.Join(dir, job.outFile)
-	outFile, err := os.Create(outPath)
+	outFile, err := os.Create(outPath) // #nosec G304 -- SDR-001: build tool output path
 	if err != nil {
 		return fmt.Errorf("create %s: %w", outPath, err)
 	}
@@ -190,7 +190,7 @@ func writeChecksums(dir string, files []string, job checksumJob) error {
 }
 
 func computeFileHash(path string, newHash func() hash.Hash) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- SDR-001: build tool reading release assets
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", path, err)
 	}

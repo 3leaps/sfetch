@@ -196,7 +196,7 @@ func runCmd(bin string, args ...string) (int, string) {
 }
 
 func loadManifest(path string) ([]corpusEntry, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- SDR-001: test harness manifest path
 	if err != nil {
 		return nil, err
 	}
