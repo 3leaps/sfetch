@@ -1,6 +1,10 @@
 # sfetch
 
-Secure, verifiable, zero-trust downloader for the uncertain world
+[![Go 1.23+](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/3leaps/sfetch?include_prereleases)](https://github.com/3leaps/sfetch/releases)
+
+**Secure, verifiable, zero-trust downloader for the uncertain world**
 
 ### The one-liner
 **sfetch is the `curl | sh` you can actually trust in 2026.**
@@ -17,24 +21,31 @@ Yet we still ship 15-line bash bootstrap scripts that do manual `curl → sha256
 
 ### Pair with shellsentry
 
-[shellsentry](https://github.com/3leaps/shellsentry) analyzes shell scripts for risky patterns before you run them. Use sfetch to verify downloads, then shellsentry to inspect what's inside:
+[shellsentry](https://github.com/3leaps/shellsentry) analyzes shell scripts for risky patterns before you run them. Use sfetch to acquire scripts safely, then shellsentry to inspect what's inside:
 
 ```bash
-# Install both tools
+# Install both tools (verified with minisign signatures)
 sfetch --repo 3leaps/sfetch --latest --dest-dir ~/.local/bin
 sfetch --repo 3leaps/shellsentry --latest --dest-dir ~/.local/bin
-
-# The new curl | sh - verified download, inspected before execution
-curl -sSfL https://example.com/install.sh -o install.sh
-shellsentry install.sh && bash install.sh
 ```
 
-Or as a one-liner that downloads, analyzes, and runs only if safe:
+**The new `curl | sh`** - verified download, inspected before execution:
 
 ```bash
-# Download, analyze, execute only if no high-risk patterns found
-curl -sSfL https://example.com/install.sh -o install.sh && shellsentry --exit-on-danger install.sh && bash install.sh
+# Fetch with sfetch (trust-scored), analyze with shellsentry, execute if safe
+sfetch --url https://example.com/install.sh --follow-redirects --output install.sh
+shellsentry --exit-on-danger install.sh && bash install.sh
 ```
+
+Or the complete zero-trust pipeline:
+
+```bash
+# GitHub release URL → auto-upgrade to verified release → analyze → execute
+sfetch https://github.com/helm/helm/releases/download/v3.14.0/get_helm.sh --output get_helm.sh
+shellsentry --exit-on-danger get_helm.sh && bash get_helm.sh
+```
+
+Why this matters: sfetch tells you **if you can trust the source**; shellsentry tells you **if you can trust the content**.
 
 ### Security & Verification
 See [docs/security.md](docs/security.md).
@@ -43,25 +54,53 @@ See [docs/security.md](docs/security.md).
 Auto-selects via heuristics ([docs/pattern-matching.md](docs/pattern-matching.md)) and classifies assets (archives vs raw scripts/binaries vs package-like). Raw files skip extraction; scripts/binaries are chmod'd on macOS/Linux. Use `--asset-match` for glob/substring selection or `--asset-regex` for advanced regex.
 
 ### Raw GitHub content
-Use `--github-raw owner/repo@ref:path` to fetch raw files from GitHub repositories (e.g., install scripts).
+
+Fetch files directly from GitHub repos - no releases required. Useful for install scripts, config files, or any repo-hosted content.
 
 ```bash
+# Fetch install script from main branch
 sfetch --github-raw Homebrew/install@HEAD:install.sh --dest-dir /tmp
+
+# Pin to a specific version/ref
+sfetch --github-raw nvm-sh/nvm@v0.40.1:install.sh --output nvm-install.sh
+
+# Paste a raw.githubusercontent.com URL - sfetch detects and handles it
+sfetch --url https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh
 ```
+
+Trust level: 25/100 (HTTPS transport only - no signature verification available for raw repo content).
 
 ### Arbitrary URLs
-Fetch arbitrary URLs with `--url` or a positional URL. HTTPS is enforced by default; redirects are blocked unless explicitly enabled. Raw GitHub URLs are routed through the GitHub raw flow, and GitHub release asset URLs are upgraded to the release verification path.
+
+Fetch any URL with built-in safety defaults. HTTPS is mandatory; redirects are blocked; you control every relaxation.
 
 ```bash
-sfetch --url https://get.docker.com --output ./get-docker.sh
+# Fetch an installer script (follows redirects for CDN-hosted content)
+sfetch --url https://get.docker.com --follow-redirects --output get-docker.sh
+
+# Fetch and see trust assessment without downloading
+sfetch --url https://sh.rustup.rs --dry-run
 ```
 
-URL safety flags:
-- `--allow-http` to allow `http://` URLs (unsafe)
-- `--follow-redirects` with `--max-redirects` (default 5)
-- `--allowed-content-types` to restrict MIME types
-- `--allow-unknown-content-type` to bypass content type checks
-- `--dry-run` and provenance output include redirect details
+**Smart URL routing:** Paste a GitHub release URL and sfetch automatically upgrades to the full verification flow:
+
+```bash
+# This URL...
+sfetch https://github.com/junegunn/fzf/releases/download/v0.56.3/fzf-0.56.3-darwin_arm64.tar.gz
+
+# ...auto-upgrades to: --repo junegunn/fzf --tag v0.56.3 --asset-match "fzf-*darwin_arm64*"
+# Trust jumps from 25/100 (bare URL) to 45/100 (checksum verified)
+```
+
+**Security defaults - you can't accidentally do something unsafe:**
+
+| Default | Override | Why |
+|---------|----------|-----|
+| HTTPS only | `--allow-http` | Can't accidentally download over plaintext |
+| Redirects blocked | `--follow-redirects` | Can't be silently redirected to a malicious host |
+| Credentials rejected | (none) | Can't leak auth tokens in URLs during redirects |
+
+Additional flags: `--max-redirects` (default 5), `--allowed-content-types`, `--allow-unknown-content-type`.
 
 ### Install permissions
 - **Archives** (`.tar.gz`, `.zip`, etc.): Permissions from the archive are preserved. Executables packaged with `0755` remain executable after extraction.
@@ -289,3 +328,19 @@ sfetch --repo fulmenhq/goneat --latest --pgp-key-file fulmen-release.asc --dest-
 # Pin to specific version
 sfetch --repo fulmenhq/goneat --tag v0.3.14 --dest-dir /usr/local/bin
 ```
+
+### Migrating from curl/wget
+
+Replace risky one-liners with trust-scored, verifiable downloads:
+
+| Old pattern | sfetch equivalent |
+|-------------|-------------------|
+| `curl -fsSL https://get.docker.com \| sh` | `sfetch --url https://get.docker.com --follow-redirects -o get-docker.sh && sh get-docker.sh` |
+| `wget https://github.com/.../v1.0/tool.tar.gz` | `sfetch https://github.com/.../v1.0/tool.tar.gz` (auto-upgrades to release verification) |
+| `curl -x proxy:8080 ...` | `sfetch --https-proxy http://proxy:8080 ...` |
+
+**Key differences from curl/wget:**
+- Never pipes directly to shell - download first, execute separately
+- Every download gets a trust score (0-100)
+- GitHub URLs auto-upgrade to release verification when possible
+- Redirects require explicit opt-in (`--follow-redirects`)

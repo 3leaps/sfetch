@@ -29,12 +29,28 @@ Inline `#nosec` comments on 12 sites for line-granular audit.
 
 sfetch computes a numeric trust score (`0–100`) with a transparent factor breakdown.
 
-- If upstream publishes nothing verifiable, sfetch can only award baseline trust (e.g., HTTPS) and will not “pretend” the download is highly trusted.
+- If upstream publishes nothing verifiable, sfetch can only award baseline trust (e.g., HTTPS) and will not "pretend" the download is highly trusted.
 - If the user bypasses verifiable checks (`--insecure`, `--skip-*`), the trust model treats this as an explicit bypass.
 
 For CI gating, use `--trust-minimum <0-100>`.
 
 Design guide: `docs/trust-rating-system.md`.
+
+## URL Safety (v0.4.0+)
+
+When fetching arbitrary URLs, sfetch applies defense-in-depth defaults:
+
+| Protection | Default | Override | Attack Prevented |
+|------------|---------|----------|------------------|
+| HTTPS mandatory | On | `--allow-http` | Plaintext interception |
+| Redirects blocked | On | `--follow-redirects` | Redirect hijacking, open redirect abuse |
+| Max redirects | 5 | `--max-redirects N` | Infinite redirect loops |
+| Credentials rejected | On | (none) | Token leakage on cross-origin redirects |
+| Content-type validation | On | `--allow-unknown-content-type` | Unexpected payload types |
+
+**Smart URL routing:** GitHub release URLs are automatically upgraded to the release verification flow, enabling signature/checksum verification that wouldn't be possible with bare URL fetching.
+
+**Provenance tracking:** Redirect chains are captured in provenance output for audit trails.
 
 ## Static Analysis Philosophy
 

@@ -373,6 +373,92 @@ sfetch --repo owner/tool --latest \
 
 ---
 
+# URL Fetching (v0.4.0+)
+
+sfetch can fetch arbitrary URLs with safety defaults and intelligent routing.
+
+## Smart URL Routing
+
+When you provide a GitHub release URL, sfetch automatically upgrades to the release verification flow:
+
+```bash
+# Paste a release URL - sfetch detects and upgrades
+sfetch https://github.com/3leaps/sfetch/releases/download/v0.2.0/sfetch_darwin_arm64.tar.gz
+
+# Internally becomes: --repo 3leaps/sfetch --tag v0.2.0 --asset-match "sfetch_darwin_arm64*"
+# Trust: 100/100 (minisign verified) instead of 25/100 (bare URL)
+```
+
+**Trust upgrades:**
+| Source | Plain URL | Smart Upgrade |
+|--------|-----------|---------------|
+| sfetch release | 25/100 | 100/100 (minisign) |
+| fzf release | 25/100 | 45/100 (checksum) |
+| gh cli release | 25/100 | 25/100 (no artifacts) |
+
+## Arbitrary URL Fetching
+
+Fetch any HTTPS resource:
+
+```bash
+# Installer scripts (many CDNs require --follow-redirects)
+sfetch --url https://get.docker.com --follow-redirects --output get-docker.sh
+sfetch --url https://sh.rustup.rs --follow-redirects --output rustup-init.sh
+
+# API responses
+sfetch --url https://httpbin.org/ip --output my-ip.json
+
+# Source tarballs
+sfetch --url https://curl.se/download/curl-8.5.0.tar.gz --dest-dir /tmp
+```
+
+## GitHub Raw Content
+
+Fetch files directly from repo branches (not releases):
+
+```bash
+# Fetch install script from main branch
+sfetch --github-raw helm/helm@main:scripts/get-helm-3 --output get-helm.sh
+
+# Pin to specific tag
+sfetch --github-raw nvm-sh/nvm@v0.40.1:install.sh --output nvm-install.sh
+
+# Auto-detected from raw.githubusercontent.com URL
+sfetch --url https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh
+```
+
+Trust level: 25/100 (HTTPS transport only).
+
+## Safety Defaults
+
+| Default | Override | Rationale |
+|---------|----------|-----------|
+| HTTPS only | `--allow-http` | Prevent accidental plaintext downloads |
+| Redirects blocked | `--follow-redirects` | Prevent redirect hijacking |
+| Credentials rejected | (none) | Prevent token leakage on redirects |
+| Max 5 redirects | `--max-redirects N` | Limit redirect chains |
+
+## sfetch + shellsentry Pipeline
+
+For maximum assurance on installer scripts:
+
+```bash
+# Download verified, analyze for risks, execute if safe
+sfetch --repo 3leaps/shellsentry --latest --asset-match "install-shellsentry.sh" --output install.sh
+shellsentry --exit-on-danger install.sh && bash install.sh
+
+# Or for arbitrary URLs
+sfetch --url https://get.docker.com --follow-redirects --output get-docker.sh
+shellsentry get-docker.sh        # Review findings
+shellsentry --exit-on-danger get-docker.sh && bash get-docker.sh
+```
+
+**Why both tools?**
+- sfetch answers: "Can I trust the source?" (verification, trust score)
+- shellsentry answers: "Can I trust the content?" (static analysis, risk patterns)
+
+---
+
 # Platform Detection
 
 sfetch auto-detects platform and matches against common naming conventions:
@@ -455,11 +541,11 @@ RW...base64key...
 
 2. **Flat archive structure**: Binary must be at the root of the archive, not in a subdirectory. Archives like ripgrep (`ripgrep-15.1.0-aarch64-apple-darwin/rg`) don't work currently.
 
-3. **GitHub releases only**: Currently GitHub releases API only. Direct URL downloads (e.g., `raw.githubusercontent.com`, arbitrary URLs) not yet supported. GitLab planned.
+3. **Cosign/Sigstore**: Not yet implemented.
 
-4. **Cosign/Sigstore**: Not yet implemented.
+4. **Package installers**: `.deb/.rpm/.pkg/.msi` are tagged and downloaded as raw files with a warning; sfetch does not run package managers.
 
-5. **Package installers**: `.deb/.rpm/.pkg/.msi` are tagged and downloaded as raw files with a warning; sfetch does not run package managers.
+5. **GitLab releases**: Not yet supported (GitHub only for `--repo` mode). Arbitrary URLs work for any host.
 
 ---
 
