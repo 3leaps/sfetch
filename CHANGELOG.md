@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-02-04
+
+### Changed
+- **Go runtime:** Upgraded from Go 1.23.4 to Go 1.24.0 (automatic with dependency updates).
+- **Dependencies updated:**
+  - `golang.org/x/crypto`: v0.31.0 → v0.47.0 (security-critical, +16 minor versions)
+  - `golang.org/x/sys`: v0.28.0 → v0.40.0 (+12 minor versions)
+  - `golang.org/x/text`: v0.21.0 → v0.33.0 (+12 minor versions)
+  - `github.com/dlclark/regexp2`: v1.11.0 → v1.11.5
+
+### Fixed
+- **install-sfetch.sh:** Corrected indentation from spaces to tabs for consistency with shell formatting standards.
+
+### Documentation
+- **CI/CD guide:** Clarified `GITHUB_TOKEN` usage for high-volume CI and GitHub-hosted runners to avoid 403 rate limits.
+- **Threat model:** Updated to reflect `SFETCH_GITHUB_TOKEN` and `GH_TOKEN` as alternative authentication environment variables.
+- **Makefile:** Updated `GONEAT_VERSION` to v0.5.1.
+
 ## [0.4.0] - 2026-01-10
 
 ### Added

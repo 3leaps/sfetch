@@ -1,3 +1,39 @@
+## v0.4.1
+
+### Summary
+Maintenance release: Go dependency updates (security-critical `golang.org/x/crypto`), bug fixes, and documentation improvements.
+
+### Highlights
+
+**Dependency updates**
+- Go runtime: 1.23.4 → 1.24.0
+- `golang.org/x/crypto`: v0.31.0 → v0.47.0 (security-critical, +16 minor versions)
+- `golang.org/x/sys`, `x/text`: Updated to latest stable versions
+- All tests pass; no breaking changes
+
+**Bug fixes**
+- Fixed shell script indentation in `install-sfetch.sh` for consistency
+
+**Documentation improvements**
+- Clarified GitHub token usage for CI/CD rate limit avoidance
+- Updated threat model with alternative token environment variables
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+Or self-update:
+```bash
+sfetch --self-update --yes
+```
+
+### Details
+- See `CHANGELOG.md` for the complete list.
+
+---
+
 ## v0.4.0
 
 ### Summary

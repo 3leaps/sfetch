@@ -19,7 +19,7 @@ sfetch is a CLI tool that downloads files from GitHub releases and arbitrary URL
 ### GitHub API (Semi-trusted)
 - Release metadata comes from GitHub API over HTTPS
 - Asset URLs are validated against expected GitHub domains
-- Rate limiting and authentication handled via GITHUB_TOKEN
+- Rate limiting/authentication handled via `SFETCH_GITHUB_TOKEN` or `GITHUB_TOKEN` (and `GH_TOKEN` where available)
 
 ## Attack Surface
 

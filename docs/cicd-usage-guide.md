@@ -220,7 +220,7 @@ If the installed binary exists but won’t execute (exit 126), check:
 
 ### Rate limiting
 
-For private repos or high-volume CI, set `GITHUB_TOKEN`:
+For high-volume CI (or GitHub-hosted runners that share egress IPs), set `GITHUB_TOKEN` (or `SFETCH_GITHUB_TOKEN`) so the installer and sfetch can authenticate GitHub API requests and avoid 403 rate limits:
 ```yaml
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
