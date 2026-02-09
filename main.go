@@ -25,7 +25,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/3leaps/sfetch/internal/hostenv"
@@ -2960,17 +2959,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	cacheAssetPath := filepath.Join(cacheAssetDir, selected.Name)
-	if err := os.Rename(assetPath, cacheAssetPath); err != nil {
-		if errors.Is(err, syscall.EXDEV) {
-			if errCopy := copyFile(assetPath, cacheAssetPath); errCopy != nil {
-				_, _ = fmt.Fprintf(stderr, "cache asset: %v\n", errCopy) //nolint:errcheck
-				return 1
-			}
-			_ = os.Remove(assetPath)
-		} else {
-			_, _ = fmt.Fprintf(stderr, "cache asset: %v\n", err) //nolint:errcheck
-			return 1
-		}
+	if err := moveOrCopy(assetPath, cacheAssetPath); err != nil {
+		_, _ = fmt.Fprintf(stderr, "cache asset: %v\n", err) //nolint:errcheck
+		return 1
 	}
 	assetPath = cacheAssetPath
 	_, _ = fmt.Fprintf(stderr, "Cached to %s\n", cacheAssetPath) //nolint:errcheck
@@ -3909,13 +3900,34 @@ func preferFormatPreference(assets []Asset, prefs []string) []Asset {
 	return assets
 }
 
+func isAlphaNum(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+func containsTokenBoundary(haystack, needle string) bool {
+	hLen := len(haystack)
+	nLen := len(needle)
+	if nLen == 0 || nLen > hLen {
+		return false
+	}
+	for i := 0; i <= hLen-nLen; i++ {
+		if strings.EqualFold(haystack[i:i+nLen], needle) {
+			before := i == 0 || !isAlphaNum(haystack[i-1])
+			after := i+nLen == hLen || !isAlphaNum(haystack[i+nLen])
+			if before && after {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func containsTokenCI(name string, tokens []string) bool {
-	lower := strings.ToLower(name)
 	for _, tok := range tokens {
 		if tok == "" {
 			continue
 		}
-		if strings.Contains(lower, strings.ToLower(tok)) {
+		if containsTokenBoundary(name, tok) {
 			return true
 		}
 	}
@@ -3982,22 +3994,19 @@ func installFileWithRename(src, dst string, classification AssetClassification, 
 				return alt, nil
 			}
 		}
-		// Fallback to copy for cross-device errors (EXDEV) or self-update.
-		// EXDEV occurs when tmpDir and destDir are on different filesystems,
-		// common in CI containers with mounted volumes.
-		if errors.Is(err, syscall.EXDEV) || selfUpdate {
-			if errCopy := copyFile(src, dst); errCopy != nil {
-				return "", errCopy
-			}
-			if classification.Type == AssetTypeRaw && runtime.GOOS != "windows" && classification.NeedsChmod {
-				// #nosec G302 -- SDR-003: executable needs +x
-				if errChmod := os.Chmod(dst, 0o755); errChmod != nil {
-					return "", errChmod
-				}
-			}
-			return dst, nil
+		// Fallback to copy when rename fails for any reason.
+		// This covers cross-device errors (EXDEV on Unix, ERROR_NOT_SAME_DEVICE
+		// on Windows) and self-update scenarios where the target is locked.
+		if errCopy := copyFile(src, dst); errCopy != nil {
+			return "", fmt.Errorf("rename: %w; copy fallback: %w", err, errCopy)
 		}
-		return "", err
+		if classification.Type == AssetTypeRaw && runtime.GOOS != "windows" && classification.NeedsChmod {
+			// #nosec G302 -- SDR-003: executable needs +x
+			if errChmod := os.Chmod(dst, 0o755); errChmod != nil {
+				return "", errChmod
+			}
+		}
+		return dst, nil
 	}
 
 	if classification.Type == AssetTypeRaw && runtime.GOOS != "windows" && classification.NeedsChmod {
@@ -4053,9 +4062,22 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
+// moveOrCopy attempts os.Rename; on any failure it falls back to copyFile
+// and removes the source. This handles cross-device renames (EXDEV on Unix,
+// ERROR_NOT_SAME_DEVICE on Windows) transparently.
+func moveOrCopy(src, dst string) error {
+	if err := os.Rename(src, dst); err != nil {
+		if errCopy := copyFile(src, dst); errCopy != nil {
+			return fmt.Errorf("rename: %w; copy fallback: %w", err, errCopy)
+		}
+		_ = os.Remove(src)
+	}
+	return nil
+}
+
 func containsAny(haystack string, needles []string) bool {
 	for _, needle := range needles {
-		if needle != "" && strings.Contains(haystack, needle) {
+		if needle != "" && containsTokenBoundary(haystack, needle) {
 			return true
 		}
 	}

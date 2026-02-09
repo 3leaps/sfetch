@@ -205,6 +205,104 @@ func TestInstallFileArchivePreservesExecOnCopyFallback(t *testing.T) {
 	}
 }
 
+func TestInstallFileWithRename_CrossDeviceNonEXDEV(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "bin", "tool")
+
+	if err := os.WriteFile(src, []byte("binary-content"), 0o755); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	// Simulate a non-EXDEV rename failure (e.g., Windows ERROR_NOT_SAME_DEVICE).
+	rename := func(oldPath, newPath string) error {
+		return fmt.Errorf("The system cannot move the file to a different disk drive")
+	}
+
+	cls := AssetClassification{Type: AssetTypeRaw, NeedsChmod: true}
+	installed, err := installFileWithRename(src, dst, cls, false, rename)
+	if err != nil {
+		t.Fatalf("installFileWithRename: %v", err)
+	}
+	if installed != dst {
+		t.Fatalf("installed path: got %q want %q", installed, dst)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read dst: %v", err)
+	}
+	if string(got) != "binary-content" {
+		t.Fatalf("dst content: got %q want %q", string(got), "binary-content")
+	}
+}
+
+func TestMoveOrCopy_RenameFails(t *testing.T) {
+	t.Parallel()
+
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	src := filepath.Join(srcDir, "asset.tar.gz")
+	dst := filepath.Join(dstDir, "subdir", "asset.tar.gz")
+
+	content := []byte("cached-asset-data")
+	if err := os.WriteFile(src, content, 0o644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	// Rename will fail because dstDir/subdir does not exist, simulating a
+	// cross-device or permission error. moveOrCopy should fall back to copy.
+	if err := moveOrCopy(src, dst); err != nil {
+		t.Fatalf("moveOrCopy: %v", err)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read dst: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Fatalf("dst content: got %q want %q", string(got), string(content))
+	}
+
+	// Source should have been removed after successful copy fallback.
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("src should have been removed after copy fallback, got err: %v", err)
+	}
+}
+
+func TestMoveOrCopy_RenameSucceeds(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "asset.tar.gz")
+	dst := filepath.Join(dir, "asset-cached.tar.gz")
+
+	content := []byte("cached-asset-data")
+	if err := os.WriteFile(src, content, 0o644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	if err := moveOrCopy(src, dst); err != nil {
+		t.Fatalf("moveOrCopy: %v", err)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read dst: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Fatalf("dst content: got %q want %q", string(got), string(content))
+	}
+
+	// Source should have been moved (not exist).
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("src should not exist after rename, got err: %v", err)
+	}
+}
+
 func TestExtractZip(t *testing.T) {
 	t.Parallel()
 
@@ -2987,6 +3085,40 @@ func TestContainsTokenCI(t *testing.T) {
 	}
 }
 
+func TestContainsTokenCI_WordBoundary(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		tokens []string
+		want   bool
+	}{
+		// "win" must NOT match inside "darwin"
+		{"goneat_v0.5.2_darwin_arm64.tar.gz", []string{"windows", "win"}, false},
+		// "win" DOES match when delimited by non-alphanumeric
+		{"tool_win_amd64.zip", []string{"win"}, true},
+		// "windows" matches normally
+		{"goneat_v0.5.2_windows_amd64.zip", []string{"windows"}, true},
+		// "win" at start of string
+		{"win-tool-amd64.zip", []string{"win"}, true},
+		// "win" at end of string
+		{"tool-win", []string{"win"}, true},
+		// "arm" must NOT match inside "darwin" (preceded by 'd', followed by 'i')
+		{"tool_darwin_amd64.tar.gz", []string{"arm"}, false},
+		// "arm" DOES match when delimited
+		{"tool_linux_arm.tar.gz", []string{"arm"}, true},
+	}
+	for _, tt := range tests {
+		name := tt.name + "_" + strings.Join(tt.tokens, ",")
+		t.Run(name, func(t *testing.T) {
+			got := containsTokenCI(tt.name, tt.tokens)
+			if got != tt.want {
+				t.Errorf("containsTokenCI(%q, %v) = %v, want %v", tt.name, tt.tokens, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTrimExtensionCI(t *testing.T) {
 	t.Parallel()
 
@@ -3051,6 +3183,32 @@ func TestContainsAny(t *testing.T) {
 		{"sfetch_darwin_arm64", []string{"windows"}, false},
 		{"sfetch_darwin_arm64", []string{}, false},
 		{"sfetch_darwin_arm64", []string{""}, false},
+	}
+	for _, tt := range tests {
+		name := tt.haystack + "_" + strings.Join(tt.needles, ",")
+		t.Run(name, func(t *testing.T) {
+			got := containsAny(tt.haystack, tt.needles)
+			if got != tt.want {
+				t.Errorf("containsAny(%q, %v) = %v, want %v", tt.haystack, tt.needles, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContainsAny_WordBoundary(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		haystack string
+		needles  []string
+		want     bool
+	}{
+		// "win" must NOT match inside "darwin"
+		{"goneat_v0.5.2_darwin_arm64.tar.gz", []string{"win", "win32", "win64"}, false},
+		// "win" DOES match when delimited
+		{"tool_win_amd64.zip", []string{"win"}, true},
+		// "windows" matches normally
+		{"goneat_v0.5.2_windows_amd64.zip", []string{"windows"}, true},
 	}
 	for _, tt := range tests {
 		name := tt.haystack + "_" + strings.Join(tt.needles, ",")
@@ -3498,6 +3656,21 @@ func TestPickByHeuristics(t *testing.T) {
 			goarch:    "arm64",
 			wantAsset: "",
 			wantErr:   true,
+		},
+		{
+			name: "windows arm64 does not pick darwin - win substring",
+			assets: []Asset{
+				{Name: "goneat_v0.5.2_darwin_amd64.tar.gz"},
+				{Name: "goneat_v0.5.2_darwin_arm64.tar.gz"},
+				{Name: "goneat_v0.5.2_linux_amd64.tar.gz"},
+				{Name: "goneat_v0.5.2_linux_arm64.tar.gz"},
+				{Name: "goneat_v0.5.2_windows_amd64.zip"},
+			},
+			cfg:       &RepoConfig{BinaryName: "goneat", ArchiveExtensions: []string{".tar.gz", ".zip"}},
+			goos:      "windows",
+			goarch:    "arm64",
+			wantAsset: "goneat_v0.5.2_windows_amd64.zip",
+			wantErr:   false,
 		},
 	}
 
