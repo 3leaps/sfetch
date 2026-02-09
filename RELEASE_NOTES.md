@@ -1,3 +1,36 @@
+## v0.4.2
+
+### Summary
+Windows reliability release focused on archive install compatibility and CI coverage.
+
+### Highlights
+
+**Windows install fix**
+- Added fallback archive binary resolution on Windows so archive installs can resolve `binaryName.exe` when `binaryName` is requested.
+- Fixes Windows bootstrap/dogfood failures seen when installing `fulmenhq/goneat` via `sfetch`.
+
+**CI hardening**
+- Added Windows dogfood CI jobs to validate `sfetch -> goneat` installs on:
+  - `windows-latest` (x64)
+  - `windows-latest-arm64-s` (custom arm64 runner)
+- Added `actionlint.yaml` to explicitly allow the custom runner label.
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+Or self-update:
+```bash
+sfetch --self-update --yes
+```
+
+### Details
+- See `CHANGELOG.md` for the complete list.
+
+---
+
 ## v0.4.1
 
 ### Summary

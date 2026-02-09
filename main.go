@@ -2207,9 +2207,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 				}
 			}
 
-			binaryPath = filepath.Join(extractDir, binaryName)
-			if _, err := os.Stat(binaryPath); err != nil {
-				_, _ = fmt.Fprintf(stderr, "binary %s not found in archive\n", binaryName) //nolint:errcheck
+			binaryPath, err = resolveArchiveBinaryPath(extractDir, binaryName, runtime.GOOS)
+			if err != nil {
+				_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 				return 1
 			}
 
@@ -2482,9 +2482,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 				}
 			}
 
-			binaryPath = filepath.Join(extractDir, binaryName)
-			if _, err := os.Stat(binaryPath); err != nil {
-				_, _ = fmt.Fprintf(stderr, "binary %s not found in archive\n", binaryName) //nolint:errcheck
+			binaryPath, err = resolveArchiveBinaryPath(extractDir, binaryName, runtime.GOOS)
+			if err != nil {
+				_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 				return 1
 			}
 
@@ -3087,9 +3087,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 
-		binaryPath = filepath.Join(extractDir, binaryName)
-		if _, err := os.Stat(binaryPath); err != nil {
-			_, _ = fmt.Fprintf(stderr, "binary %s not found in archive\n", binaryName) //nolint:errcheck
+		binaryPath, err = resolveArchiveBinaryPath(extractDir, binaryName, goos)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
 
@@ -3429,6 +3429,20 @@ func extractZip(zipPath, extractDir string) error {
 	}
 
 	return nil
+}
+
+func resolveArchiveBinaryPath(extractDir, binaryName, goos string) (string, error) {
+	path := filepath.Join(extractDir, binaryName)
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	}
+	if goos == "windows" && !strings.HasSuffix(strings.ToLower(binaryName), ".exe") {
+		exePath := filepath.Join(extractDir, binaryName+".exe")
+		if _, err := os.Stat(exePath); err == nil {
+			return exePath, nil
+		}
+	}
+	return "", fmt.Errorf("binary %s not found in archive", binaryName)
 }
 
 func isScriptExtension(name string) bool {

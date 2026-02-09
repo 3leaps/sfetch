@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-02-09
+
+### Fixed
+- **Windows archive install compatibility:** Added fallback binary resolution for extracted archives on Windows so `binaryName` can resolve to `binaryName.exe` when the archive contains `.exe` artifacts. This fixes Windows installs for repos like `fulmenhq/goneat` when using `sfetch --dest-dir ...`.
+
+### Added
+- **Windows dogfood CI coverage:** Added CI jobs that validate `sfetch` can install `goneat` on:
+  - `windows-latest` (x64)
+  - `windows-latest-arm64-s` (custom arm64 runner)
+- **Actionlint custom runner config:** Added `actionlint.yaml` to allow the custom self-hosted runner label.
+
 ## [0.4.1] - 2026-02-04
 
 ### Changed

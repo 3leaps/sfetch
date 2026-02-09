@@ -95,3 +95,70 @@ jobs:
             --require-minisign
 
           goneat version
+
+  windows-dogfood-x64:
+    name: Windows dogfood (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Install minisign
+        shell: pwsh
+        run: |
+          choco install minisign -y --no-progress
+
+      - name: Build sfetch
+        shell: pwsh
+        run: |
+          go build -o bin/sfetch.exe .
+          .\bin\sfetch.exe --version
+
+      - name: Install goneat via sfetch
+        shell: pwsh
+        run: |
+          .\bin\sfetch.exe `
+            --repo fulmenhq/goneat `
+            --tag v0.5.2 `
+            --dest-dir bin `
+            --require-minisign
+          .\bin\goneat.exe version
+
+  windows-dogfood-arm64:
+    name: Windows dogfood (arm64)
+    runs-on: windows-latest-arm64-s
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Install minisign
+        shell: pwsh
+        run: |
+          if (Get-Command choco -ErrorAction SilentlyContinue) {
+            choco install minisign -y --no-progress
+          } else {
+            winget install -e --id FrankDenis.Minisign --silent `
+              --accept-source-agreements --accept-package-agreements
+          }
+
+      - name: Build sfetch
+        shell: pwsh
+        run: |
+          go build -o bin/sfetch.exe .
+          .\bin\sfetch.exe --version
+
+      - name: Install goneat via sfetch
+        shell: pwsh
+        run: |
+          .\bin\sfetch.exe `
+            --repo fulmenhq/goneat `
+            --tag v0.5.2 `
+            --dest-dir bin `
+            --require-minisign
+          .\bin\goneat.exe version

@@ -460,6 +460,33 @@ func TestExtractZipNestedPaths(t *testing.T) {
 	}
 }
 
+func TestResolveArchiveBinaryPath(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, "goneat.exe"), []byte("bin"), 0o644); err != nil {
+		t.Fatalf("write exe: %v", err)
+	}
+
+	got, err := resolveArchiveBinaryPath(tmp, "goneat", "windows")
+	if err != nil {
+		t.Fatalf("resolveArchiveBinaryPath windows fallback: %v", err)
+	}
+	want := filepath.Join(tmp, "goneat.exe")
+	if got != want {
+		t.Fatalf("path: got %q want %q", got, want)
+	}
+}
+
+func TestResolveArchiveBinaryPathMissing(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	if _, err := resolveArchiveBinaryPath(tmp, "goneat", "linux"); err == nil {
+		t.Fatalf("expected error for missing binary")
+	}
+}
+
 func TestHelpExtendedAlias(t *testing.T) {
 	t.Parallel()
 
