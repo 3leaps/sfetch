@@ -4292,3 +4292,91 @@ func TestParseGitHubRawSpec(t *testing.T) {
 		})
 	}
 }
+
+func TestMatchWithPatterns_WinDarwinFalsePositive(t *testing.T) {
+	t.Parallel()
+
+	assets := []Asset{
+		{Name: "goneat_v0.5.2_darwin_amd64.tar.gz"},
+		{Name: "goneat_v0.5.2_darwin_arm64.tar.gz"},
+		{Name: "goneat_v0.5.2_linux_amd64.tar.gz"},
+		{Name: "goneat_v0.5.2_linux_arm64.tar.gz"},
+		{Name: "goneat_v0.5.2_windows_amd64.zip"},
+	}
+
+	cfg := &RepoConfig{
+		BinaryName:        "goneat",
+		ArchiveExtensions: []string{".tar.gz", ".zip"},
+		AssetPatterns: []string{
+			"(?i)^{{binary}}[_-]{{osToken}}[_-]{{archToken}}.*",
+			"(?i)^{{binary}}.*{{osToken}}.*{{archToken}}.*",
+		},
+	}
+
+	// windows/arm64 must NOT match darwin_arm64 via "win" substring in "darwin".
+	got := matchWithPatterns(assets, cfg, "windows", "arm64")
+	if got != nil {
+		t.Errorf("matchWithPatterns(windows, arm64) = %q, want nil (should fall through to heuristics)", got.Name)
+	}
+}
+
+func TestSelectAsset_WindowsArm64_EndToEnd(t *testing.T) {
+	t.Parallel()
+
+	release := &Release{
+		TagName: "v0.5.2",
+		Assets: []Asset{
+			{Name: "goneat_v0.5.2_darwin_amd64.tar.gz"},
+			{Name: "goneat_v0.5.2_darwin_arm64.tar.gz"},
+			{Name: "goneat_v0.5.2_linux_amd64.tar.gz"},
+			{Name: "goneat_v0.5.2_linux_arm64.tar.gz"},
+			{Name: "goneat_v0.5.2_windows_amd64.zip"},
+		},
+	}
+
+	cfg := &RepoConfig{
+		BinaryName:        "goneat",
+		ArchiveExtensions: []string{".tar.gz", ".zip"},
+		AssetPatterns: []string{
+			"(?i)^{{binary}}[_-]{{osToken}}[_-]{{archToken}}.*",
+			"(?i)^{{binary}}.*{{osToken}}.*{{archToken}}.*",
+		},
+	}
+
+	// No exact windows/arm64 asset exists; should fall through to heuristics
+	// and pick windows_amd64 as the best available.
+	got, err := selectAsset(release, cfg, "windows", "arm64", "", "")
+	if err != nil {
+		t.Fatalf("selectAsset(windows, arm64) error = %v", err)
+	}
+	if got.Name != "goneat_v0.5.2_windows_amd64.zip" {
+		t.Errorf("selectAsset(windows, arm64) = %q, want %q", got.Name, "goneat_v0.5.2_windows_amd64.zip")
+	}
+}
+
+func TestResolveArchiveBinaryPath_WindowsExeInstallName(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "mytool.exe"), []byte("binary"), 0o755); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	binaryPath, err := resolveArchiveBinaryPath(dir, "mytool", "windows")
+	if err != nil {
+		t.Fatalf("resolveArchiveBinaryPath: %v", err)
+	}
+	if !strings.HasSuffix(binaryPath, "mytool.exe") {
+		t.Fatalf("binaryPath = %q, want suffix mytool.exe", binaryPath)
+	}
+
+	// Simulate the installName update logic from the install flow.
+	installName := "mytool"
+	if strings.HasSuffix(strings.ToLower(filepath.Base(binaryPath)), ".exe") &&
+		!strings.HasSuffix(strings.ToLower(installName), ".exe") {
+		installName += ".exe"
+	}
+	if installName != "mytool.exe" {
+		t.Errorf("installName = %q, want %q", installName, "mytool.exe")
+	}
+}

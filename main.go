@@ -2212,6 +2212,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return 1
 			}
 
+			// If the resolved binary has .exe (Windows archive), update installName.
+			if runtime.GOOS == "windows" && strings.HasSuffix(strings.ToLower(filepath.Base(binaryPath)), ".exe") &&
+				!strings.HasSuffix(strings.ToLower(installName), ".exe") {
+				installName += ".exe"
+			}
+
 			// #nosec G302 -- SDR-003: executable needs +x
 			if err := os.Chmod(binaryPath, 0o755); err != nil {
 				_, _ = fmt.Fprintf(stderr, "chmod: %v\n", err) //nolint:errcheck
@@ -2485,6 +2491,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 			if err != nil {
 				_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 				return 1
+			}
+
+			// If the resolved binary has .exe (Windows archive), update installName.
+			if runtime.GOOS == "windows" && strings.HasSuffix(strings.ToLower(filepath.Base(binaryPath)), ".exe") &&
+				!strings.HasSuffix(strings.ToLower(installName), ".exe") {
+				installName += ".exe"
 			}
 
 			// #nosec G302 -- SDR-003: executable needs +x
@@ -3084,6 +3096,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 
+		// If the resolved binary has .exe (Windows archive), update installName.
+		if goos == "windows" && strings.HasSuffix(strings.ToLower(filepath.Base(binaryPath)), ".exe") &&
+			!strings.HasSuffix(strings.ToLower(installName), ".exe") {
+			installName += ".exe"
+		}
+
 		// #nosec G302 -- SDR-003: executable needs +x
 		if err := os.Chmod(binaryPath, 0o755); err != nil {
 			_, _ = fmt.Fprintf(stderr, "chmod: %v\n", err) //nolint:errcheck
@@ -3607,13 +3625,37 @@ func matchWithMatch(assets []Asset, pattern string, cfg *RepoConfig, goos, goarc
 }
 
 func matchWithPatterns(assets []Asset, cfg *RepoConfig, goos, goarch string) *Asset {
+	osTokens := aliasList(goos, goosAliasTable)
+	if len(osTokens) == 0 {
+		osTokens = []string{goos}
+	}
 	for _, pattern := range cfg.AssetPatterns {
 		regexStr := renderPattern(pattern, cfg, goos, goarch)
 		re, err := regexp.Compile(regexStr)
 		if err != nil {
 			continue
 		}
-		match, err := matchWithRegex(assets, re, cfg, goos, goarch)
+		var matches []Asset
+		for i := range assets {
+			if re.MatchString(assets[i].Name) {
+				matches = append(matches, assets[i])
+			}
+		}
+		if len(matches) == 0 {
+			continue
+		}
+		// Validate regex matches with boundary-aware OS token check to catch
+		// false positives (e.g. "win" regex matching inside "darwin").
+		var validated []Asset
+		for _, m := range matches {
+			if containsTokenCI(m.Name, osTokens) {
+				validated = append(validated, m)
+			}
+		}
+		if len(validated) == 0 {
+			continue
+		}
+		match, err := pickWithInference(validated, cfg, goos, goarch, "pattern")
 		if err == nil {
 			return match
 		}
