@@ -9,10 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **CI goneat version:** Bumped goneat from v0.4.0/v0.5.2 to v0.5.3 across all CI jobs and Makefile bootstrap.
+
 ## [0.4.2] - 2026-02-09
 
 ### Fixed
-- **Windows archive install compatibility:** Added fallback binary resolution for extracted archives on Windows so `binaryName` can resolve to `binaryName.exe` when the archive contains `.exe` artifacts. This fixes Windows installs for repos like `fulmenhq/goneat` when using `sfetch --dest-dir ...`.
+- **Pattern regex false positive on Windows:** `matchWithPatterns` regex aliases (e.g. "win") matched as substrings inside unrelated tokens ("darwin"), causing Windows/arm64 to select darwin assets. Pattern matches are now validated with boundary-aware OS token checking before acceptance.
+- **Boundary-aware token matching:** `containsTokenCI` and `containsAny` now enforce word boundaries so "win" cannot match inside "darwin" during heuristic asset selection.
+- **Windows archive install name:** `installName` now inherits the `.exe` extension from the resolved binary inside archives, fixing paths like `bin\goneat` → `bin\goneat.exe`.
+- **Windows archive binary resolution:** Added fallback binary resolution for extracted archives on Windows so `binaryName` can resolve to `binaryName.exe` when the archive contains `.exe` artifacts.
+- **Cross-device rename fallback:** `installFile` falls back to copy+remove when `os.Rename` fails across filesystem boundaries (common on Windows CI runners with temp dirs on different drives).
 
 ### Added
 - **Windows dogfood CI coverage:** Added CI jobs that validate `sfetch` can install `goneat` on:

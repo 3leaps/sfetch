@@ -33,7 +33,7 @@ jobs:
       - name: Install goneat via sfetch (dogfooding)
         run: |
           ./bin/sfetch --repo fulmenhq/goneat \
-            --tag v0.4.0 \
+            --tag v0.5.3 \
             --dest-dir bin \
             --require-minisign
           ./bin/goneat version
@@ -89,7 +89,7 @@ jobs:
           export PATH="$BIN_DIR:$PATH"
 
           sfetch --repo fulmenhq/goneat \
-            --tag v0.4.0 \
+            --tag v0.5.3 \
             --dest-dir "$BIN_DIR" \
             --cache-dir "$CACHE_DIR" \
             --require-minisign
@@ -122,7 +122,7 @@ jobs:
         run: |
           .\bin\sfetch.exe `
             --repo fulmenhq/goneat `
-            --tag v0.5.2 `
+            --tag v0.5.3 `
             --dest-dir bin `
             --require-minisign
           .\bin\goneat.exe version
@@ -158,7 +158,7 @@ jobs:
         run: |
           .\bin\sfetch.exe `
             --repo fulmenhq/goneat `
-            --tag v0.5.2 `
+            --tag v0.5.3 `
             --dest-dir bin `
             --require-minisign
           .\bin\goneat.exe version

@@ -1,13 +1,18 @@
 ## v0.4.2
 
 ### Summary
-Windows reliability release focused on archive install compatibility and CI coverage.
+Windows reliability release focused on cross-platform asset selection, archive install compatibility, and CI coverage.
 
 ### Highlights
 
+**Asset selection fixes**
+- Fixed pattern-based regex matching where OS alias "win" matched as a substring inside "darwin", causing Windows/arm64 to incorrectly select darwin assets. Pattern matches are now validated with boundary-aware token checking before acceptance.
+- Fixed boundary-aware token matching (`containsTokenCI`) to prevent "win" from matching inside "darwin" and similar false positives in heuristic selection.
+
 **Windows install fix**
 - Added fallback archive binary resolution on Windows so archive installs can resolve `binaryName.exe` when `binaryName` is requested.
-- Fixes Windows bootstrap/dogfood failures seen when installing `fulmenhq/goneat` via `sfetch`.
+- Fixed missing `.exe` extension on `installName` when extracting Windows archives — the resolved binary had `.exe` but the install path did not.
+- Fixed cross-device rename failures during install by falling back to copy+remove when `os.Rename` fails across filesystem boundaries.
 
 **CI hardening**
 - Added Windows dogfood CI jobs to validate `sfetch -> goneat` installs on:
