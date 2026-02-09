@@ -18,8 +18,15 @@ fi
 # Assumes release artifacts were built in CI and downloaded locally.
 # This script only re-uploads/clobbers assets on GitHub.
 shopt -s nullglob
-ARTIFACTS=("$DIR"/sfetch_* "$DIR"/SHA256SUMS "$DIR"/SHA2-512SUMS "$DIR"/install-sfetch.sh)
-SIGNATURES=("$DIR"/SHA256SUMS.minisig "$DIR"/SHA256SUMS.asc "$DIR"/SHA2-512SUMS.minisig "$DIR"/SHA2-512SUMS.asc "$DIR"/*-minisign.pub "$DIR"/*-signing-key.asc)
+ARTIFACTS=("$DIR"/sfetch_* "$DIR"/SHA256SUMS "$DIR"/SHA512SUMS "$DIR"/install-sfetch.sh)
+# Build signature list from globs only; filter to existing files.
+SIG_CANDIDATES=("$DIR"/SHA256SUMS.* "$DIR"/SHA512SUMS.* "$DIR"/*-minisign.pub "$DIR"/*-signing-key.asc)
+SIGNATURES=()
+for f in "${SIG_CANDIDATES[@]}"; do
+    if [ -f "$f" ]; then
+        SIGNATURES+=("$f")
+    fi
+done
 if [ ${#ARTIFACTS[@]} -eq 0 ]; then
     echo "no artifacts to upload" >&2
     exit 1
@@ -30,7 +37,9 @@ echo "📤 Uploading signatures and keys"
 if [ ${#SIGNATURES[@]} -gt 0 ]; then
     gh release upload "$TAG" "${SIGNATURES[@]}" --clobber
 else
-    echo "⚠️  No signature files found; skipping"
+    echo "❌ No signature files found in $DIR" >&2
+    echo "   Did you run 'make release-sign' first?" >&2
+    exit 1
 fi
 echo "📝 Updating release notes"
 gh release edit "$TAG" --notes-file "$NOTES_FILE"

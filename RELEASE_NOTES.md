@@ -1,3 +1,39 @@
+## v0.4.3
+
+### Summary
+Windows .zip extraction fix and release DX alignment with fulseed conventions.
+
+### Highlights
+
+**Bug fix**
+- Fixed Windows `.zip` extraction failure where the default `archiveType: "tar.gz"` config overrode the correctly-inferred `.zip` format, causing sfetch to extract Windows `.zip` assets with `tar` instead of Go's `archive/zip`. This was the root cause of kitfly CI failures installing goneat on Windows.
+
+**Release DX improvements**
+- Renamed `SHA2-512SUMS` to `SHA512SUMS` across release tooling (aligned with goreleaser/fulseed conventions)
+- Added unified targets: `release-export-keys`, `release-verify-keys`, `release-verify-signatures`
+- Added `release-upload-provenance` for uploading only manifests, signatures, and keys (no binaries)
+- Renamed `verify-release-key` → `release-verify-key`, `verify-minisign-pubkey` → `release-verify-minisign-pubkey`
+- Renamed `sign-release-assets.sh` → `sign-release-manifests.sh`
+- Fixed `upload-release-assets.sh` to filter non-existent signature files with clear error message
+- Added `scripts/verify-signatures.sh` for post-sign verification
+- Bumped goneat to v0.5.3 across all CI jobs
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+Or self-update:
+```bash
+sfetch --self-update --yes
+```
+
+### Details
+- See `CHANGELOG.md` for the complete list.
+
+---
+
 ## v0.4.2
 
 ### Summary

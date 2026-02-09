@@ -34,7 +34,7 @@ if [ ! -d "$DIR" ]; then
 fi
 
 checksum_files=()
-for file in SHA256SUMS SHA2-512SUMS; do
+for file in SHA256SUMS SHA512SUMS; do
     if [ -f "$DIR/$file" ]; then
         checksum_files+=("$file")
     fi

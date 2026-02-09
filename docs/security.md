@@ -61,21 +61,23 @@ When fetching arbitrary URLs, sfetch applies defense-in-depth defaults:
 
 ## Manual release signing
 
-CI uploads unsigned archives only. Maintainers generate and sign checksum manifests (`SHA256SUMS`, `SHA2-512SUMS`) locally with minisign (primary) and optionally PGP:
+CI uploads unsigned archives only. Maintainers generate and sign checksum manifests (`SHA256SUMS`, `SHA512SUMS`) locally with minisign (primary) and optionally PGP:
 
 ```bash
 export MINISIGN_KEY=/path/to/key.key
 export PGP_KEY_ID=your-key-id  # optional
 
 RELEASE_TAG=v0.2.0 make release-download
+RELEASE_TAG=v0.2.0 make release-checksums
 RELEASE_TAG=v0.2.0 make release-sign
-make release-export-minisign-key
-make release-export-key  # if using PGP
+make release-verify-signatures
+make release-export-keys
+make release-verify-keys
 RELEASE_TAG=v0.2.0 make release-notes
 RELEASE_TAG=v0.2.0 make release-upload
 ```
 
-Only the checksum manifests are signed (not individual files). Users verify the signature on `SHA256SUMS`/`SHA2-512SUMS`, then verify archive checksums against them. This is standard practice - signing individual files would be redundant.
+Only the checksum manifests are signed (not individual files). Users verify the signature on `SHA256SUMS`/`SHA512SUMS`, then verify archive checksums against them. This is standard practice - signing individual files would be redundant.
 
 Installer hardening: `scripts/install-sfetch.sh` now requires minisign verification by default (embedded trust anchor). GPG fallback is pinned by fingerprint. Checksum-only installs require explicit opt-in (`--allow-checksum-only`) and emit low-trust warnings.
 

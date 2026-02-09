@@ -9,8 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-02-09
+
 ### Changed
 - **CI goneat version:** Bumped goneat from v0.4.0/v0.5.2 to v0.5.3 across all CI jobs and Makefile bootstrap.
+- **SHA512 manifest name:** Renamed `SHA2-512SUMS` to `SHA512SUMS` across release tooling (generate, sign, upload, download) to align with goreleaser/fulseed conventions. sfetch still recognizes `SHA2-512SUMS` from other projects for backward compatibility.
+- **Signing script renamed:** `sign-release-assets.sh` → `sign-release-manifests.sh` (clarifies scope: signs manifests, not binaries).
+- **Makefile target renames:** `verify-release-key` → `release-verify-key`, `verify-minisign-pubkey` → `release-verify-minisign-pubkey` (consistent `release-` prefix).
+
+### Added
+- **Unified release targets:** `release-export-keys` (exports both minisign + PGP keys), `release-verify-keys` (verifies both), `release-verify-signatures` (verifies minisign + PGP signatures on manifests).
+- **Provenance upload:** `release-upload-provenance` uploads only manifests, signatures, keys, and notes (no binaries). CI handles binary uploads.
+- **Signature verification script:** `scripts/verify-signatures.sh` verifies minisign and PGP signatures on checksum manifests.
+
+### Fixed
+- **Windows .zip extraction failure:** Legacy `archiveType: "tar.gz"` in default config overrode the correctly-inferred `.zip` archive format, routing Windows `.zip` assets through the `tar` extraction codepath. The legacy compatibility guard now preserves formats already inferred from file extensions.
+- **Upload script signature handling:** `upload-release-assets.sh` now filters non-existent files from the signature list instead of passing literal paths that bypass `nullglob`. Fails with a clear "Did you run `make release-sign`?" message when no signatures are found.
 
 ## [0.4.2] - 2026-02-09
 

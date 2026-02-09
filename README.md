@@ -281,7 +281,7 @@ bash install-sfetch.sh
 
 ### Manual signing workflow
 
-CI uploads unsigned archives. Maintainers generate `SHA256SUMS` and `SHA2-512SUMS` locally, then sign them with minisign (primary) and optionally PGP:
+CI uploads unsigned archives. Maintainers generate `SHA256SUMS` and `SHA512SUMS` locally, then sign them with minisign (primary) and optionally PGP:
 
 ```bash
 export MINISIGN_KEY=/path/to/sfetch.key

@@ -51,7 +51,8 @@ CORPUS_DEST ?= test-corpus
 .PHONY: all help build test clean install fmt lint assess tools bootstrap bootstrap-force
 .PHONY: precommit prepush version corpus corpus-all corpus-dryrun corpus-validate
 .PHONY: release release-download release-checksums release-verify-checksums release-sign
-.PHONY: release-notes release-upload verify-release-key verify-minisign-pubkey release-export-minisign-key
+.PHONY: release-notes release-upload release-upload-provenance release-export-key release-export-minisign-key release-export-keys
+.PHONY: release-verify-key release-verify-minisign-pubkey release-verify-keys release-verify-signatures
 .PHONY: release-clean bootstrap-script build-all gosec gosec-high
 .PHONY: version-check version-set version-patch version-minor version-major
 
@@ -274,7 +275,7 @@ bootstrap-script: ## Copy install script into release directory
 	cp scripts/install-sfetch.sh $(DIST_RELEASE)/install-sfetch.sh
 	@echo "[ok] Copied install-sfetch.sh to $(DIST_RELEASE)"
 
-release-checksums: bootstrap-script ## Generate SHA256SUMS and SHA2-512SUMS
+release-checksums: bootstrap-script ## Generate SHA256SUMS and SHA512SUMS
 	go run ./scripts/cmd/generate-checksums --dir $(DIST_RELEASE)
 
 release-verify-checksums: ## Verify checksums in dist/release
@@ -285,9 +286,9 @@ release-verify-checksums: ## Verify checksums in dist/release
 		echo "=== SHA256SUMS ===" && \
 		shasum -a 256 -c SHA256SUMS 2>&1 | grep -v ': OK$$' || echo "All SHA256 checksums OK"; \
 	fi && \
-	if [ -f SHA2-512SUMS ]; then \
-		echo "=== SHA2-512SUMS ===" && \
-		shasum -a 512 -c SHA2-512SUMS 2>&1 | grep -v ': OK$$' || echo "All SHA512 checksums OK"; \
+	if [ -f SHA512SUMS ]; then \
+		echo "=== SHA512SUMS ===" && \
+		shasum -a 512 -c SHA512SUMS 2>&1 | grep -v ': OK$$' || echo "All SHA512 checksums OK"; \
 	fi
 	@echo "[ok] Checksum verification complete"
 
@@ -302,8 +303,8 @@ release-notes: ## Copy release notes into dist/release
 	cp "$$src" "$(DIST_RELEASE)/release-notes-$(RELEASE_TAG).md"
 	@echo "[ok] Release notes copied to $(DIST_RELEASE)"
 
-release-sign: release-checksums ## Sign checksum manifests
-	SFETCH_MINISIGN_KEY=$(SFETCH_MINISIGN_KEY) SFETCH_PGP_KEY_ID=$(SFETCH_PGP_KEY_ID) SFETCH_GPG_HOMEDIR=$(SFETCH_GPG_HOMEDIR) ./scripts/sign-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+release-sign: release-checksums ## Sign checksum manifests (minisign + optional PGP)
+	SFETCH_MINISIGN_KEY=$(SFETCH_MINISIGN_KEY) SFETCH_PGP_KEY_ID=$(SFETCH_PGP_KEY_ID) SFETCH_GPG_HOMEDIR=$(SFETCH_GPG_HOMEDIR) ./scripts/sign-release-manifests.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
 release-export-key: ## Export PGP public key to dist/release
 	SFETCH_GPG_HOMEDIR=$(SFETCH_GPG_HOMEDIR) ./scripts/export-release-key.sh $(SFETCH_PGP_KEY_ID) $(DIST_RELEASE)
@@ -326,16 +327,31 @@ release-export-minisign-key: build ## Copy minisign public key to dist/release
 		exit 1; \
 	fi
 
-verify-release-key: ## Verify PGP key is public-only
+release-export-keys: release-export-minisign-key release-export-key ## Export all public signing keys
+
+release-verify-key: ## Verify PGP key is public-only
 	./scripts/verify-public-key.sh $(DIST_RELEASE)/$(PUBLIC_KEY_NAME)
 
-verify-minisign-pubkey: build ## Verify minisign public key (usage: make verify-minisign-pubkey FILE=path/to/key.pub)
-	@if [ -z "$(FILE)" ]; then echo "usage: make verify-minisign-pubkey FILE=path/to/key.pub" >&2; exit 1; fi
+release-verify-minisign-pubkey: build ## Verify minisign public key (usage: make release-verify-minisign-pubkey FILE=path/to/key.pub)
+	@if [ -z "$(FILE)" ]; then echo "usage: make release-verify-minisign-pubkey FILE=path/to/key.pub" >&2; exit 1; fi
 	@if [ ! -f "$(FILE)" ]; then echo "error: file $(FILE) not found" >&2; exit 1; fi
 	./$(BUILD_ARTIFACT) --verify-minisign-pubkey "$(FILE)"
 
-release-upload: release-notes verify-release-key ## Upload assets and update release notes
+release-verify-keys: release-verify-key ## Verify all exported public keys
+	@if [ -f "$(DIST_RELEASE)/$(MINISIGN_PUB_NAME)" ]; then \
+		$(MAKE) release-verify-minisign-pubkey FILE=$(DIST_RELEASE)/$(MINISIGN_PUB_NAME); \
+	else \
+		echo "ℹ️  No minisign public key to verify ($(MINISIGN_PUB_NAME) not found)"; \
+	fi
+
+release-verify-signatures: ## Verify minisign and PGP signatures on checksum manifests
+	./scripts/verify-signatures.sh $(DIST_RELEASE)
+
+release-upload: release-notes release-verify-key ## Upload all assets and update release notes
 	./scripts/upload-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+
+release-upload-provenance: release-notes ## Upload provenance only (manifests, signatures, keys, notes)
+	./scripts/release-upload-provenance.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
 release-clean: ## Remove dist/release contents
 	rm -rf $(DIST_RELEASE)

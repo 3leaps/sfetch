@@ -107,7 +107,7 @@ func jobsFromAlgos(list string) ([]checksumJob, error) {
 		case "sha512":
 			jobs = append(jobs, checksumJob{
 				algo:    "sha512",
-				outFile: "SHA2-512SUMS",
+				outFile: "SHA512SUMS",
 				newHash: sha512.New,
 			})
 		default:
@@ -147,7 +147,8 @@ func skipFile(name string) bool {
 		strings.HasSuffix(lower, ".sha512") ||
 		strings.HasSuffix(lower, ".sha512.txt") ||
 		strings.HasPrefix(lower, "sha256sums") ||
-		strings.HasPrefix(lower, "sha2-512sums") {
+		strings.HasPrefix(lower, "sha2-512sums") ||
+		strings.HasPrefix(lower, "sha512sums") {
 		return true
 	}
 

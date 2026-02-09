@@ -25,7 +25,7 @@ PGP signatures are provided as a secondary option for users who prefer gpg tooli
 
 Only checksum manifests are signed, not individual archive files. This is standard practice:
 
-1. User downloads archive + `SHA256SUMS`/`SHA2-512SUMS` + signature (`*.minisig` or `*.asc`)
+1. User downloads archive + `SHA256SUMS`/`SHA512SUMS` + signature (`*.minisig` or `*.asc`)
 2. Verify signature on the checksum file
 3. Verify archive checksum against the signed manifest
 
@@ -35,8 +35,8 @@ This approach means one signature operation per release (one password prompt) wh
 
 | Format | File | Verification | Client Dependency |
 |--------|------|--------------|-------------------|
-| **minisign** | `SHA256SUMS.minisig`, `SHA2-512SUMS.minisig` | `sfetch --minisign-key <path>` or auto-detect | None (pure-Go) |
-| **PGP** | `SHA256SUMS.asc`, `SHA2-512SUMS.asc` | `sfetch --pgp-key-file <path>` or auto-detect | `gpg` binary |
+| **minisign** | `SHA256SUMS.minisig`, `SHA512SUMS.minisig` | `sfetch --minisign-key <path>` or auto-detect | None (pure-Go) |
+| **PGP** | `SHA256SUMS.asc`, `SHA512SUMS.asc` | `sfetch --pgp-key-file <path>` or auto-detect | `gpg` binary |
 
 **Minisign key flags:**
 - `--minisign-key <path>` - Local file or URL
@@ -86,7 +86,7 @@ RELEASE_TAG=v0.2.0 make release-download
 # 2. Generate checksum manifests and sign them
 RELEASE_TAG=v0.2.0 make release-checksums
 RELEASE_TAG=v0.2.0 make release-sign
-# Produces: SHA256SUMS, SHA2-512SUMS plus .minisig/.asc (if PGP_KEY_ID set)
+# Produces: SHA256SUMS, SHA512SUMS plus .minisig/.asc (if PGP_KEY_ID set)
 
 # 3. Export public keys for the release
 make release-export-minisign-key

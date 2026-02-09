@@ -3235,9 +3235,11 @@ func classifyAsset(assetName string, cfg *RepoConfig, override string) (AssetCla
 	warnings := []string{}
 
 	// Backward compatibility: legacy archiveType
-	// Only apply when inferred type is Archive or Unknown (don't override raw scripts/packages)
+	// Only apply when inferred type is Archive/Unknown AND format wasn't already
+	// inferred from the file extension. Without the cls.ArchiveFormat guard, a
+	// config default of "tar.gz" would override a correctly-inferred .zip format.
 	if cfg.ArchiveType != "" && cfg.AssetType == "" && cfg.ArchiveFormat == "" {
-		if cls.Type == AssetTypeArchive || cls.Type == AssetTypeUnknown {
+		if (cls.Type == AssetTypeArchive || cls.Type == AssetTypeUnknown) && cls.ArchiveFormat == "" {
 			if fmt := archiveFormatFromString(cfg.ArchiveType); fmt != "" {
 				cls.Type = AssetTypeArchive
 				cls.ArchiveFormat = fmt

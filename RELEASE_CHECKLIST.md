@@ -44,42 +44,54 @@ export SFETCH_GPG_HOMEDIR=/path/to/custom/gpg/homedir   # optional, defaults to 
    make release-download
    ```
 
-3. **Generate & sign checksum manifests** (`SHA256SUMS`, `SHA2-512SUMS`) with minisign + PGP
+3. **Generate checksum manifests** (`SHA256SUMS`, `SHA512SUMS`)
    ```bash
    make release-checksums
+   ```
+
+4. **Verify checksums**
+   ```bash
+   make release-verify-checksums
+   ```
+
+5. **Sign checksum manifests** with minisign + PGP
+   ```bash
    make release-sign
    ```
-   Produces: `SHA256SUMS`, `SHA2-512SUMS` plus `.minisig`/`.asc`
+   Produces: `SHA256SUMS`, `SHA512SUMS` plus `.minisig`/`.asc`
 
-4. **Export public keys** (auto-validates before copying)
+6. **Verify signatures**
    ```bash
-   make release-export-minisign-key   # → sfetch-minisign.pub (validates it's not secret key!)
-   make release-export-key            # → sfetch-release-signing-key.asc
+   make release-verify-signatures
    ```
 
-5. **Verify exported keys are public-only**
+7. **Export public keys** (auto-validates before copying)
    ```bash
-   make verify-release-key                                    # PGP key
-   make verify-minisign-pubkey FILE=dist/release/sfetch-minisign.pub  # minisign key (optional, done in step 4)
+   make release-export-keys
+   ```
+   Exports both `sfetch-minisign.pub` and `sfetch-release-signing-key.asc`.
+
+8. **Verify exported keys are public-only**
+   ```bash
+   make release-verify-keys
    ```
 
-6. **Copy release notes** (requires `docs/releases/$RELEASE_TAG.md`)
+9. **Copy release notes** (requires `docs/releases/$RELEASE_TAG.md`)
    ```bash
    make release-notes
    ```
 
-7. **Verify checksums before upload**
-   ```bash
-   make release-verify-checksums
-   ```
-   Validates that all archives match their checksums in SHA256SUMS/SHA2-512SUMS.
-
-8. **Upload signatures and keys**
-   ```bash
-   make release-upload
-   ```
-   > **Note:** This uploads ALL assets with `--clobber`, including binaries CI already uploaded.
-   > This is intentional for idempotency - rerun safely to fix any mistakes.
+10. **Upload signatures and keys**
+    ```bash
+    make release-upload
+    ```
+    > **Note:** This uploads ALL assets with `--clobber`, including binaries CI already uploaded.
+    > This is intentional for idempotency - rerun safely to fix any mistakes.
+    >
+    > To upload provenance only (manifests, signatures, keys, notes):
+    > ```bash
+    > make release-upload-provenance
+    > ```
 
 ## 3. Post-Release
 

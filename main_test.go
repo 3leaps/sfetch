@@ -1285,6 +1285,26 @@ func TestClassifyAssetLegacyArchiveTypeDoesNotOverrideRaw(t *testing.T) {
 	}
 }
 
+func TestClassifyAssetLegacyArchiveTypeDoesNotOverrideZipFormat(t *testing.T) {
+	// Regression: legacy archiveType "tar.gz" in defaults must not override a
+	// correctly-inferred .zip archive format. This caused Windows .zip assets
+	// to be extracted with tar instead of archive/zip.
+	cfg := &RepoConfig{
+		ArchiveType: "tar.gz",
+	}
+
+	cls, _, err := classifyAsset("goneat_v0.5.3_windows_amd64.zip", cfg, "")
+	if err != nil {
+		t.Fatalf("classifyAsset error: %v", err)
+	}
+	if cls.Type != AssetTypeArchive {
+		t.Fatalf("Type = %s, want archive", cls.Type)
+	}
+	if cls.ArchiveFormat != ArchiveFormatZip {
+		t.Fatalf("ArchiveFormat = %q, want %q", cls.ArchiveFormat, ArchiveFormatZip)
+	}
+}
+
 func TestLooksLikeSupplemental(t *testing.T) {
 	t.Parallel()
 
