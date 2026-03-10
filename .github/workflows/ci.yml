@@ -9,6 +9,11 @@ name: CI
 permissions:
   contents: read
 
+env:
+  GITHUB_TOKEN: ${{ github.token }}
+  GH_TOKEN: ${{ github.token }}
+  SFETCH_GITHUB_TOKEN: ${{ github.token }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -152,6 +157,17 @@ jobs:
         run: |
           go build -o bin/sfetch.exe .
           .\bin\sfetch.exe --version
+
+      - name: Verify install script detects windows arm64
+        shell: bash
+        run: |
+          set -euo pipefail
+          lib="$(mktemp)"
+          sed '$d' scripts/install-sfetch.sh > "$lib"
+          printf '\ndetect_platform\n' >> "$lib"
+          platform="$(bash "$lib" | tr -d '\r\n')"
+          echo "Detected platform via install-sfetch.sh: $platform"
+          test "$platform" = "windows_arm64"
 
       - name: Install goneat via sfetch
         shell: pwsh

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-03-10
+
+### Fixed
+- **Windows ARM64 bootstrap detection:** `install-sfetch.sh` now prefers GitHub Actions `RUNNER_ARCH`, then native `powershell.exe`, before consulting Windows env vars or `uname -m`, fixing GitHub Actions Windows ARM64 runs where Git Bash and spawned processes still report `amd64`.
+
+### Added
+- **Windows ARM64 installer validation:** CI now runs the local `install-sfetch.sh` detection logic under Git Bash on the Windows ARM64 runner and asserts it resolves to `windows_arm64`.
+- **Installer regression coverage:** Added a test case that mocks native PowerShell architecture output so the Windows ARM64 detection path is covered even when shell env vars lie.
+
 ## [0.4.4] - 2026-03-10
 
 ### Fixed
