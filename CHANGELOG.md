@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-03-10
+
+### Fixed
+- **Windows ARM64 bootstrap detection:** `scripts/install-sfetch.sh` now prefers `PROCESSOR_ARCHITECTURE` / `PROCESSOR_ARCHITEW6432` on Windows before falling back to `uname -m`, fixing WoW64 cases where Git Bash reports `x86_64` on native ARM64 runners and downloads the wrong archive.
+
+### Added
+- **Installer regression coverage:** Added a table-driven Go test that mocks shell `uname` values and Windows architecture environment variables to lock in the Windows ARM64 installer path.
+
+### Changed
+- **Cross-platform build parity:** `make build-all` now includes `windows/arm64`, matching the release workflow matrix so local/precommit builds exercise the same artifact set that ships in releases.
+- **goneat pin refreshed:** Bootstrap and CI now pin `fulmenhq/goneat` to `v0.5.6`.
+
 ## [0.4.3] - 2026-02-09
 
 ### Changed

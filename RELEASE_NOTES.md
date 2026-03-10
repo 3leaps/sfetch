@@ -1,3 +1,39 @@
+## v0.4.4
+
+### Summary
+Windows ARM64 bootstrap reliability release for the `install-sfetch.sh` path, with matching local build coverage.
+
+### Highlights
+
+**Bootstrap installer fix**
+- Fixed `install-sfetch.sh` platform detection on Windows ARM64 hosts running Git Bash or similar WoW64 shells. The installer now checks `PROCESSOR_ARCHITECTURE` and `PROCESSOR_ARCHITEW6432` before `uname -m`, so it downloads `sfetch_windows_arm64.zip` instead of the x64 archive when the host is actually ARM64.
+- This addresses flaky downstream CI installs where `uname -m` reported `x86_64` even though the runner was native Windows ARM64.
+
+**Regression coverage**
+- Added a focused installer test that mocks `uname` and Windows architecture environment variables, covering both native and WoW64-style ARM64 detection paths.
+
+**Build matrix parity**
+- Updated `make build-all` to include `windows/arm64`, bringing local and precommit artifact builds in line with the release workflow matrix.
+
+**Toolchain refresh**
+- Updated the active `goneat` pin in bootstrap and CI flows to `v0.5.6`.
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+Or self-update:
+```bash
+sfetch --self-update --yes
+```
+
+### Details
+- See `CHANGELOG.md` for the complete list.
+
+---
+
 ## v0.4.3
 
 ### Summary

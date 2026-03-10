@@ -664,20 +664,20 @@ func formatDryRunOutput(repo string, rel *Release, assessment *VerificationAsses
 
 	sb.WriteString("\nsfetch dry-run assessment\n")
 	sb.WriteString("─────────────────────────\n")
-	sb.WriteString(fmt.Sprintf("Repository:  %s\n", repo))
-	sb.WriteString(fmt.Sprintf("Release:     %s\n", rel.TagName))
+	_, _ = fmt.Fprintf(&sb, "Repository:  %s\n", repo)
+	_, _ = fmt.Fprintf(&sb, "Release:     %s\n", rel.TagName)
 
 	// Self-update version comparison section
 	if selfUpdateInfo != nil {
 		sb.WriteString("\nVersion check:\n")
-		sb.WriteString(fmt.Sprintf("  Current:    %s\n", update.FormatVersionDisplay(selfUpdateInfo.CurrentVersion)))
-		sb.WriteString(fmt.Sprintf("  Target:     %s\n", update.FormatVersionDisplay(selfUpdateInfo.TargetVersion)))
-		sb.WriteString(fmt.Sprintf("  Status:     %s\n", update.DescribeDecision(selfUpdateInfo.Decision)))
+		_, _ = fmt.Fprintf(&sb, "  Current:    %s\n", update.FormatVersionDisplay(selfUpdateInfo.CurrentVersion))
+		_, _ = fmt.Fprintf(&sb, "  Target:     %s\n", update.FormatVersionDisplay(selfUpdateInfo.TargetVersion))
+		_, _ = fmt.Fprintf(&sb, "  Status:     %s\n", update.DescribeDecision(selfUpdateInfo.Decision))
 	}
 
 	if assessment.SelectedAsset != nil {
 		size := formatSize(assessment.SelectedAsset.Size)
-		sb.WriteString(fmt.Sprintf("Asset:       %s (%s)\n", assessment.SelectedAsset.Name, size))
+		_, _ = fmt.Fprintf(&sb, "Asset:       %s (%s)\n", assessment.SelectedAsset.Name, size)
 	}
 
 	sb.WriteString("\nVerification available:\n")
@@ -687,9 +687,9 @@ func formatDryRunOutput(repo string, rel *Release, assessment *VerificationAsses
 		sigType := assessment.SignatureFormat
 		verifiable := assessment.Trust.Factors.Signature.Verifiable
 		if assessment.SignatureIsChecksum {
-			sb.WriteString(fmt.Sprintf("  Signature:  %s (%s, checksum-level, verifiable=%t)\n", assessment.SignatureFile, sigType, verifiable))
+			_, _ = fmt.Fprintf(&sb, "  Signature:  %s (%s, checksum-level, verifiable=%t)\n", assessment.SignatureFile, sigType, verifiable)
 		} else {
-			sb.WriteString(fmt.Sprintf("  Signature:  %s (%s, per-asset, verifiable=%t)\n", assessment.SignatureFile, sigType, verifiable))
+			_, _ = fmt.Fprintf(&sb, "  Signature:  %s (%s, per-asset, verifiable=%t)\n", assessment.SignatureFile, sigType, verifiable)
 		}
 	} else {
 		sb.WriteString("  Signature:  none\n")
@@ -698,39 +698,39 @@ func formatDryRunOutput(repo string, rel *Release, assessment *VerificationAsses
 	// Checksum info
 	if assessment.ChecksumAvailable {
 		verifiable := assessment.Trust.Factors.Checksum.Verifiable
-		sb.WriteString(fmt.Sprintf("  Checksum:   %s (%s, %s, verifiable=%t)\n",
-			assessment.ChecksumFile, assessment.ChecksumAlgorithm, assessment.ChecksumType, verifiable))
+		_, _ = fmt.Fprintf(&sb, "  Checksum:   %s (%s, %s, verifiable=%t)\n",
+			assessment.ChecksumFile, assessment.ChecksumAlgorithm, assessment.ChecksumType, verifiable)
 	} else {
 		sb.WriteString("  Checksum:   none\n")
 	}
 
 	sb.WriteString("\nVerification plan:\n")
-	sb.WriteString(fmt.Sprintf("  Workflow:   %s\n", describeWorkflow(assessment.Workflow)))
-	sb.WriteString(fmt.Sprintf("  Trust:      %d/100 (%s)\n", assessment.Trust.Score, assessment.Trust.LevelName))
+	_, _ = fmt.Fprintf(&sb, "  Workflow:   %s\n", describeWorkflow(assessment.Workflow))
+	_, _ = fmt.Fprintf(&sb, "  Trust:      %d/100 (%s)\n", assessment.Trust.Score, assessment.Trust.LevelName)
 	// Trust factor breakdown
 	sb.WriteString("\nTrust factors:\n")
-	sb.WriteString(fmt.Sprintf("  Signature:  verifiable=%t validated=%t skipped=%t points=%d\n",
+	_, _ = fmt.Fprintf(&sb, "  Signature:  verifiable=%t validated=%t skipped=%t points=%d\n",
 		assessment.Trust.Factors.Signature.Verifiable,
 		assessment.Trust.Factors.Signature.Validated,
 		assessment.Trust.Factors.Signature.Skipped,
-		assessment.Trust.Factors.Signature.Points))
-	sb.WriteString(fmt.Sprintf("  Checksum:   verifiable=%t validated=%t skipped=%t algo=%s points=%d\n",
+		assessment.Trust.Factors.Signature.Points)
+	_, _ = fmt.Fprintf(&sb, "  Checksum:   verifiable=%t validated=%t skipped=%t algo=%s points=%d\n",
 		assessment.Trust.Factors.Checksum.Verifiable,
 		assessment.Trust.Factors.Checksum.Validated,
 		assessment.Trust.Factors.Checksum.Skipped,
 		assessment.Trust.Factors.Checksum.Algorithm,
-		assessment.Trust.Factors.Checksum.Points))
-	sb.WriteString(fmt.Sprintf("  Transport:  https=%t points=%d\n",
+		assessment.Trust.Factors.Checksum.Points)
+	_, _ = fmt.Fprintf(&sb, "  Transport:  https=%t points=%d\n",
 		assessment.Trust.Factors.Transport.HTTPS,
-		assessment.Trust.Factors.Transport.Points))
-	sb.WriteString(fmt.Sprintf("  Algorithm:  name=%s points=%d\n",
+		assessment.Trust.Factors.Transport.Points)
+	_, _ = fmt.Fprintf(&sb, "  Algorithm:  name=%s points=%d\n",
 		assessment.Trust.Factors.Algorithm.Name,
-		assessment.Trust.Factors.Algorithm.Points))
+		assessment.Trust.Factors.Algorithm.Points)
 
 	if len(assessment.Warnings) > 0 {
 		sb.WriteString("\nWarnings:\n")
 		for _, w := range assessment.Warnings {
-			sb.WriteString(fmt.Sprintf("  - %s\n", w))
+			_, _ = fmt.Fprintf(&sb, "  - %s\n", w)
 		}
 	}
 
@@ -1562,13 +1562,13 @@ func formatRawDryRunOutput(spec githubRawSpec, assessment *VerificationAssessmen
 	sb.WriteString("\nsfetch dry-run assessment\n")
 	sb.WriteString("─────────────────────────\n")
 	sb.WriteString("Source:     github raw\n")
-	sb.WriteString(fmt.Sprintf("Repository: %s\n", spec.Repo))
-	sb.WriteString(fmt.Sprintf("Ref:        %s\n", spec.Ref))
-	sb.WriteString(fmt.Sprintf("Path:       %s\n", spec.Path))
-	sb.WriteString(fmt.Sprintf("URL:        %s\n", spec.URL))
+	_, _ = fmt.Fprintf(&sb, "Repository: %s\n", spec.Repo)
+	_, _ = fmt.Fprintf(&sb, "Ref:        %s\n", spec.Ref)
+	_, _ = fmt.Fprintf(&sb, "Path:       %s\n", spec.Path)
+	_, _ = fmt.Fprintf(&sb, "URL:        %s\n", spec.URL)
 
 	if assessment.SelectedAsset != nil {
-		sb.WriteString(fmt.Sprintf("Asset:      %s\n", assessment.SelectedAsset.Name))
+		_, _ = fmt.Fprintf(&sb, "Asset:      %s\n", assessment.SelectedAsset.Name)
 	}
 
 	sb.WriteString("\nVerification available:\n")
@@ -1576,32 +1576,32 @@ func formatRawDryRunOutput(spec githubRawSpec, assessment *VerificationAssessmen
 	sb.WriteString("  Checksum:   none\n")
 
 	sb.WriteString("\nVerification plan:\n")
-	sb.WriteString(fmt.Sprintf("  Workflow:   %s\n", describeWorkflow(assessment.Workflow)))
-	sb.WriteString(fmt.Sprintf("  Trust:      %d/100 (%s)\n", assessment.Trust.Score, assessment.Trust.LevelName))
+	_, _ = fmt.Fprintf(&sb, "  Workflow:   %s\n", describeWorkflow(assessment.Workflow))
+	_, _ = fmt.Fprintf(&sb, "  Trust:      %d/100 (%s)\n", assessment.Trust.Score, assessment.Trust.LevelName)
 
 	sb.WriteString("\nTrust factors:\n")
-	sb.WriteString(fmt.Sprintf("  Signature:  verifiable=%t validated=%t skipped=%t points=%d\n",
+	_, _ = fmt.Fprintf(&sb, "  Signature:  verifiable=%t validated=%t skipped=%t points=%d\n",
 		assessment.Trust.Factors.Signature.Verifiable,
 		assessment.Trust.Factors.Signature.Validated,
 		assessment.Trust.Factors.Signature.Skipped,
-		assessment.Trust.Factors.Signature.Points))
-	sb.WriteString(fmt.Sprintf("  Checksum:   verifiable=%t validated=%t skipped=%t algo=%s points=%d\n",
+		assessment.Trust.Factors.Signature.Points)
+	_, _ = fmt.Fprintf(&sb, "  Checksum:   verifiable=%t validated=%t skipped=%t algo=%s points=%d\n",
 		assessment.Trust.Factors.Checksum.Verifiable,
 		assessment.Trust.Factors.Checksum.Validated,
 		assessment.Trust.Factors.Checksum.Skipped,
 		assessment.Trust.Factors.Checksum.Algorithm,
-		assessment.Trust.Factors.Checksum.Points))
-	sb.WriteString(fmt.Sprintf("  Transport:  https=%t points=%d\n",
+		assessment.Trust.Factors.Checksum.Points)
+	_, _ = fmt.Fprintf(&sb, "  Transport:  https=%t points=%d\n",
 		assessment.Trust.Factors.Transport.HTTPS,
-		assessment.Trust.Factors.Transport.Points))
-	sb.WriteString(fmt.Sprintf("  Algorithm:  name=%s points=%d\n",
+		assessment.Trust.Factors.Transport.Points)
+	_, _ = fmt.Fprintf(&sb, "  Algorithm:  name=%s points=%d\n",
 		assessment.Trust.Factors.Algorithm.Name,
-		assessment.Trust.Factors.Algorithm.Points))
+		assessment.Trust.Factors.Algorithm.Points)
 
 	if len(assessment.Warnings) > 0 {
 		sb.WriteString("\nWarnings:\n")
 		for _, w := range assessment.Warnings {
-			sb.WriteString(fmt.Sprintf("  - %s\n", w))
+			_, _ = fmt.Fprintf(&sb, "  - %s\n", w)
 		}
 	}
 
@@ -1614,22 +1614,22 @@ func formatURLDryRunOutput(spec urlSpec, result urlFetchResult, assessment *Veri
 	sb.WriteString("\nsfetch dry-run assessment\n")
 	sb.WriteString("─────────────────────────\n")
 	sb.WriteString("Source:     url\n")
-	sb.WriteString(fmt.Sprintf("URL:        %s\n", spec.URL))
+	_, _ = fmt.Fprintf(&sb, "URL:        %s\n", spec.URL)
 	if result.finalURL != "" && result.finalURL != spec.URL {
-		sb.WriteString(fmt.Sprintf("Final URL:  %s\n", result.finalURL))
+		_, _ = fmt.Fprintf(&sb, "Final URL:  %s\n", result.finalURL)
 	}
 	if len(result.redirects) > 0 {
 		sb.WriteString("Redirects:\n")
 		for _, redirect := range result.redirects {
-			sb.WriteString(fmt.Sprintf("  - %s\n", redirect))
+			_, _ = fmt.Fprintf(&sb, "  - %s\n", redirect)
 		}
 	}
 	if result.contentType != "" {
-		sb.WriteString(fmt.Sprintf("Content-Type: %s\n", result.contentType))
+		_, _ = fmt.Fprintf(&sb, "Content-Type: %s\n", result.contentType)
 	}
 
 	if assessment.SelectedAsset != nil {
-		sb.WriteString(fmt.Sprintf("Asset:      %s\n", assessment.SelectedAsset.Name))
+		_, _ = fmt.Fprintf(&sb, "Asset:      %s\n", assessment.SelectedAsset.Name)
 	}
 
 	sb.WriteString("\nVerification available:\n")
@@ -1637,32 +1637,32 @@ func formatURLDryRunOutput(spec urlSpec, result urlFetchResult, assessment *Veri
 	sb.WriteString("  Checksum:   none\n")
 
 	sb.WriteString("\nVerification plan:\n")
-	sb.WriteString(fmt.Sprintf("  Workflow:   %s\n", describeWorkflow(assessment.Workflow)))
-	sb.WriteString(fmt.Sprintf("  Trust:      %d/100 (%s)\n", assessment.Trust.Score, assessment.Trust.LevelName))
+	_, _ = fmt.Fprintf(&sb, "  Workflow:   %s\n", describeWorkflow(assessment.Workflow))
+	_, _ = fmt.Fprintf(&sb, "  Trust:      %d/100 (%s)\n", assessment.Trust.Score, assessment.Trust.LevelName)
 
 	sb.WriteString("\nTrust factors:\n")
-	sb.WriteString(fmt.Sprintf("  Signature:  verifiable=%t validated=%t skipped=%t points=%d\n",
+	_, _ = fmt.Fprintf(&sb, "  Signature:  verifiable=%t validated=%t skipped=%t points=%d\n",
 		assessment.Trust.Factors.Signature.Verifiable,
 		assessment.Trust.Factors.Signature.Validated,
 		assessment.Trust.Factors.Signature.Skipped,
-		assessment.Trust.Factors.Signature.Points))
-	sb.WriteString(fmt.Sprintf("  Checksum:   verifiable=%t validated=%t skipped=%t algo=%s points=%d\n",
+		assessment.Trust.Factors.Signature.Points)
+	_, _ = fmt.Fprintf(&sb, "  Checksum:   verifiable=%t validated=%t skipped=%t algo=%s points=%d\n",
 		assessment.Trust.Factors.Checksum.Verifiable,
 		assessment.Trust.Factors.Checksum.Validated,
 		assessment.Trust.Factors.Checksum.Skipped,
 		assessment.Trust.Factors.Checksum.Algorithm,
-		assessment.Trust.Factors.Checksum.Points))
-	sb.WriteString(fmt.Sprintf("  Transport:  https=%t points=%d\n",
+		assessment.Trust.Factors.Checksum.Points)
+	_, _ = fmt.Fprintf(&sb, "  Transport:  https=%t points=%d\n",
 		assessment.Trust.Factors.Transport.HTTPS,
-		assessment.Trust.Factors.Transport.Points))
-	sb.WriteString(fmt.Sprintf("  Algorithm:  name=%s points=%d\n",
+		assessment.Trust.Factors.Transport.Points)
+	_, _ = fmt.Fprintf(&sb, "  Algorithm:  name=%s points=%d\n",
 		assessment.Trust.Factors.Algorithm.Name,
-		assessment.Trust.Factors.Algorithm.Points))
+		assessment.Trust.Factors.Algorithm.Points)
 
 	if len(assessment.Warnings) > 0 {
 		sb.WriteString("\nWarnings:\n")
 		for _, w := range assessment.Warnings {
-			sb.WriteString(fmt.Sprintf("  - %s\n", w))
+			_, _ = fmt.Fprintf(&sb, "  - %s\n", w)
 		}
 	}
 
@@ -2966,7 +2966,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	cacheAssetDir := filepath.Join(cd, actualHash)
 	// #nosec G301 -- SDR-002: cache directory
-	if err := os.MkdirAll(cacheAssetDir, 0o755); err != nil {
+	if err := os.MkdirAll(cacheAssetDir, 0o755); err != nil { // #nosec G301,G703 -- CLI-controlled cache directory
 		_, _ = fmt.Fprintf(stderr, "mkdir cache %s: %v\n", cacheAssetDir, err) //nolint:errcheck
 		return 1
 	}
@@ -3059,21 +3059,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return 1
 			}
 		case ArchiveFormatTarXz:
-			// #nosec G204 -- assetPath tmp controlled
+			// #nosec G204,G702 -- tar args are fixed; paths are local temp files
 			cmd := exec.Command("tar", "xJf", assetPath, "-C", extractDir)
 			if err := cmd.Run(); err != nil {
 				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
 				return 1
 			}
 		case ArchiveFormatTarBz2:
-			// #nosec G204 -- assetPath tmp controlled
+			// #nosec G204,G702 -- tar args are fixed; paths are local temp files
 			cmd := exec.Command("tar", "xjf", assetPath, "-C", extractDir)
 			if err := cmd.Run(); err != nil {
 				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
 				return 1
 			}
 		case ArchiveFormatTar:
-			// #nosec G204 -- assetPath tmp controlled
+			// #nosec G204,G702 -- tar args are fixed; paths are local temp files
 			cmd := exec.Command("tar", "xf", assetPath, "-C", extractDir)
 			if err := cmd.Run(); err != nil {
 				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
@@ -3082,7 +3082,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		case ArchiveFormatTarGz:
 			fallthrough
 		default:
-			// #nosec G204 -- assetPath tmp controlled
+			// #nosec G204,G702 -- tar args are fixed; paths are local temp files
 			cmd := exec.Command("tar", "xzf", assetPath, "-C", extractDir)
 			if err := cmd.Run(); err != nil {
 				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
@@ -3432,7 +3432,7 @@ func extractZip(zipPath, extractDir string) error {
 		if runtime.GOOS != "windows" {
 			perm := mode.Perm()
 			if perm != 0 {
-				if err := os.Chmod(destPathClean, perm); err != nil {
+				if err := os.Chmod(destPathClean, perm); err != nil { // #nosec G302,G703 -- apply archive-provided mode within validated extraction root
 					return fmt.Errorf("chmod %s: %w", destPathClean, err)
 				}
 			}
@@ -4064,7 +4064,7 @@ func installFileWithRename(src, dst string, classification AssetClassification, 
 }
 
 func copyFile(src, dst string) error {
-	in, err := os.Open(src) // #nosec G304 -- SDR-001: CLI file path input
+	in, err := os.Open(src) // #nosec G304,G703 -- CLI-selected source path
 	if err != nil {
 		return fmt.Errorf("open %s: %w", src, err)
 	}
@@ -4076,31 +4076,31 @@ func copyFile(src, dst string) error {
 	}
 
 	// #nosec G301 -- SDR-002: user destination dir
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil { // #nosec G301,G703 -- CLI-selected destination directory
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
 	}
 
 	tmp := dst + ".tmp"
-	out, err := os.Create(tmp) // #nosec G304 -- SDR-001: CLI file path input
+	out, err := os.Create(tmp) // #nosec G304,G703 -- temp file derived from destination path
 	if err != nil {
 		return fmt.Errorf("create %s: %w", tmp, err)
 	}
 
 	if _, err := io.Copy(out, in); err != nil {
 		_ = out.Close()
-		_ = os.Remove(tmp)
+		_ = os.Remove(tmp) // #nosec G703 -- temp file derived from destination path
 		return fmt.Errorf("copy %s: %w", dst, err)
 	}
 	if err := out.Close(); err != nil {
-		_ = os.Remove(tmp)
+		_ = os.Remove(tmp) // #nosec G703 -- temp file derived from destination path
 		return fmt.Errorf("close %s: %w", tmp, err)
 	}
-	if err := os.Chmod(tmp, srcInfo.Mode().Perm()); err != nil {
-		_ = os.Remove(tmp)
+	if err := os.Chmod(tmp, srcInfo.Mode().Perm()); err != nil { // #nosec G302,G703 -- preserve source executable bits on copied artifact
+		_ = os.Remove(tmp) // #nosec G703 -- temp file derived from destination path
 		return fmt.Errorf("chmod %s: %w", tmp, err)
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
+	if err := os.Rename(tmp, dst); err != nil { // #nosec G306,G703 -- atomic replacement into CLI-selected destination
+		_ = os.Remove(tmp) // #nosec G703 -- temp file derived from destination path
 		return fmt.Errorf("rename %s: %w", dst, err)
 	}
 	return nil
@@ -4110,11 +4110,11 @@ func copyFile(src, dst string) error {
 // and removes the source. This handles cross-device renames (EXDEV on Unix,
 // ERROR_NOT_SAME_DEVICE on Windows) transparently.
 func moveOrCopy(src, dst string) error {
-	if err := os.Rename(src, dst); err != nil {
+	if err := os.Rename(src, dst); err != nil { // #nosec G306,G703 -- move between local artifact paths
 		if errCopy := copyFile(src, dst); errCopy != nil {
 			return fmt.Errorf("rename: %w; copy fallback: %w", err, errCopy)
 		}
-		_ = os.Remove(src)
+		_ = os.Remove(src) // #nosec G703 -- source artifact path chosen by the CLI
 	}
 	return nil
 }

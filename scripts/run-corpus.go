@@ -59,7 +59,7 @@ func main() {
 		fatalf("manifest validation failed: %v", err)
 	}
 
-	if _, err := os.Stat(destDir); err != nil {
+	if _, err := os.Stat(destDir); err != nil { // #nosec G703 -- local test harness destination path
 		fatalf("destination %s not found (create it or set CORPUS_DEST)", destDir)
 	}
 
@@ -184,7 +184,7 @@ func runEntry(e corpusEntry, dryRunOnly bool, dest, sfetchBin string) result {
 }
 
 func runCmd(bin string, args ...string) (int, string) {
-	cmd := exec.Command(bin, args...)
+	cmd := exec.Command(bin, args...) // #nosec G204,G702 -- local test harness executes caller-selected sfetch binary
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -196,7 +196,7 @@ func runCmd(bin string, args ...string) (int, string) {
 }
 
 func loadManifest(path string) ([]corpusEntry, error) {
-	f, err := os.Open(path) // #nosec G304 -- SDR-001: test harness manifest path
+	f, err := os.Open(path) // #nosec G304,G703 -- local test harness manifest path
 	if err != nil {
 		return nil, err
 	}

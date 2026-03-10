@@ -116,6 +116,20 @@ detect_platform() {
         *) err "unsupported OS: $(uname -s)" ;;
     esac
 
+    # Git Bash and similar WoW64 shells can report x86_64 via uname -m on
+    # native Windows ARM64 hosts. Prefer Windows architecture env vars first.
+    if [ "$os" = "windows" ]; then
+        case "$(printf '%s' "${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE:-}}" | tr '[:upper:]' '[:lower:]')" in
+            amd64 | x86_64) arch="amd64" ;;
+            arm64 | aarch64) arch="arm64" ;;
+        esac
+    fi
+
+    if [ -n "${arch:-}" ]; then
+        echo "${os}_${arch}"
+        return
+    fi
+
     case "$(uname -m)" in
         x86_64 | amd64) arch="amd64" ;;
         arm64 | aarch64) arch="arm64" ;;

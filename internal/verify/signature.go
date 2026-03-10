@@ -91,7 +91,7 @@ func VerifyPGPSignature(assetPath, sigPath, pubKeyPath, gpgBin string) error {
 }
 
 func runCommand(bin string, args ...string) error {
-	cmd := exec.Command(bin, args...)
+	cmd := exec.Command(bin, args...) // #nosec G204 -- verifier binary is user-configured; args are fixed by verification flow
 	var combined bytes.Buffer
 	cmd.Stdout = &combined
 	cmd.Stderr = &combined

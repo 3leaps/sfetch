@@ -40,7 +40,7 @@ BIN_DIR := $(CURDIR)/bin
 
 # Pinned tool versions (minimums; existing installs are respected)
 SFETCH_VERSION := v0.3.4
-GONEAT_VERSION ?= v0.5.3
+GONEAT_VERSION ?= v0.5.6
 
 # Tool paths (prefer repo-local, fall back to PATH)
 SFETCH = $(shell [ -x "$(BIN_DIR)/sfetch" ] && echo "$(BIN_DIR)/sfetch" || command -v sfetch 2>/dev/null)
@@ -206,6 +206,7 @@ build-all: ## Build for all platforms
 	GOOS=linux  GOARCH=amd64  CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o dist/release/$(NAME)-linux-amd64      $(MAIN)
 	GOOS=linux  GOARCH=arm64  CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o dist/release/$(NAME)-linux-arm64      $(MAIN)
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o dist/release/$(NAME)-windows-amd64.exe $(MAIN)
+	GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o dist/release/$(NAME)-windows-arm64.exe $(MAIN)
 	@echo "[ok] Built all platforms to dist/release/"
 
 test: ## Run tests
