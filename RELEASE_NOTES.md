@@ -16,7 +16,7 @@ Windows ARM64 bootstrap reliability release for the `install-sfetch.sh` path, wi
 - Updated `make build-all` to include `windows/arm64`, bringing local and precommit artifact builds in line with the release workflow matrix.
 
 **Toolchain refresh**
-- Updated the active `goneat` pin in bootstrap and CI flows to `v0.5.6`.
+- Updated the active `goneat` pin in bootstrap and CI flows to `v0.5.7`.
 
 ### Install
 
