@@ -22,7 +22,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
 
       - name: Install system tools
         run: |
@@ -65,10 +65,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
-
       - name: Install prerequisites
         shell: bash
         run: |
@@ -76,6 +72,10 @@ jobs:
           apt-get update && \
             apt-get install -y --no-install-recommends \
             ca-certificates git minisign
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
 
       - name: Build sfetch (from this commit)
         shell: bash
@@ -109,7 +109,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
 
       - name: Install minisign
         shell: pwsh
@@ -140,7 +140,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
 
       - name: Install minisign
         shell: pwsh
