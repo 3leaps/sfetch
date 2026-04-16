@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-04-16
+
+### Fixed
+- **Private GitHub repo asset downloads:** sfetch was always hitting `https://github.com/<o>/<r>/releases/download/...`, which returns 404 for private-repo assets even with a valid `Authorization: Bearer` header. When a token is available, sfetch now uses the GitHub API asset endpoint (`https://api.github.com/repos/<o>/<r>/releases/assets/<id>`) with `Accept: application/octet-stream`, follows the resulting 302 to the signed S3 URL, and writes the asset to disk.
+
+### Added
+- **`GH_TOKEN` recognized in token resolution chain.** Default precedence is now `SFETCH_GITHUB_TOKEN` → `GH_TOKEN` → `GITHUB_TOKEN`, so credentials populated by `gh auth login` are picked up automatically.
+- **`--token-env <NAME>` flag.** Names a specific env var to read the token from when the default chain has the wrong-scoped credential. Hard-fails if the named var is unset/empty rather than silently falling back. Pairs naturally with `${{ secrets.PRIVATE_REPO_PAT }}` in CI.
+- **Auth-failure error UX.** A 401/404 from an asset download now names the env-var source the token came from (never the value) and prescribes `--token-env` for the recovery path.
+- **Cross-host token-stripping on redirects.** All sfetch GitHub HTTP requests install a `CheckRedirect` that drops `Authorization` when the next hop is not on a trusted host, even when Go's stdlib same-domain rule would have preserved it. Defense-in-depth for the `github.com` → S3 hop.
+
+### Changed
+- **`internal/model.Asset`** carries `URL` and `ID` from the GitHub release payload so the API asset endpoint is reachable. Backwards compatible — existing JSON without these fields still parses.
+- **All release-asset download call sites** (main asset, sidecar checksums, sidecar signatures, key auto-detection) route through a single `downloadAsset(*Asset, path)` helper that picks the right endpoint based on auth availability.
+
 ## [0.4.5] - 2026-03-10
 
 ### Fixed

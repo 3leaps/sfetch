@@ -1,3 +1,38 @@
+## v0.4.6
+
+### Summary
+Private-repo release assets now download successfully when the user has visibility — no more silent 404s. Token resolution learns `GH_TOKEN` and gains `--token-env <NAME>` for the wrong-scope-PAT case.
+
+### Highlights
+
+**Private-repo asset download fix**
+- The browser download URL (`https://github.com/<o>/<r>/releases/download/...`) returns 404 for private-repo assets even with a valid Bearer token. sfetch now uses the GitHub API asset endpoint (`/repos/<o>/<r>/releases/assets/<id>`) with `Accept: application/octet-stream`, which 302s to a short-lived signed URL and lets the download succeed.
+
+**Token resolution improvements**
+- New precedence: `SFETCH_GITHUB_TOKEN` → `GH_TOKEN` → `GITHUB_TOKEN`. `GH_TOKEN` is what `gh auth login` populates by default — it now works out of the box.
+- `--token-env <NAME>` reads a token from a named env var. Useful when your ambient `GITHUB_TOKEN` cannot see a sibling org's private repo and you have a separately-scoped PAT loaded under a different name. Hard-fails if the named var is empty rather than silently falling back.
+- sfetch deliberately does NOT accept `--token <value>` — that pattern leaks into `~/.bash_history`, `ps`, and `set -x` CI logs.
+
+**Defense-in-depth on redirects**
+- A custom `CheckRedirect` strips the `Authorization` header on every redirect hop whose target is not a trusted GitHub host, even when Go's stdlib same-domain rule would have preserved it.
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+Or self-update:
+```bash
+sfetch --self-update --yes
+```
+
+### Details
+- See `CHANGELOG.md` for the complete list.
+- See `docs/security.md#github-authentication-v046` for the full token model.
+
+---
+
 ## v0.4.5
 
 ### Summary

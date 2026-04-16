@@ -52,6 +52,63 @@ When fetching arbitrary URLs, sfetch applies defense-in-depth defaults:
 
 **Provenance tracking:** Redirect chains are captured in provenance output for audit trails.
 
+## GitHub authentication (v0.4.6+)
+
+sfetch reads a GitHub PAT from the environment and attaches it as a Bearer
+token to outbound requests on github-controlled hosts. This is what enables
+private-repo release downloads.
+
+### Token resolution precedence
+
+| Order | Source | Notes |
+|-------|--------|-------|
+| 1 | `--token-env <NAME>` | Reads the token from the named env var. Hard-fails if `<NAME>` is unset or empty — no fallback to the default chain. |
+| 2 | `SFETCH_GITHUB_TOKEN` | sfetch-specific override. |
+| 3 | `GH_TOKEN` | The variable `gh auth login` populates by default. |
+| 4 | `GITHUB_TOKEN` | The variable GitHub Actions injects automatically. |
+
+A token resolved from any of the chain entries is attached to requests on
+`github.com` and `api.github.com` hosts only. On a redirect to a non-trusted
+host (e.g., a pre-signed S3 URL for the asset payload), sfetch explicitly
+strips the `Authorization` header before following — defense-in-depth on top
+of Go's stdlib same-domain rule.
+
+### Why we do NOT accept `--token <value>`
+
+A literal `--token=ghp_xxx` would land in shell history (`~/.bash_history`,
+`~/.zsh_history`), `ps` output, and CI logs whenever `set -x` is in effect.
+Naming an env var keeps the value out of every CLI surface while staying
+fully scriptable: in CI, `--token-env PRIVATE_REPO_PAT` pairs naturally with
+`PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}`.
+
+### Private-repo asset downloads
+
+For private-repo releases, sfetch issues the actual asset GET against the
+GitHub API asset endpoint
+(`https://api.github.com/repos/<o>/<r>/releases/assets/<id>`) with
+`Accept: application/octet-stream`. GitHub responds with a 302 to a
+short-lived pre-signed URL, which sfetch then follows without the token
+attached. The browser-style download URL
+(`https://github.com/<o>/<r>/releases/download/...`) is reserved for the
+unauthenticated public-repo path; it is the URL that returns 404 on private
+repos even with a valid Bearer token.
+
+### Picking a different PAT for one call
+
+If the ambient `GITHUB_TOKEN` cannot see the target repo (common when your
+shell PAT is scoped narrowly and you need to reach a sibling org's private
+repo), pass `--token-env <YOUR_VAR_NAME>`:
+
+```bash
+export PRIVATE_REPO_PAT=ghp_xxx_with_repo_access
+sfetch --repo myorg/private-tool --latest --asset-match darwin-arm64 \
+       --token-env PRIVATE_REPO_PAT
+```
+
+A 401/404 from an asset download will name the env var sfetch used
+(never the value) and prescribe `--token-env` so the recovery path is
+discoverable from the error message.
+
 ## Static Analysis Philosophy
 
 - **Prefer stdlib/crypto**: ed25519 native, SHA256/512.

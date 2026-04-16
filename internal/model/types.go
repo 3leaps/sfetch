@@ -7,8 +7,20 @@ type Release struct {
 }
 
 // Asset is the subset of the GitHub release asset payload that sfetch uses.
+//
+// URL is the API asset endpoint
+// (https://api.github.com/repos/<o>/<r>/releases/assets/<id>); requesting it
+// with `Accept: application/octet-stream` and an Authorization header
+// returns a 302 to a short-lived signed URL — the documented path for
+// programmatic downloads of private-repo assets.
+//
+// BrowserDownloadUrl is the human-facing URL
+// (https://github.com/<o>/<r>/releases/download/<tag>/<name>); it works for
+// public assets but 404s on private ones even with valid auth.
 type Asset struct {
 	Name               string `json:"name"`
+	URL                string `json:"url"`
+	ID                 int64  `json:"id"`
 	BrowserDownloadUrl string `json:"browser_download_url"`
 	Size               int64  `json:"size"`
 }

@@ -35,6 +35,25 @@ SFETCH_GITHUB_TOKEN
 - Export `GITHUB_TOKEN`, `GH_TOKEN`, and `SFETCH_GITHUB_TOKEN` at workflow or job scope so child processes inherit authenticated access.
 - If a step intentionally avoids auth, document why in the workflow.
 
+### Cross-repo private downloads
+
+The implicit `${{ github.token }}` is scoped to the workflow's own
+repository. A workflow that needs to fetch release assets from a
+*different* private repo must use a separately-scoped PAT and tell sfetch
+which env var to read it from:
+
+```yaml
+env:
+  PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+- run: sfetch --repo myorg/private-tool --latest --token-env PRIVATE_REPO_PAT ...
+```
+
+Do not pass the token value on the CLI (`--token=...`) — sfetch refuses
+this on purpose to keep secrets out of `set -x` logs and `ps` output. The
+default precedence (`SFETCH_GITHUB_TOKEN` > `GH_TOKEN` > `GITHUB_TOKEN`)
+applies when `--token-env` is not set; see
+[security.md](security.md#github-authentication-v046).
+
 ## Release Validation
 
 Before tagging a release:

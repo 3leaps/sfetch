@@ -234,6 +234,33 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
+### Private repositories (cross-repo downloads)
+
+The default `${{ github.token }}` GITHUB_TOKEN is scoped to the workflow's
+own repository — it cannot read another private repo's release assets. To
+fetch from a different private repo, set a scoped PAT and point sfetch at
+its env-var name with `--token-env`:
+
+```yaml
+- name: Install private-org tool
+  env:
+    PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+  run: |
+    sfetch --repo myorg/private-tool --latest \
+           --asset-match linux-amd64 \
+           --dest-dir "$HOME/.local/bin" \
+           --token-env PRIVATE_REPO_PAT
+```
+
+`--token-env` overrides the default `SFETCH_GITHUB_TOKEN` → `GH_TOKEN` →
+`GITHUB_TOKEN` chain. If the named env var is unset or empty, sfetch fails
+loudly rather than silently falling back to a wrong-scope token. sfetch
+never accepts the token value on the command line — that would land in CI
+logs whenever `set -x` is in effect.
+
+See [security.md](security.md#github-authentication-v046) for the full
+precedence model.
+
 ## See Also
 
 - [Examples & Pattern Matching](examples.md) - Real-world verification examples
