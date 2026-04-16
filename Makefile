@@ -34,17 +34,18 @@ SFETCH_MINISIGN_PUB ?=
 SFETCH_PGP_KEY_ID ?=
 SFETCH_GPG_HOMEDIR ?=
 MINISIGN_PUB_NAME ?= sfetch-minisign.pub
+SCOOP_BUCKET_DIR ?= ../scoop-bucket
+SCOOP_BUCKET_REPO ?= https://github.com/3leaps/scoop-bucket.git
 
 # Tool installation directory (repo-local)
 BIN_DIR := $(CURDIR)/bin
 
 # Pinned tool versions (minimums; existing installs are respected)
 SFETCH_VERSION := v0.3.4
-GONEAT_VERSION ?= v0.5.7
+GONEAT_VERSION ?= v0.5.10
 
-# Tool paths (prefer repo-local, fall back to PATH)
+# Tool paths (sfetch bootstrap may land in bin/; goneat must be on PATH)
 SFETCH = $(shell [ -x "$(BIN_DIR)/sfetch" ] && echo "$(BIN_DIR)/sfetch" || command -v sfetch 2>/dev/null)
-GONEAT = $(shell [ -x "$(BIN_DIR)/goneat" ] && echo "$(BIN_DIR)/goneat" || command -v goneat 2>/dev/null)
 
 CORPUS_DEST ?= test-corpus
 
@@ -53,7 +54,7 @@ CORPUS_DEST ?= test-corpus
 .PHONY: release release-download release-checksums release-verify-checksums release-sign
 .PHONY: release-notes release-upload release-upload-provenance release-export-key release-export-minisign-key release-export-keys
 .PHONY: release-verify-key release-verify-minisign-pubkey release-verify-keys release-verify-signatures
-.PHONY: release-clean bootstrap-script build-all gosec gosec-high
+.PHONY: release-clean bootstrap-script build-all gosec gosec-high update-scoop-manifest
 .PHONY: version-check version-set version-patch version-minor version-major
 
 all: build
@@ -104,54 +105,34 @@ bootstrap: ## Install development tools via trust chain
 	if [ -z "$$SFETCH_BIN" ]; then echo "[!!] sfetch installation failed"; exit 1; fi; \
 	echo "[ok] sfetch: $$SFETCH_BIN"
 	@echo ""
-	@# Step 2: Install goneat via sfetch (dogfooding!)
-	@SFETCH_BIN=""; \
-	if [ -x "$(BIN_DIR)/sfetch" ]; then SFETCH_BIN="$(BIN_DIR)/sfetch"; \
-	elif command -v sfetch >/dev/null 2>&1; then SFETCH_BIN="$$(command -v sfetch)"; fi; \
-	if [ ! -x "$(BIN_DIR)/goneat" ] && ! command -v goneat >/dev/null 2>&1; then \
-		echo "[..] Installing goneat $(GONEAT_VERSION) via sfetch..."; \
-		$$SFETCH_BIN --repo fulmenhq/goneat --tag $(GONEAT_VERSION) --dest-dir "$(BIN_DIR)"; \
-	else \
-		echo "[ok] goneat already installed"; \
+	@# Step 2: Verify goneat is installed (dev machines ship with it; CI installs it explicitly before calling make)
+	@if ! command -v goneat >/dev/null 2>&1; then \
+		echo "[!!] goneat not found on PATH"; \
+		echo "    Install it from https://github.com/fulmenhq/goneat/releases (pinned: $(GONEAT_VERSION))"; \
+		exit 1; \
 	fi
-	@# Verify goneat
-	@GONEAT_BIN=""; \
-	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
-	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
-	if [ -z "$$GONEAT_BIN" ]; then echo "[!!] goneat installation failed"; exit 1; fi; \
-	echo "[ok] goneat: $$($$GONEAT_BIN version 2>&1 | head -n1)"
+	@echo "[ok] goneat: $$(goneat version 2>&1 | head -n1)"
 	@echo ""
 	@# Step 3: Install foundation tools via goneat
 	@echo "[..] Installing foundation tools via goneat..."
-	@GONEAT_BIN=""; \
-	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
-	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
-	$$GONEAT_BIN doctor tools --scope foundation --install --yes 2>/dev/null || \
+	@goneat doctor tools --scope foundation --install --yes 2>/dev/null || \
 		echo "[!!] goneat doctor tools failed, some tools may need manual installation"
 	@echo ""
 	@echo "[ok] Bootstrap complete"
 	@echo ""
-	@echo "Repo-local tools installed to $(BIN_DIR)"
 	@echo "Run 'make build' to build sfetch"
 
-bootstrap-force: ## Force reinstall all tools
-	@rm -f "$(BIN_DIR)/sfetch" "$(BIN_DIR)/goneat"
+bootstrap-force: ## Force reinstall repo-local sfetch and re-run bootstrap
+	@rm -f "$(BIN_DIR)/sfetch"
 	@$(MAKE) bootstrap
 
 tools: ## Verify external tools are available
 	@echo "Verifying tools..."
-	@GONEAT_BIN=""; \
-	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
-	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
-	if [ -n "$$GONEAT_BIN" ]; then \
-		$$GONEAT_BIN doctor tools --scope foundation 2>&1 || true; \
-	else \
-		echo "[!!] goneat not found (run 'make bootstrap')"; \
-		echo ""; \
-		echo "Fallback checks:"; \
-		if command -v go >/dev/null 2>&1; then echo "[ok] go: $$(go version | cut -d' ' -f3)"; else echo "[!!] go not found"; fi; \
-		if command -v staticcheck >/dev/null 2>&1; then echo "[ok] staticcheck found"; else echo "[!!] staticcheck not found"; fi; \
+	@if ! command -v goneat >/dev/null 2>&1; then \
+		echo "[!!] goneat not found on PATH (install from https://github.com/fulmenhq/goneat/releases)"; \
+		exit 1; \
 	fi
+	@goneat doctor tools --scope foundation 2>&1 || true
 	@echo ""
 
 # -----------------------------------------------------------------------------
@@ -159,33 +140,16 @@ tools: ## Verify external tools are available
 # -----------------------------------------------------------------------------
 
 fmt: ## Format code (Go + shell via goneat)
-	@GONEAT_BIN=""; \
-	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
-	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
-	if [ -n "$$GONEAT_BIN" ]; then \
-		$$GONEAT_BIN assess --categories format --fix; \
-	else \
-		go fmt ./...; \
-		echo "[!!] goneat not found, shell/markdown formatting skipped (run 'make bootstrap')"; \
-	fi
+	@command -v goneat >/dev/null 2>&1 || { echo "[!!] goneat not found on PATH"; exit 1; }
+	goneat assess --categories format --fix
 
 lint: ## Run linters (via goneat)
-	@GONEAT_BIN=""; \
-	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
-	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
-	if [ -n "$$GONEAT_BIN" ]; then \
-		$$GONEAT_BIN assess --categories lint --check; \
-	else \
-		echo "[!!] goneat not found (run 'make bootstrap')"; \
-		go vet ./...; \
-	fi
+	@command -v goneat >/dev/null 2>&1 || { echo "[!!] goneat not found on PATH"; exit 1; }
+	goneat assess --categories lint --check
 
 assess: ## Run goneat assess (format, lint, security)
-	@GONEAT_BIN=""; \
-	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
-	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
-	if [ -z "$$GONEAT_BIN" ]; then echo "[!!] goneat not found (run 'make bootstrap')"; exit 1; fi; \
-	$$GONEAT_BIN assess --categories format,lint,security --format concise
+	@command -v goneat >/dev/null 2>&1 || { echo "[!!] goneat not found on PATH"; exit 1; }
+	goneat assess --categories format,lint,security --format concise
 
 # -----------------------------------------------------------------------------
 # Build, Test, Quality
@@ -223,11 +187,8 @@ gosec-high: ## Run gosec (high confidence only)
 # -----------------------------------------------------------------------------
 
 precommit: ## Run pre-commit checks (goneat assess + Go tests + build)
-	@GONEAT_BIN=""; \
-	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
-	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
-	if [ -z "$$GONEAT_BIN" ]; then echo "[!!] goneat not found (run 'make bootstrap')"; exit 1; fi; \
-	$$GONEAT_BIN assess --categories format,lint --check --fail-on critical
+	@command -v goneat >/dev/null 2>&1 || { echo "[!!] goneat not found on PATH"; exit 1; }
+	goneat assess --categories format,lint --check --fail-on critical
 	go run github.com/santhosh-tekuri/jsonschema/cmd/jv@latest testdata/corpus.schema.json testdata/corpus.json
 	go test -v -race ./...
 	$(MAKE) gosec-high
@@ -235,10 +196,8 @@ precommit: ## Run pre-commit checks (goneat assess + Go tests + build)
 	@echo "[ok] Pre-commit checks passed"
 
 prepush: precommit ## Run pre-push checks (same as precommit + security)
-	@GONEAT_BIN=""; \
-	if [ -x "$(BIN_DIR)/goneat" ]; then GONEAT_BIN="$(BIN_DIR)/goneat"; \
-	elif command -v goneat >/dev/null 2>&1; then GONEAT_BIN="$$(command -v goneat)"; fi; \
-	$$GONEAT_BIN assess --categories format,lint,security --check --fail-on high
+	@command -v goneat >/dev/null 2>&1 || { echo "[!!] goneat not found on PATH"; exit 1; }
+	goneat assess --categories format,lint,security --check --fail-on high
 	@echo "[ok] Pre-push checks passed"
 
 # -----------------------------------------------------------------------------
@@ -350,9 +309,48 @@ release-verify-signatures: ## Verify minisign and PGP signatures on checksum man
 
 release-upload: release-notes release-verify-key ## Upload all assets and update release notes
 	./scripts/upload-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+	@echo ""
+	@echo "📝 Updating Scoop manifest..."
+	@$(MAKE) update-scoop-manifest
 
 release-upload-provenance: release-notes ## Upload provenance only (manifests, signatures, keys, notes)
 	./scripts/release-upload-provenance.sh $(RELEASE_TAG) $(DIST_RELEASE)
+
+update-scoop-manifest: ## Update Scoop bucket manifest with the current release version (requires sibling ../scoop-bucket)
+	@echo "Updating Scoop manifest for $(NAME) $(VERSION)..."
+	@echo ""
+	@echo "ℹ️  Note: This target expects the scoop-bucket repository as a sibling directory"
+	@echo "   Repository: $(SCOOP_BUCKET_REPO)"
+	@echo "   Expected path: $(SCOOP_BUCKET_DIR)"
+	@echo ""
+	@if [ ! -d "$(SCOOP_BUCKET_DIR)" ]; then \
+		echo "⚠️  Warning: $(SCOOP_BUCKET_DIR) directory not found"; \
+		echo ""; \
+		echo "Please clone or initialize the scoop-bucket repository:"; \
+		echo "  cd .. && git clone $(SCOOP_BUCKET_REPO)"; \
+		echo ""; \
+		echo "Directory structure should be:"; \
+		echo "  parent/"; \
+		echo "    ├── sfetch/           (this repository)"; \
+		echo "    └── scoop-bucket/     (sibling repository)"; \
+		echo ""; \
+		echo "Skipping Scoop manifest update."; \
+	elif [ ! -f "$(SCOOP_BUCKET_DIR)/bucket/$(NAME).json" ]; then \
+		echo "❌ Error: Manifest file not found: $(SCOOP_BUCKET_DIR)/bucket/$(NAME).json"; \
+		exit 1; \
+	else \
+		echo "✅ Sibling repository found: $(SCOOP_BUCKET_DIR)"; \
+		echo "   Calling scoop-bucket update target..."; \
+		$(MAKE) -C "$(SCOOP_BUCKET_DIR)" update-sfetch VERSION=$(VERSION); \
+		echo ""; \
+		echo "✅ Scoop manifest updated successfully!"; \
+		echo ""; \
+		echo "📋 Next steps:"; \
+		echo "   1. Review changes:  cd $(SCOOP_BUCKET_DIR) && git diff bucket/$(NAME).json"; \
+		echo "   2. Validate JSON:   python3 -m json.tool $(SCOOP_BUCKET_DIR)/bucket/$(NAME).json >/dev/null"; \
+		echo "   3. Commit bucket:   cd $(SCOOP_BUCKET_DIR) && git add bucket/$(NAME).json && git commit"; \
+		echo "   4. Push bucket:     cd $(SCOOP_BUCKET_DIR) && git push"; \
+	fi
 
 release-clean: ## Remove dist/release contents
 	rm -rf $(DIST_RELEASE)
