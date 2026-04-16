@@ -1,6 +1,6 @@
 module github.com/3leaps/sfetch
 
-go 1.24.0
+go 1.26.0
 
 require (
 	github.com/jedisct1/go-minisign v0.0.0-20241212093149-d2f9f49435c7

@@ -2,6 +2,26 @@
 
 This document walks maintainers through the build/sign/upload flow for each sfetch release.
 
+## Repository Layout Prerequisite
+
+To dogfood direct Scoop deployment at release time, keep `sfetch` and `scoop-bucket` as sibling repositories:
+
+```text
+parent/
+  ├── sfetch/        # This repository
+  └── scoop-bucket/  # Required for `make update-scoop-manifest`
+```
+
+Setup:
+
+```bash
+cd ..
+git clone https://github.com/3leaps/scoop-bucket.git
+cd sfetch
+```
+
+Why this matters: `make release-upload` now uploads the signed GitHub release assets and then updates the sibling Scoop manifest automatically. If `../scoop-bucket` is missing, the upload still succeeds but Scoop publication is skipped with a warning and requires manual follow-up.
+
 ## 1. Prepare & Tag
 
 - [ ] Ensure `main` is clean and `make precommit` passes
@@ -81,24 +101,36 @@ export SFETCH_GPG_HOMEDIR=/path/to/custom/gpg/homedir   # optional, defaults to 
    make release-notes
    ```
 
-10. **Upload signatures and keys**
+10. **Upload release assets and update Scoop**
     ```bash
     make release-upload
     ```
     > **Note:** This uploads ALL assets with `--clobber`, including binaries CI already uploaded.
     > This is intentional for idempotency - rerun safely to fix any mistakes.
     >
+    > If `../scoop-bucket` is present, this target also runs `make update-scoop-manifest` at the end so the bucket is ready for commit/push immediately after release upload.
+    >
     > To upload provenance only (manifests, signatures, keys, notes):
     > ```bash
     > make release-upload-provenance
     > ```
+
+11. **Verify the Scoop manifest update**
+    ```bash
+    python3 -m json.tool ../scoop-bucket/bucket/sfetch.json >/dev/null
+    ```
+    Review the diff before committing the bucket repo:
+    ```bash
+    cd ../scoop-bucket && git diff bucket/sfetch.json
+    ```
 
 ## 3. Post-Release
 
 - [ ] Verify release: `gh release view v$(cat VERSION)`
 - [ ] Test install script: `curl -sSfL .../install-sfetch.sh | bash -s -- --dry-run`
 - [ ] Verify binary version: `sfetch --version` shows correct version
-- [ ] Update downstream package manifests (Homebrew/Scoop) if needed
+- [ ] Commit and push `../scoop-bucket` after confirming `bucket/sfetch.json` has the right version and hashes
+- [ ] Test on local Windows VM: `scoop bucket add 3leaps <path-or-url>` then `scoop install sfetch`
 - [ ] Announce release
 
 ## 4. Post-Release Version Bump (optional)

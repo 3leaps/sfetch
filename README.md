@@ -12,6 +12,7 @@
 A tiny (~3 MB), statically-linked Go binary that downloads release artifacts from GitHub and **verifies signatures and checksums automatically** - using minisign, PGP, or raw ed25519.
 
 No runtime dependencies. No package manager required. Works in CI, Docker, and air-gapped environments. See [CI/CD Usage Guide](docs/cicd-usage-guide.md) for container and pipeline examples.
+For release engineering guardrails learned from recent Windows ARM64 and CI authentication failures, see [CI Guardrails](docs/ci-guardrails.md).
 
 ### Why sfetch exists
 Every modern engineering org signs their releases now.  

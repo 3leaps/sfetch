@@ -2,6 +2,8 @@
 
 This guide covers using sfetch in CI/CD environments such as GitHub Actions, GitLab CI, and containerized runners.
 
+For repo-level release and workflow rules, also see [CI Guardrails](ci-guardrails.md).
+
 ## Automatic Cross-Filesystem Handling
 
 **TL;DR:** sfetch v0.2.6+ handles cross-device installs and caching automatically. No special flags needed.
@@ -35,6 +37,10 @@ This is fragile and version-dependent—upgrading is recommended.
 
 ```yaml
 - name: Install sfetch + tool
+  env:
+    GITHUB_TOKEN: ${{ github.token }}
+    GH_TOKEN: ${{ github.token }}
+    SFETCH_GITHUB_TOKEN: ${{ github.token }}
   run: |
     set -euo pipefail
     BIN_DIR="$HOME/.local/bin"
@@ -50,6 +56,8 @@ This is fragile and version-dependent—upgrading is recommended.
     # Verify
     tool --version
 ```
+
+Exporting all three token variables at job or workflow scope keeps `sfetch`, `gh`, and child processes on authenticated GitHub API requests by default.
 
 ### With explicit version pinning
 

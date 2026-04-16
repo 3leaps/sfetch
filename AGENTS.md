@@ -66,12 +66,15 @@ As a security-focused CLI, prioritize transparency and testability:
 ### Testing
 - Unit: Table-driven tests covering edge cases (e.g., invalid sigs, checksum mismatches).
 - Integration: `go test ./...` + `testdata/` fixtures; verify full flows.
+- Shell/bootstrap tests: scrub inherited env (`PATH`, platform variables, auth vars) before injecting mocks so runner-local tools cannot leak into subprocess assertions.
 - Run: `make test` (or `go test ./... -v`).
 
 ### Verification
 - Linting: `go fmt ./... && go vet ./...`.
 - Security changes: Add tests for verification paths; run integration tests.
 - Skepticism: All sig/checksum logic must be auditable; prefer stdlib crypto.
+- CI/bootstrap changes: verify the exact user entrypoint in CI, not just buildability. If `install-sfetch.sh` changes, exercise it on the real target runner.
+- GitHub Actions auth: export `GITHUB_TOKEN`, `GH_TOKEN`, and `SFETCH_GITHUB_TOKEN` at workflow or job scope unless a step must intentionally use different credentials.
 
 Keep docs minimal; focus on tests for assurance.
 
@@ -83,6 +86,8 @@ Keep docs minimal; focus on tests for assurance.
 - Test changes thoroughly with `make test`
 - Update documentation for user-facing changes
 - Use semantic versioning for releases
+- Add or update real-runner CI coverage when changing platform detection, bootstrap scripts, or shell install logic
+- Keep subprocess-based tests hermetic by filtering inherited environment variables before adding mocks
 
 ### DO NOT
 - **Push code without maintainer approval** - All changes must be reviewed before pushing to main
