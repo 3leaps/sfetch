@@ -93,27 +93,27 @@ func TestDefaultResolver_Precedence(t *testing.T) {
 
 func TestEnvVarResolver_ExplicitOverride(t *testing.T) {
 	clearChain(t)
-	t.Setenv("RETELAT_PAT", "scoped-pat")
+	t.Setenv("PRIVATE_REPO_PAT", "scoped-pat")
 
-	tok, src, err := EnvVarResolver{Name: "RETELAT_PAT"}.Resolve()
+	tok, src, err := EnvVarResolver{Name: "PRIVATE_REPO_PAT"}.Resolve()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if tok != "scoped-pat" {
 		t.Errorf("token = %q, want %q", tok, "scoped-pat")
 	}
-	if string(src) != "RETELAT_PAT" {
-		t.Errorf("source = %q, want %q", src, "RETELAT_PAT")
+	if string(src) != "PRIVATE_REPO_PAT" {
+		t.Errorf("source = %q, want %q", src, "PRIVATE_REPO_PAT")
 	}
 }
 
 func TestEnvVarResolver_EmptyValueIsHardError(t *testing.T) {
-	// Even if the default chain has a token, --token-env RETELAT_PAT with
-	// RETELAT_PAT unset must fail — no silent fallback.
+	// Even if the default chain has a token, --token-env PRIVATE_REPO_PAT with
+	// PRIVATE_REPO_PAT unset must fail — no silent fallback.
 	t.Setenv("GITHUB_TOKEN", "would-have-worked")
-	t.Setenv("RETELAT_PAT", "")
+	t.Setenv("PRIVATE_REPO_PAT", "")
 
-	_, _, err := EnvVarResolver{Name: "RETELAT_PAT"}.Resolve()
+	_, _, err := EnvVarResolver{Name: "PRIVATE_REPO_PAT"}.Resolve()
 	if err == nil {
 		t.Fatal("expected error for unset explicit env var, got nil")
 	}
