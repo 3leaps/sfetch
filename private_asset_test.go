@@ -183,3 +183,26 @@ type staticResolver struct {
 func (r staticResolver) Resolve() (string, gh.TokenSource, error) {
 	return r.token, r.source, nil
 }
+
+// TestFetchExpectedHash_HonorsExplicitTokenEnvMissing asserts that
+// --self-verify → fetchExpectedHash surfaces the resolver error when the
+// user passes --token-env NAME and NAME is unset. Regression for a path
+// that previously swallowed the resolver error via the legacy
+// githubToken() wrapper and proceeded unauthenticated.
+func TestFetchExpectedHash_HonorsExplicitTokenEnvMissing(t *testing.T) {
+	const missingVar = "SFETCH_DEFINITELY_NOT_SET_IN_TEST_FETCH_HASH"
+	if v, ok := os.LookupEnv(missingVar); ok {
+		t.Fatalf("test precondition violated: %s is set (%q); unset it or pick a different name", missingVar, v)
+	}
+
+	gh.SetResolver(gh.EnvVarResolver{Name: missingVar})
+	t.Cleanup(func() { gh.SetResolver(nil) })
+
+	_, err := fetchExpectedHash("0.4.6", "sfetch_darwin_arm64.tar.gz")
+	if err == nil {
+		t.Fatal("expected error for missing --token-env target, got nil")
+	}
+	if !strings.Contains(err.Error(), missingVar) {
+		t.Errorf("error should name the missing env var %q, got: %v", missingVar, err)
+	}
+}

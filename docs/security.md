@@ -67,11 +67,21 @@ private-repo release downloads.
 | 3 | `GH_TOKEN` | The variable `gh auth login` populates by default. |
 | 4 | `GITHUB_TOKEN` | The variable GitHub Actions injects automatically. |
 
-A token resolved from any of the chain entries is attached to requests on
-`github.com` and `api.github.com` hosts only. On a redirect to a non-trusted
-host (e.g., a pre-signed S3 URL for the asset payload), sfetch explicitly
-strips the `Authorization` header before following — defense-in-depth on top
-of Go's stdlib same-domain rule.
+A token resolved from any of the chain entries is attached only to HTTPS
+requests whose parsed hostname is an exact match for `github.com` or
+`api.github.com`. Subdomain spoofs (`github.com.attacker.example`) and
+path-embedded tricks (`attacker.example/github.com/...`) are rejected.
+Other GitHub-operated hosts (`codeload.github.com`,
+`raw.githubusercontent.com`, `objects.githubusercontent.com`) are
+deliberately **not** trusted — sfetch's current flows do not need auth
+against them, and excluding them keeps the attack surface minimal for
+user-supplied URLs passed via `--pgp-key-url` / `--minisign-key-url`.
+
+On a redirect to a non-trusted host (e.g., the pre-signed S3 URL behind
+an asset 302), sfetch explicitly strips the `Authorization` header before
+following — defense-in-depth on top of Go's stdlib same-domain rule,
+which would otherwise preserve the header on a same-host different-port
+hop.
 
 ### Why we do NOT accept `--token <value>`
 

@@ -3,6 +3,7 @@ package github
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -46,8 +47,28 @@ var (
 	trustedHostFn   func(url string) bool = defaultTrustedHost
 )
 
-func defaultTrustedHost(url string) bool {
-	return strings.Contains(url, "github.com")
+// trustedGitHubHosts enumerates exact hostnames that receive the GitHub
+// token. Subdomains and substring matches are intentionally excluded — a
+// host like `github.com.attacker.example` or a path-embedded `github.com`
+// segment must never trigger auth attachment, because `--pgp-key-url` and
+// `--minisign-key-url` accept arbitrary user-supplied URLs through the
+// same httpGetWithAuth code path.
+var trustedGitHubHosts = map[string]struct{}{
+	"github.com":     {},
+	"api.github.com": {},
+}
+
+func defaultTrustedHost(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	if !strings.EqualFold(parsed.Scheme, "https") {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	_, ok := trustedGitHubHosts[host]
+	return ok
 }
 
 // SetTrustedHostMatcher replaces the predicate that decides whether to

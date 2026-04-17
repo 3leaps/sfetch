@@ -12,10 +12,6 @@ type ghTokenSource = gh.TokenSource
 
 const ghSourceNone = gh.SourceNone
 
-func githubToken() string {
-	return gh.TokenFromEnv()
-}
-
 // resolveGithubToken returns the token value, the env-var name it came from
 // (or "" if none), and any resolver error. Used for authenticated requests
 // that need to attribute the token source in error messages.

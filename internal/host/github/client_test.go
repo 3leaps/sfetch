@@ -176,18 +176,39 @@ func TestTokenFromEnv_BackwardCompat(t *testing.T) {
 
 func TestShouldAttachAuth(t *testing.T) {
 	tests := []struct {
+		name string
 		url  string
 		want bool
 	}{
-		{"https://github.com/owner/repo/releases/download/v1/asset.tar.gz", true},
-		{"https://api.github.com/repos/owner/repo/releases/assets/123", true},
-		{"https://objects.githubusercontent.com/signed-url", false},
-		{"https://codeload.github.com/owner/repo/tar.gz/main", true}, // github.com substring present
-		{"https://example.com/not-github", false},
+		{"github.com asset path", "https://github.com/owner/repo/releases/download/v1/asset.tar.gz", true},
+		{"api.github.com asset endpoint", "https://api.github.com/repos/owner/repo/releases/assets/123", true},
+		{"uppercase host is normalized", "https://GITHUB.COM/owner/repo", true},
+
+		// Attack vectors that a substring check would have let through.
+		{"subdomain spoof via host prefix", "https://github.com.attacker.example/key.pub", false},
+		{"attacker host with github.com path segment", "https://attacker.example/github.com/key.pub", false},
+		{"attacker host with github.com query", "https://attacker.example/key?host=github.com", false},
+
+		// Real github-operated hosts that are NOT on the allowlist because
+		// sfetch doesn't currently auth against them. Add them here (and
+		// to trustedGitHubHosts) if a code path starts needing auth.
+		{"codeload (not allowlisted)", "https://codeload.github.com/owner/repo/tar.gz/main", false},
+		{"objects.githubusercontent (signed S3)", "https://objects.githubusercontent.com/release-asset-blob", false},
+		{"raw.githubusercontent (raw content)", "https://raw.githubusercontent.com/owner/repo/main/file.sh", false},
+
+		// Transport: only HTTPS is trusted.
+		{"http scheme rejected", "http://github.com/owner/repo", false},
+
+		// Malformed input should never attach auth.
+		{"empty url", "", false},
+		{"unparseable url", "http://[::1", false},
+		{"not a github host", "https://example.com/not-github", false},
 	}
 	for _, tc := range tests {
-		if got := shouldAttachAuth(tc.url); got != tc.want {
-			t.Errorf("shouldAttachAuth(%q) = %v, want %v", tc.url, got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldAttachAuth(tc.url); got != tc.want {
+				t.Errorf("shouldAttachAuth(%q) = %v, want %v", tc.url, got, tc.want)
+			}
+		})
 	}
 }

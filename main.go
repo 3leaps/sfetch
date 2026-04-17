@@ -4518,7 +4518,11 @@ func fetchExpectedHash(ver, assetName string) (string, error) {
 		return "", err
 	}
 	req.Header.Set("User-Agent", fmt.Sprintf("sfetch/%s", version))
-	if tok := githubToken(); tok != "" {
+	tok, _, err := resolveGithubToken()
+	if err != nil {
+		return "", err
+	}
+	if tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	resp, err := client.Do(req)
