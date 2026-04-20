@@ -491,6 +491,13 @@ main() {
 	platform=$(detect_platform)
 	log "Detected platform: ${platform}"
 
+	# macOS Intel (darwin/amd64) was retired after v0.4.6. Fail loudly
+	# here rather than 404 on a missing asset; point users at the last
+	# supporting release and the upgrade path.
+	if [ "$platform" = "darwin_amd64" ]; then
+		err "darwin/amd64 (Intel Mac) is no longer supported as of sfetch v0.4.7. Pin --tag v0.4.6 to install the last supporting release, or use Apple Silicon."
+	fi
+
 	# Set default install directory
 	if [ -z "$install_dir" ]; then
 		if [[ "$platform" == windows_* ]]; then

@@ -62,3 +62,6 @@ sbom/
 
 # Local scratch (agent/test helpers)
 .tmp/
+
+# Claude Code harness state (settings.local.json, scheduled_tasks.lock, etc.)
+.claude/
