@@ -1810,6 +1810,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	setTokenEnvOverride(strings.TrimSpace(*tokenEnv))
 
+	// Eagerly validate --token-env: if the caller named an env var and it
+	// is unset/empty, fail loudly at startup rather than letting downstream
+	// commands (e.g., --self-verify with its soft network fallback) swallow
+	// the resolver error and proceed unauthenticated. This enforces the
+	// documented hard-fail contract uniformly across every subcommand.
+	if strings.TrimSpace(*tokenEnv) != "" {
+		if _, _, err := resolveGithubToken(); err != nil {
+			_, _ = fmt.Fprintln(stderr, "error:", err) //nolint:errcheck // best-effort error output
+			return 1
+		}
+	}
+
 	// Handle --self-verify: print verification instructions and exit
 	if *selfVerify {
 		printSelfVerify(*jsonOut)

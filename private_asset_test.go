@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -182,6 +183,34 @@ type staticResolver struct {
 
 func (r staticResolver) Resolve() (string, gh.TokenSource, error) {
 	return r.token, r.source, nil
+}
+
+// TestRun_SelfVerifyHardFailsOnMissingTokenEnv exercises the full CLI
+// path: `sfetch --self-verify --token-env <MISSING>` must exit non-zero
+// and surface the resolver error, not fall through to the soft
+// "network unavailable" message. Regression for devrev finding on PR #2
+// where printSelfVerify's soft hashErr handling swallowed the hard-fail
+// contract.
+func TestRun_SelfVerifyHardFailsOnMissingTokenEnv(t *testing.T) {
+	const missingVar = "SFETCH_DEFINITELY_NOT_SET_IN_CLI_CHECK"
+	if v, ok := os.LookupEnv(missingVar); ok {
+		t.Fatalf("test precondition violated: %s is set (%q); unset it", missingVar, v)
+	}
+	// Reset the resolver after the test regardless of outcome.
+	t.Cleanup(func() { gh.SetResolver(nil) })
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--self-verify", "--token-env", missingVar}, &stdout, &stderr)
+
+	if code == 0 {
+		t.Fatalf("expected non-zero exit, got 0; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), missingVar) {
+		t.Errorf("stderr should name the missing env var %q, got: %q", missingVar, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "network unavailable") {
+		t.Errorf("stderr should not contain the soft network-unavailable fallback; got: %q", stderr.String())
+	}
 }
 
 // TestFetchExpectedHash_HonorsExplicitTokenEnvMissing asserts that

@@ -62,7 +62,7 @@ private-repo release downloads.
 
 | Order | Source | Notes |
 |-------|--------|-------|
-| 1 | `--token-env <NAME>` | Reads the token from the named env var. Hard-fails if `<NAME>` is unset or empty — no fallback to the default chain. |
+| 1 | `--token-env <NAME>` | Reads the token from the named env var. Hard-fails at startup if `<NAME>` is unset or empty — no fallback to the default chain, and no soft fallback in any subcommand (including `--self-verify`). |
 | 2 | `SFETCH_GITHUB_TOKEN` | sfetch-specific override. |
 | 3 | `GH_TOKEN` | The variable `gh auth login` populates by default. |
 | 4 | `GITHUB_TOKEN` | The variable GitHub Actions injects automatically. |
