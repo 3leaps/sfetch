@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.4.6] - 2026-04-16
+## [0.4.6] - 2026-04-20
 
 ### Fixed
 - **Private GitHub repo asset downloads:** sfetch was always hitting `https://github.com/<o>/<r>/releases/download/...`, which returns 404 for private-repo assets even with a valid `Authorization: Bearer` header. When a token is available, sfetch now uses the GitHub API asset endpoint (`https://api.github.com/repos/<o>/<r>/releases/assets/<id>`) with `Accept: application/octet-stream`, follows the resulting 302 to the signed S3 URL, and writes the asset to disk.
