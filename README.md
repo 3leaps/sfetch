@@ -339,9 +339,11 @@ Replace risky one-liners with trust-scored, verifiable downloads:
 | `curl -fsSL https://get.docker.com \| sh` | `sfetch --url https://get.docker.com --follow-redirects -o get-docker.sh && sh get-docker.sh` |
 | `wget https://github.com/.../v1.0/tool.tar.gz` | `sfetch https://github.com/.../v1.0/tool.tar.gz` (auto-upgrades to release verification) |
 | `curl -x proxy:8080 ...` | `sfetch --https-proxy http://proxy:8080 ...` |
+| `gh release download -R private/repo` | `sfetch --repo private/repo --latest --token-env MY_PAT` |
 
 **Key differences from curl/wget:**
 - Never pipes directly to shell - download first, execute separately
 - Every download gets a trust score (0-100)
 - GitHub URLs auto-upgrade to release verification when possible
 - Redirects require explicit opt-in (`--follow-redirects`)
+- Private repos: a token from `SFETCH_GITHUB_TOKEN`/`GH_TOKEN`/`GITHUB_TOKEN` is used automatically; pass `--token-env <NAME>` to point at a differently-scoped PAT (see [security.md](docs/security.md#github-authentication-v046))

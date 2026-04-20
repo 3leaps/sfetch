@@ -1702,6 +1702,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	httpProxy := fs.String("http-proxy", "", "HTTP proxy URL (overrides HTTP_PROXY)")
 	httpsProxy := fs.String("https-proxy", "", "HTTPS proxy URL (overrides HTTPS_PROXY)")
 	noProxy := fs.String("no-proxy", "", "comma-separated proxy bypass list (overrides NO_PROXY)")
+	tokenEnv := fs.String("token-env", "", "name of env var to read GitHub token from (overrides SFETCH_GITHUB_TOKEN/GH_TOKEN/GITHUB_TOKEN)")
 	preferPerAsset := fs.Bool("prefer-per-asset", false, "prefer per-asset signatures over checksum-level signatures (Workflow B over A)")
 	requireMinisign := fs.Bool("require-minisign", false, "require minisign signature verification (fail if unavailable)")
 	skipSig := fs.Bool("skip-sig", false, "skip signature verification (testing only)")
@@ -1758,7 +1759,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 
 		_, _ = fmt.Fprintln(out, "\nNetwork:") //nolint:errcheck
-		for _, name := range []string{"http-proxy", "https-proxy", "no-proxy"} {
+		for _, name := range []string{"http-proxy", "https-proxy", "no-proxy", "token-env"} {
 			printFlag(name)
 		}
 
@@ -1805,6 +1806,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}); err != nil {
 		_, _ = fmt.Fprintln(stderr, "error:", err) //nolint:errcheck // best-effort error output
 		return 1
+	}
+
+	setTokenEnvOverride(strings.TrimSpace(*tokenEnv))
+
+	// Eagerly validate --token-env: if the caller named an env var and it
+	// is unset/empty, fail loudly at startup rather than letting downstream
+	// commands (e.g., --self-verify with its soft network fallback) swallow
+	// the resolver error and proceed unauthenticated. This enforces the
+	// documented hard-fail contract uniformly across every subcommand.
+	if strings.TrimSpace(*tokenEnv) != "" {
+		if _, _, err := resolveGithubToken(); err != nil {
+			_, _ = fmt.Fprintln(stderr, "error:", err) //nolint:errcheck // best-effort error output
+			return 1
+		}
 	}
 
 	// Handle --self-verify: print verification instructions and exit
@@ -2409,7 +2424,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		defer os.RemoveAll(tmpDir) //nolint:errcheck // best-effort cleanup of temp dir
 
 		assetPath := filepath.Join(tmpDir, selected.Name)
-		if err := download(selected.BrowserDownloadUrl, assetPath); err != nil {
+		if err := downloadAsset(selected, assetPath); err != nil {
 			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
@@ -2764,7 +2779,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	defer os.RemoveAll(tmpDir) //nolint:errcheck // best-effort cleanup of temp dir
 
 	assetPath := filepath.Join(tmpDir, selected.Name)
-	if err := download(selected.BrowserDownloadUrl, assetPath); err != nil {
+	if err := downloadAsset(selected, assetPath); err != nil {
 		_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 		return 1
 	}
@@ -2807,7 +2822,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 
 		checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
-		if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
+		if err := downloadAsset(checksumAsset, checksumPath); err != nil {
 			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
@@ -2815,7 +2830,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// Download checksum signature
 		sigAsset = findAssetByName(rel.Assets, assessment.SignatureFile)
 		sigPath = filepath.Join(tmpDir, sigAsset.Name)
-		if err := download(sigAsset.BrowserDownloadUrl, sigPath); err != nil {
+		if err := downloadAsset(sigAsset, sigPath); err != nil {
 			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
@@ -2870,7 +2885,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 
 		sigPath = filepath.Join(tmpDir, sigAsset.Name)
-		if err := download(sigAsset.BrowserDownloadUrl, sigPath); err != nil {
+		if err := downloadAsset(sigAsset, sigPath); err != nil {
 			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
@@ -2880,7 +2895,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			checksumAsset := findAssetByName(rel.Assets, assessment.ChecksumFile)
 			if checksumAsset != nil {
 				checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
-				if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
+				if err := downloadAsset(checksumAsset, checksumPath); err != nil {
 					_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 					return 1
 				}
@@ -2904,7 +2919,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 
 		checksumPath = filepath.Join(tmpDir, checksumAsset.Name)
-		if err := download(checksumAsset.BrowserDownloadUrl, checksumPath); err != nil {
+		if err := downloadAsset(checksumAsset, checksumPath); err != nil {
 			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
@@ -3525,11 +3540,68 @@ func mergeConfig(base RepoConfig, override RepoConfig) RepoConfig {
 	return cfg
 }
 
-func download(url, path string) error {
-	resp, err := httpGetWithAuth(url)
-	if err != nil {
-		return fmt.Errorf("fetch %s: %w", url, err)
+// downloadAsset downloads a GitHub release asset, preferring the API asset
+// endpoint when a token is available (which works for private repos) and
+// falling back to the public browser download URL otherwise. On a 404 from
+// the browser path we annotate the error with the resolved token source so
+// the user can pick a different PAT via --token-env.
+func downloadAsset(asset *Asset, path string) error {
+	if asset == nil {
+		return fmt.Errorf("downloadAsset: nil asset")
 	}
+	tok, source, err := resolveGithubToken()
+	if err != nil {
+		return err
+	}
+	if tok != "" && asset.URL != "" {
+		resp, gerr := httpGetAssetAPI(asset.URL)
+		if gerr != nil {
+			return fmt.Errorf("fetch %s (asset %s): %w", asset.URL, asset.Name, gerr)
+		}
+		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusUnauthorized {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			return fmt.Errorf("status %d downloading %s via API: %s\n%s",
+				resp.StatusCode, asset.Name, strings.TrimSpace(string(body)),
+				authHint(source))
+		}
+		return writeResponseBody(resp, asset.URL, path)
+	}
+
+	resp, err := httpGetWithAuth(asset.BrowserDownloadUrl)
+	if err != nil {
+		return fmt.Errorf("fetch %s: %w", asset.BrowserDownloadUrl, err)
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusUnauthorized {
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return fmt.Errorf("status %d downloading %s: %s\n%s",
+			resp.StatusCode, asset.Name, strings.TrimSpace(string(body)),
+			authHint(source))
+	}
+	return writeResponseBody(resp, asset.BrowserDownloadUrl, path)
+}
+
+// authHint formats a remediation message naming the token source (env var
+// name only — never the value) and prescribing --token-env for scoped PATs.
+func authHint(source ghTokenSource) string {
+	if source == ghSourceNone {
+		return "  hint: no GitHub token was provided. If this is a private repo, set\n" +
+			"        SFETCH_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN, or pass --token-env <NAME>."
+	}
+	return fmt.Sprintf(
+		"  auth: used token from %s\n"+
+			"  hint: if that token cannot see this asset, set a scoped PAT and pass\n"+
+			"        --token-env <YOUR_VAR_NAME>.",
+		source,
+	)
+}
+
+// writeResponseBody streams a successful HTTP response to path. Closes
+// resp.Body on every exit. Non-2xx responses produce a status error that
+// echoes the originally-requested URL (not the post-redirect URL) so the
+// caller sees what they asked for.
+func writeResponseBody(resp *http.Response, url, path string) error {
 	defer resp.Body.Close() //nolint:errcheck // read-only response, close error non-critical
 
 	if resp.StatusCode != http.StatusOK {
@@ -4269,7 +4341,7 @@ func downloadKeyFromURL(src string, tmpDir string) (string, error) {
 
 func downloadAssetToTemp(asset *Asset, tmpDir string) (string, error) {
 	path := filepath.Join(tmpDir, asset.Name)
-	if err := download(asset.BrowserDownloadUrl, path); err != nil {
+	if err := downloadAsset(asset, path); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -4458,7 +4530,11 @@ func fetchExpectedHash(ver, assetName string) (string, error) {
 		return "", err
 	}
 	req.Header.Set("User-Agent", fmt.Sprintf("sfetch/%s", version))
-	if tok := githubToken(); tok != "" {
+	tok, _, err := resolveGithubToken()
+	if err != nil {
+		return "", err
+	}
+	if tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	resp, err := client.Do(req)
