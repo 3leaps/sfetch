@@ -79,11 +79,15 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.26'
 
       - name: License check
+        # go-licenses v1.6.0 errors on stdlib packages ("Package fmt does not
+        # have module info"), which is a tool regression unrelated to our
+        # dependencies. Pin to v1.5.0 — the last version that silently
+        # skipped stdlib — until a working successor lands.
         run: |
-          go install github.com/google/go-licenses@latest
+          go install github.com/google/go-licenses@v1.5.0
           REPORT=$(go-licenses csv ./...)
           echo "$REPORT"
           if echo "$REPORT" | grep -E "(GPL|AGPL)" >/dev/null 2>&1; then
