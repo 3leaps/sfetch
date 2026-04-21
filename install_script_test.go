@@ -124,6 +124,111 @@ detect_platform
 	}
 }
 
+// TestInstallScriptDarwinAMD64GuardHonorsExplicitTag exercises the
+// ADR-0002 retirement guard in scripts/install-sfetch.sh. Devrev caught
+// a regression where the original guard fired for every Intel Mac
+// invocation, including the documented recovery path
+// `--tag v0.4.6`. The fix gates the guard on `$tag = "latest"`, so an
+// explicit tag always wins.
+func TestInstallScriptDarwinAMD64GuardHonorsExplicitTag(t *testing.T) {
+	scriptBytes, err := os.ReadFile("scripts/install-sfetch.sh")
+	if err != nil {
+		t.Fatalf("read install script: %v", err)
+	}
+	// Strip `main "$@"` so the harness can call main() with controlled
+	// argv and we never hit the network.
+	script := strings.TrimSuffix(string(scriptBytes), "main \"$@\"\n")
+	if script == string(scriptBytes) {
+		t.Fatal("install script missing main invocation suffix")
+	}
+
+	scriptPath := filepath.Join(t.TempDir(), "install-sfetch-lib.sh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
+		t.Fatalf("write temp script: %v", err)
+	}
+
+	tests := []struct {
+		name         string
+		args         string // space-separated main() args
+		wantExit     bool   // true = script should exit non-zero at the guard
+		wantContains string
+	}{
+		{
+			name:         "no --tag on Intel Mac fires the guard",
+			args:         "",
+			wantExit:     true,
+			wantContains: "darwin/amd64 (Intel Mac) is no longer supported",
+		},
+		{
+			name:         "--tag v0.4.6 on Intel Mac bypasses the guard",
+			args:         "--tag v0.4.6",
+			wantExit:     false,
+			wantContains: "",
+		},
+		{
+			name:         "--tag v0.3.0 on Intel Mac bypasses the guard",
+			args:         "--tag v0.3.0",
+			wantExit:     false,
+			wantContains: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Harness:
+			// - Stub uname to report Darwin/x86_64 (Intel Mac).
+			// - Redefine err() so the guard's exit is detectable without
+			//   killing the test shell.
+			// - Stub every network-touching helper invoked AFTER the
+			//   guard so the test terminates deterministically on success.
+			//   We only care whether the guard fired.
+			harness := `
+set -u
+uname() {
+	case "$1" in
+		-s) printf 'Darwin\n' ;;
+		-m) printf 'x86_64\n' ;;
+		*) command uname "$@" ;;
+	esac
+}
+source "$1"
+# Replace err with a deterministic marker; the real err calls exit 1.
+err() {
+	printf 'ERR: %s\n' "$*" >&2
+	exit 42
+}
+# Neutralize the downstream functions the guard precedes so the test
+# exits cleanly if the guard is correctly skipped.
+check_verification_tools() { :; }
+fetch_release_meta() { exit 0; }
+main ` + tc.args + `
+# If main returns (no exit), the guard did not fire and downstream
+# was stubbed. Report success explicitly.
+echo "GUARD_SKIPPED"
+`
+			cmd := exec.Command("bash", "-c", harness, "bash", scriptPath)
+			cmd.Env = filteredEnv(os.Environ(), "PATH")
+			cmd.Env = append(cmd.Env, "PATH=/usr/bin:/bin")
+
+			out, _ := cmd.CombinedOutput()
+			exitCode := cmd.ProcessState.ExitCode()
+
+			if tc.wantExit {
+				if exitCode != 42 {
+					t.Fatalf("expected guard exit (42), got %d\noutput:\n%s", exitCode, out)
+				}
+				if !strings.Contains(string(out), tc.wantContains) {
+					t.Errorf("output should contain %q, got:\n%s", tc.wantContains, out)
+				}
+			} else {
+				if strings.Contains(string(out), "darwin/amd64 (Intel Mac) is no longer supported") {
+					t.Errorf("guard fired unexpectedly on %q; output:\n%s", tc.args, out)
+				}
+			}
+		})
+	}
+}
+
 func filteredEnv(env []string, dropKeys ...string) []string {
 	filtered := make([]string, 0, len(env))
 	for _, entry := range env {

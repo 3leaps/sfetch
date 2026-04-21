@@ -38,7 +38,15 @@ artifacts. The supported target matrix is:
 
 `scripts/install-sfetch.sh` detects the Intel-Mac case early and exits
 with a clear message pointing users at v0.4.6 (the last supporting
-release) or at an Apple Silicon upgrade.
+release) or at an Apple Silicon upgrade. The guard honors an explicit
+`--tag` so the documented recovery path (`--tag v0.4.6`) stays
+functional — only the unversioned (`latest`) install is blocked.
+
+`sfetch --self-update` applies the same retirement handling: on
+darwin/amd64, if the resolved target release lacks the asset, sfetch
+surfaces the explicit retirement guidance (pin `--tag v0.4.6` or build
+from source) instead of the generic "no asset matches GOOS/GOARCH
+heuristics" error that the asset selector would otherwise return.
 
 The Go source itself remains portable; anyone who needs to build from
 source on Intel Mac can still do so via `go build` — we simply stop

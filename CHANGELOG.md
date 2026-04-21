@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **darwin/amd64 (Intel Mac) release artifacts.** sfetch no longer publishes `sfetch_darwin_amd64.tar.gz` starting with v0.4.7. Apple has retired Intel Mac support (macOS 15 is the last supporting release), and the sibling `homebrew-tap` already treats `darwin-amd64` as optional. Users on Intel Mac should pin `--tag v0.4.6` (the last supporting release) or upgrade to Apple Silicon. See [ADR-0002](docs/adr/adr-0002-drop-darwin-amd64.md) for the full rationale.
 
 ### Changed
-- **`scripts/install-sfetch.sh`** exits early with an informative message when run on `darwin/amd64`, rather than proceeding to a 404 on the missing asset.
+- **`scripts/install-sfetch.sh`** exits early with an informative message when run on `darwin/amd64` without an explicit `--tag`, rather than proceeding to a 404 on the missing asset. The guard honors `--tag` so the documented recovery path (`--tag v0.4.6`) works with either the latest or pinned installer.
+- **`sfetch --self-update`** on darwin/amd64 surfaces the same retirement guidance when the target release lacks the asset, instead of the generic asset-selection error.
 - **Release matrix and `make build-all`** no longer produce darwin/amd64 binaries.
 
 ## [0.4.6] - 2026-04-20
