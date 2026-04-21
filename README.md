@@ -238,7 +238,7 @@ curl -sSfL .../install-sfetch.sh | bash -s -- --allow-checksum-only
 ```
 
 The installer:
-- Detects platform (linux/darwin/windows, amd64/arm64)
+- Detects platform (linux/darwin/windows, amd64/arm64; macOS is arm64-only from v0.4.7 — Intel Mac users should pin `--tag v0.4.6`)
 - Requires minisign verification by default using the embedded trust anchor
 - Optional GPG fallback with pinned fingerprint; checksum-only requires explicit `--allow-checksum-only`
 

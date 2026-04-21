@@ -1,3 +1,47 @@
+## v0.4.7
+
+### Summary
+Maintenance release: drops darwin/amd64 (Intel Mac) release artifacts and aligns the installer + release matrix with the narrower supported set. No feature changes.
+
+### Highlights
+
+**Intel Mac retirement**
+- sfetch no longer publishes `sfetch_darwin_amd64.tar.gz`. Apple has retired Intel Mac support in macOS 16+, and consumer orgs have moved to Apple Silicon.
+- `scripts/install-sfetch.sh` now exits early with a clear message when run on Intel Mac without a `--tag`, pointing users at `--tag v0.4.6` (the last supporting release) or an Apple Silicon upgrade. The guard honors explicit `--tag`, so the documented recovery path works with either the latest or pinned installer.
+- `sfetch --self-update` applies the same retirement handling: on Intel Mac, if the target release lacks the asset, you get the retirement message and the `--self-update --tag v0.4.6` recovery command instead of a generic asset-selection error.
+- See [ADR-0002](docs/adr/adr-0002-drop-darwin-amd64.md) for the full rationale, migration path, and the "this is not a permanent foreclosure" notes.
+
+**Supported platforms from v0.4.7**
+- `darwin_arm64`
+- `linux_amd64`, `linux_arm64`
+- `windows_amd64`, `windows_arm64`
+
+### Migration for Intel Mac users
+
+```bash
+# Pin the last supporting release
+curl -sSfL https://github.com/3leaps/sfetch/releases/download/v0.4.6/install-sfetch.sh | bash -s -- --tag v0.4.6
+
+# Or build from source on Intel Mac
+git clone https://github.com/3leaps/sfetch && cd sfetch && git checkout v0.4.7 && GOOS=darwin GOARCH=amd64 go build -o sfetch .
+```
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+Or self-update:
+```bash
+sfetch --self-update --yes
+```
+
+### Details
+- See `CHANGELOG.md` for the complete list.
+
+---
+
 ## v0.4.6
 
 ### Summary

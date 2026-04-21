@@ -2673,6 +2673,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
+	// darwin/amd64 artifacts end at v0.4.6. When --self-update targets a
+	// release that lacks them, surface the same retirement guidance the
+	// bootstrap installer gives instead of the generic
+	// "no asset matches GOOS/GOARCH heuristics" error. Intel Mac users
+	// who already have sfetch installed are the most likely to hit this.
+	if *selfUpdate && goos == "darwin" && goarch == "amd64" && !hasDarwinAMD64Asset(rel.Assets) {
+		_, _ = fmt.Fprintf(stderr,
+			"error: sfetch %s does not ship darwin/amd64 (Intel Mac) artifacts.\n"+
+				"  darwin/amd64 was retired after v0.4.6.\n"+
+				"  Pin to the last supporting release: sfetch --self-update --tag v0.4.6 --yes\n"+
+				"  Or build from source: GOOS=darwin GOARCH=amd64 go build -o sfetch .\n",
+			rel.TagName,
+		)
+		return 1
+	}
+
 	selected, err := selectAsset(&rel, cfg, goos, goarch, *assetMatch, *assetRegex)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
@@ -4354,6 +4370,19 @@ func findAssetByName(assets []Asset, name string) *Asset {
 		}
 	}
 	return nil
+}
+
+// hasDarwinAMD64Asset reports whether the release includes a darwin/amd64
+// artifact. Used by the self-update flow to distinguish "this release
+// retired Intel Mac" (ADR-0002) from a generic asset-selection miss.
+func hasDarwinAMD64Asset(assets []Asset) bool {
+	for _, a := range assets {
+		name := strings.ToLower(a.Name)
+		if strings.Contains(name, "darwin") && strings.Contains(name, "amd64") {
+			return true
+		}
+	}
+	return false
 }
 
 func autoDetectKeyAsset(assets []Asset) *Asset {

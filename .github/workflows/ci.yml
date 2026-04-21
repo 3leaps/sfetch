@@ -18,9 +18,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.26'
 
@@ -63,7 +63,7 @@ jobs:
     container:
       image: ubuntu:24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install prerequisites
         shell: bash
@@ -73,7 +73,7 @@ jobs:
             apt-get install -y --no-install-recommends \
             ca-certificates git minisign
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.26'
 
@@ -105,9 +105,9 @@ jobs:
     name: Windows dogfood (x64)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.26'
 
@@ -136,9 +136,9 @@ jobs:
     name: Windows dogfood (arm64)
     runs-on: windows-latest-arm64-s
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.26'
 
