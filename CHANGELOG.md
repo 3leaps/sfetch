@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`scripts/install-sfetch.sh`** exits early with an informative message when run on `darwin/amd64` without an explicit `--tag`, rather than proceeding to a 404 on the missing asset. The guard honors `--tag` so the documented recovery path (`--tag v0.4.6`) works with either the latest or pinned installer.
 - **`sfetch --self-update`** on darwin/amd64 surfaces the same retirement guidance when the target release lacks the asset, instead of the generic asset-selection error.
 - **Release matrix and `make build-all`** no longer produce darwin/amd64 binaries.
+- **GitHub Actions pinned to Node 24 runners:** bumped `actions/checkout@v4` → `@v5` and `actions/setup-go@v5` → `@v6` across CI and release workflows, clearing the Node 20 deprecation warnings GitHub is emitting during the runner transition.
 
 ## [0.4.6] - 2026-04-20
 
