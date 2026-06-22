@@ -1,0 +1,26 @@
+# Pinned yamlfmt config — stops the YAML formatting tug-of-war.
+#
+# Without this file, goneat's bundled yamlfmt and a standalone `yamlfmt`
+# disagree on inline-comment padding: goneat deliberately writes two spaces
+# before `#` (the yamllint-compatible default), while standalone yamlfmt
+# defaults to one. That mismatch caused unrelated files (.goneat/*.yaml,
+# .github/workflows/*) to flip back and forth and fail `make precommit`.
+#
+# Pinning here makes every yamlfmt invocation — goneat's `assess --categories
+# format` and any bare `yamlfmt` (which auto-loads .yamlfmt from the repo
+# root) — agree on two spaces, which is also what yamllint's `comments` rule
+# expects by default. See the goneat appnote `yaml-format-lint-alignment` and
+# https://github.com/google/yamlfmt/blob/main/docs/config-file.md.
+
+formatter:
+  type: basic
+  indent: 2
+  line_ending: lf
+  # Two spaces before "#" in inline comments — matches goneat's pinned default
+  # and yamllint convention. This is the setting that actually stops the churn.
+  pad_line_comments: 2
+  # sfetch house style differs from gonimbus: every YAML file opens with `---`
+  # and uses blank lines to separate top-level blocks. Preserve both so this
+  # config pins comment padding WITHOUT reformatting every workflow/config file.
+  include_document_start: true
+  retain_line_breaks: true

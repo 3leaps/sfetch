@@ -42,7 +42,7 @@ BIN_DIR := $(CURDIR)/bin
 
 # Pinned tool versions (minimums; existing installs are respected)
 SFETCH_VERSION := v0.3.4
-GONEAT_VERSION ?= v0.5.10
+GONEAT_VERSION ?= v0.5.13
 
 # Tool paths (sfetch bootstrap may land in bin/; goneat must be on PATH)
 SFETCH = $(shell [ -x "$(BIN_DIR)/sfetch" ] && echo "$(BIN_DIR)/sfetch" || command -v sfetch 2>/dev/null)

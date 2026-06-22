@@ -15,11 +15,11 @@ import (
 type TokenSource string
 
 const (
-	SourceNone       TokenSource = ""
-	SourceSfetch     TokenSource = "SFETCH_GITHUB_TOKEN"
-	SourceGhToken    TokenSource = "GH_TOKEN"
-	SourceGithubTok  TokenSource = "GITHUB_TOKEN"
-	SourceExplicit   TokenSource = "--token-env" // prefix; actual env var name appended
+	SourceNone      TokenSource = ""
+	SourceSfetch    TokenSource = "SFETCH_GITHUB_TOKEN"
+	SourceGhToken   TokenSource = "GH_TOKEN"
+	SourceGithubTok TokenSource = "GITHUB_TOKEN"
+	SourceExplicit  TokenSource = "--token-env" // prefix; actual env var name appended
 )
 
 // defaultChain is the precedence used when no explicit resolver is set.
@@ -42,9 +42,9 @@ type TokenResolver interface {
 }
 
 var (
-	resolverMu      sync.RWMutex
-	resolver        TokenResolver       = defaultResolver{}
-	trustedHostFn   func(url string) bool = defaultTrustedHost
+	resolverMu    sync.RWMutex
+	resolver      TokenResolver         = defaultResolver{}
+	trustedHostFn func(url string) bool = defaultTrustedHost
 )
 
 // trustedGitHubHosts enumerates exact hostnames that receive the GitHub

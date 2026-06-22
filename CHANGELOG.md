@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-06-22
+
+### Changed
+- **Go toolchain pinned to 1.26.4.** `go.mod` now declares `go 1.25.5` with `toolchain go1.26.4`, and CI/release `setup-go` pins `1.26.4` (was the floating `1.26`). Default builds (`GOTOOLCHAIN=auto`) transparently use the patched 1.26.4 standard library while the module still builds on Go 1.25.x, keeping us inside Go's supported-major window and clearing the stdlib advisories that source-based vulnerability scans were flagging.
+- **Dependencies updated:** `golang.org/x/crypto` v0.47.0 → v0.53.0, `golang.org/x/text` v0.33.0 → v0.38.0, `golang.org/x/sys` v0.40.0 → v0.46.0, `github.com/dlclark/regexp2` v1.11.5 → v1.12.0, and `github.com/jedisct1/go-minisign` refreshed to its latest commit. `govulncheck ./...` reports no vulnerabilities.
+- **goneat pinned to v0.5.13** (was v0.5.10) across the `Makefile` and the CI dogfood install steps.
+- **Release workflow migrated off archived Node12 actions.** `actions/create-release@v1` and `actions/upload-release-asset@v1` (both archived, Node12-era) are replaced with `softprops/action-gh-release@v2` (Node 24), completing the Node 20 → 24 runner transition begun in v0.4.7 (which had already moved `checkout`/`setup-go`).
+
+### Added
+- **Pinned YAML formatting standard.** Added repo-root `.yamlfmt` and `.yamllint` so goneat's bundled yamlfmt and any standalone yamlfmt agree on inline-comment padding (two spaces) and document-start handling. Ends the intermittent `make precommit`/CI churn on workflow and config files. The config preserves sfetch's `---` + blank-line house style rather than collapsing it.
+
+### Fixed
+- Normalized `scripts/install-sfetch.sh` to 4-space indentation, matching the other `scripts/*.sh` and `.goneat/assess.yaml`'s shfmt `-i 4` setting. Whitespace-only; platform detection and argument handling verified unchanged.
+- Re-applied go1.26 `gofmt` alignment to `internal/host/github/client.go`.
+
 ## [0.4.7] - 2026-04-20
 
 ### Removed
