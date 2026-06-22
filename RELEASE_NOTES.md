@@ -352,28 +352,3 @@ sfetch --self-update --yes
 
 ### Details
 - See `CHANGELOG.md` for the complete list.
-
----
-
-## v0.3.3
-
-### Summary
-Local agent role catalog and operating model guidance for supervised sessions.
-
-### Highlights
-- Added `docs/agent-roles.md` for offline role guidance
-- Clarified default role and operating model in `AGENTS.md`
-
-### Install
-
-```bash
-curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
-```
-
-Or self-update:
-```bash
-sfetch --self-update --yes
-```
-
-### Details
-- See `CHANGELOG.md` for the complete list.
