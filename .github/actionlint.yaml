@@ -1,3 +1,4 @@
+---
 self-hosted-runner:
   labels:
     - windows-latest-arm64-s

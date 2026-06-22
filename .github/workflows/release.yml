@@ -15,34 +15,25 @@ env:
 jobs:
   create_release:
     runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # softprops/action-gh-release@v2 (Node 24) replaces the archived,
+      # Node12-era actions/create-release@v1 + actions/upload-release-asset@v1.
+      # It creates the release for the pushed tag (idempotent) and uploads the
+      # install script. The build matrix below appends per-platform archives to
+      # the same release. Maintainer signs + adds SHA256SUMS/notes afterward via
+      # scripts/ (see README "Manual signing workflow").
+      - name: Create release and upload install script
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref }}
-          release_name: sfetch ${{ github.ref }}
+          name: sfetch ${{ github.ref_name }}
           body: |
-            ## sfetch ${{ github.ref }}
+            ## sfetch ${{ github.ref_name }}
             Auto-generated release.
           draft: false
           prerelease: false
-
-      - name: Upload install script
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: scripts/install-sfetch.sh
-          asset_name: install-sfetch.sh
-          asset_content_type: text/x-shellscript
+          files: scripts/install-sfetch.sh
 
   build:
     needs: create_release
@@ -77,7 +68,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version: '1.26.4'
 
       - name: License check
         # go-licenses v1.6.0 errors on stdlib packages ("Package fmt does not
@@ -128,19 +119,16 @@ jobs:
       # Per-file .sha256 removed - signed SHA256SUMS is the authoritative source
       # Maintainer generates SHA256SUMS locally and signs with minisign/pgp
 
+      # Appends this matrix entry's archive to the release created above.
+      # action-gh-release@v2 is idempotent on the tag; parallel matrix jobs each
+      # upload a distinctly-named asset, so no upload_url plumbing is needed.
       - name: Upload Archive
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: ${{ env.ASSET_FILE }}
-          asset_name: ${{ env.ASSET_FILE }}
-          asset_content_type: ${{ env.ASSET_CONTENT_TYPE }}
+          files: ${{ env.ASSET_FILE }}
 
       - name: Signing handled manually
         # NOTE: actionlint rejects constant expressions like `${{ false }}`.
         # Keep this step effectively disabled while leaving a breadcrumb.
         if: ${{ github.ref == 'refs/tags/__disabled__' }}
         run: echo "Signing occurs via scripts/sign-release.sh after CI"
-...

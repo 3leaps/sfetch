@@ -1,3 +1,29 @@
+## v0.4.8
+
+### Summary
+Maintenance release: refreshes the Go toolchain and dependencies, completes the GitHub Actions Node 20 → 24 migration, bumps goneat, and pins a repo-wide YAML formatting standard. No user-facing feature or behavior changes.
+
+### Highlights
+
+**Toolchain & supply chain**
+- `go.mod` pins `go 1.25.5` + `toolchain go1.26.4`; CI/release build with Go `1.26.4`. Binaries ship with the patched 1.26.4 standard library while the module still builds on Go 1.25.x.
+- Updated `golang.org/x/crypto`, `golang.org/x/text`, `golang.org/x/sys`, `github.com/dlclark/regexp2`, and `github.com/jedisct1/go-minisign`. `govulncheck ./...` is clean.
+
+**CI / release**
+- Replaced the archived Node12 `actions/create-release@v1` + `actions/upload-release-asset@v1` with `softprops/action-gh-release@v2` (Node 24), completing the runner transition started in v0.4.7.
+- Pinned goneat to `v0.5.13`.
+
+**Developer experience**
+- Added repo-root `.yamlfmt` and `.yamllint` so goneat and standalone yamlfmt no longer disagree on YAML formatting — ending intermittent `make precommit`/CI churn. sfetch's `---` + blank-line style is preserved.
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+---
+
 ## v0.4.7
 
 ### Summary
@@ -312,31 +338,6 @@ Proxy support for HTTP(S) downloads with CLI flags and env overrides.
 
 **Validation coverage**
 - Added tests for proxy URL validation and env override behavior
-
-### Install
-
-```bash
-curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
-```
-
-Or self-update:
-```bash
-sfetch --self-update --yes
-```
-
-### Details
-- See `CHANGELOG.md` for the complete list.
-
----
-
-## v0.3.3
-
-### Summary
-Local agent role catalog and operating model guidance for supervised sessions.
-
-### Highlights
-- Added `docs/agent-roles.md` for offline role guidance
-- Clarified default role and operating model in `AGENTS.md`
 
 ### Install
 

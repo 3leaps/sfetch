@@ -1,0 +1,11 @@
+extends: default
+
+rules:
+  # sfetch YAML consistently opens with `---`, but goneat runs yamllint in
+  # strict mode (.goneat/assess.yaml), so a single stray file without it would
+  # fail an unrelated `make precommit`. Disable rather than churn every file.
+  document-start: disable
+  # Workflow `run:` blocks, URLs, and signing commands routinely exceed 80
+  # columns. Leaving line-length on forces cosmetic reflow churn on files that
+  # are otherwise fine; keep that out of mechanical config PRs.
+  line-length: disable

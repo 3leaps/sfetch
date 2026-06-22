@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-06-22
+
+### Changed
+- **Go toolchain pinned to 1.26.4.** `go.mod` now declares `go 1.25.5` with `toolchain go1.26.4`, and CI/release `setup-go` pins `1.26.4` (was the floating `1.26`). Default builds (`GOTOOLCHAIN=auto`) transparently use the patched 1.26.4 standard library while the module still builds on Go 1.25.x, keeping us inside Go's supported-major window and clearing the stdlib advisories that source-based vulnerability scans were flagging.
+- **Dependencies updated:** `golang.org/x/crypto` v0.47.0 → v0.53.0, `golang.org/x/text` v0.33.0 → v0.38.0, `golang.org/x/sys` v0.40.0 → v0.46.0, `github.com/dlclark/regexp2` v1.11.5 → v1.12.0, and `github.com/jedisct1/go-minisign` refreshed to its latest commit. `govulncheck ./...` reports no vulnerabilities.
+- **goneat pinned to v0.5.13** (was v0.5.10) across the `Makefile` and the CI dogfood install steps.
+- **Release workflow migrated off archived Node12 actions.** `actions/create-release@v1` and `actions/upload-release-asset@v1` (both archived, Node12-era) are replaced with `softprops/action-gh-release@v2` (Node 24), completing the Node 20 → 24 runner transition begun in v0.4.7 (which had already moved `checkout`/`setup-go`).
+
+### Added
+- **Pinned YAML formatting standard.** Added repo-root `.yamlfmt` and `.yamllint` so goneat's bundled yamlfmt and any standalone yamlfmt agree on inline-comment padding (two spaces) and document-start handling. Ends the intermittent `make precommit`/CI churn on workflow and config files. The config preserves sfetch's `---` + blank-line house style rather than collapsing it.
+
+### Fixed
+- Normalized `scripts/install-sfetch.sh` to 4-space indentation, matching the other `scripts/*.sh` and `.goneat/assess.yaml`'s shfmt `-i 4` setting. Whitespace-only; platform detection and argument handling verified unchanged.
+- Re-applied go1.26 `gofmt` alignment to `internal/host/github/client.go`.
+
 ## [0.4.7] - 2026-04-20
 
 ### Removed
@@ -131,107 +146,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 - Documented proxy support in `README.md`.
-
-## [0.3.3] - 2026-01-10
-
-### Documentation
-- Added a local agent role catalog and operating model guidance for supervised sessions.
-
-## [0.3.2] - 2026-01-02
-
-### Added
-- **shellsentry integration:** Added shellsentry to `testdata/corpus.json` with minisign verification fixtures.
-- **Test coverage improvements:** Comprehensive test suite expansion across 5 passes:
-  - Pass 1: Pure functions (inferBinaryName, archiveFormat, tokenCI, etc.)
-  - Pass 2: internal/verify edge cases (checksum detection, signature formats)
-  - Pass 3: CLI flag validation (mutual exclusivity, required flags, help/version)
-  - Pass 4: Asset selection logic (heuristics, match/regex, pattern rendering)
-  - Pass 5: Trust score calculation (algorithms, penalties, score capping)
-
-### Changed
-- **stdout/stderr convention:** All human-readable output now goes to stderr; stdout reserved for JSON only. Affected: `--version`, `--version-extended`, `--self-verify`, `--show-trust-anchors`, `--dry-run`, `--helpextended`, success messages. This enables clean piping of JSON output in CI/CD pipelines.
-
-### Fixed
-- **LICENSE:** Added project name notice and updated contact email.
-
-## [0.3.1] - 2025-12-31
-
-### Fixed
-- **Raw scripts no longer misclassified as archives:** Fixed regression where raw scripts (e.g., `install-sfetch.sh`) were incorrectly treated as archives when the default config includes `archiveType: "tar.gz"`. The legacy `archiveType` field now only applies to assets that are actually archives or have unknown type.
-
-### Documentation
-- Added `make release-verify-checksums` step to `RELEASE_CHECKLIST.md`.
-
-## [0.3.0] - 2025-12-29
-
-### Added
-- **Trust rating system (v0.3.0):** Numeric trust score (0–100) with transparent factor breakdown.
-- **Policy gating:** New `--trust-minimum <0-100>` blocks downloads below the threshold.
-- **Workflow `none`:** Explicitly represents sources that provide no verification artifacts (distinct from bypass via `--insecure`).
-- **Dogfood corpus expansion:** Corpus continues to live in `testdata/corpus.json` and is runnable via `make corpus-dryrun`.
-
-### Changed
-- **Provenance schema:** Added `trust` object (`score`, `level`, `levelName`, `factors`) while retaining legacy `trustLevel` for one minor cycle.
-- **CLI output:** Normal runs now print trust score; dry-run includes a verifiable/validated breakdown.
-
-### Fixed
-- Clarified dry-run messaging to avoid implying integrity when signature artifacts exist but no verification key is available.
-
-## [0.2.9] - 2025-12-25
-
-### Fixed
-- **Asset selection now works for `minisign` and similar tool names:** Fixed false positive in supplemental file detection where tools containing "sig" in their name (like `minisign`, `cosign`, `design-tool`) were incorrectly excluded from asset selection. The fix removes the overly broad substring check and adds explicit `.minisig` suffix detection.
-
-### Documentation
-- Added "Install permissions" section to README documenting permission behavior for archives, raw scripts/binaries, and cross-device installs.
-
-## [0.2.8] - 2025-12-14
-
-### Added
-- **Linux `noexec` detection (warn-only):** sfetch now warns when the install destination appears to be mounted with `noexec`.
-
-### Changed
-- **Release notes source is now versioned:** `make release-notes` now requires `docs/releases/$RELEASE_TAG.md` and fails if missing.
-- **More deterministic install behavior tests:** install logic is factored into a helper to enable unit tests for rename vs EXDEV copy fallback.
-
-### Security
-- Expanded test coverage for ZIP extraction edge cases (zip slip, absolute paths, symlinks).
-
-## [0.2.7] - 2025-12-14
-
-### Changed
-- **ZIP extraction is now pure-Go:** `.zip` assets are extracted via the Go standard library (`archive/zip`), removing the runtime dependency on `unzip`.
-
-### Security
-- **Hardened ZIP extraction:** ZIP slip/path traversal, absolute paths, and symlinks are rejected during extraction.
-
-## [0.2.6] - 2025-12-14
-
-### Fixed
-- **Cross-device installs/caching (EXDEV):** When `--dest-dir` or `--cache-dir` is on a different filesystem than the temp directory (common in containerized CI), sfetch now falls back to copy when `rename(2)` fails with "invalid cross-device link".
-
-### Changed
-- Refactored internals to improve auditability and testability (moved logic into `internal/*` and introduced an injectable CLI entrypoint); CLI behavior is intended to be unchanged.
-
-### Documentation
-- Added CI/CD usage guide: `docs/cicd-usage-guide.md`.
-
-## [0.2.5] - 2025-12-13
-
-### Added
-- **Self-update version check:** `--self-update` now skips reinstall when already at the target version; `--self-update-force` reinstalls; `--tag` allows explicit downgrades (major-version guard still applies).
-- **Embedded self-update config:** Self-update uses an embedded, schema-backed update target config (`configs/update/sfetch.json`), with `--show-update-config` and `--validate-update-config`.
-- **Update library (initial):** New `pkg/update` package exposes self-update decision logic for reuse.
-- **Dry-run version info:** `--self-update --dry-run` now shows version comparison (current/target/status).
-
-### Changed
-- Build now targets the package (not `./main.go`) so multi-file `main` builds work (`Makefile` `MAIN ?= .`).
-- **Signing env vars standardized:** All signing-related environment variables now use an `SFETCH_` prefix for CI/scripting consistency:
-  - `MINISIGN_KEY` → `SFETCH_MINISIGN_KEY`
-  - `PGP_KEY_ID` → `SFETCH_PGP_KEY_ID`
-  - `GPG_HOMEDIR` → `SFETCH_GPG_HOMEDIR`
-  - Added `SFETCH_MINISIGN_PUB` for explicit public key path.
-- Dev builds no longer require `--self-update-force` to proceed (easier exit path for developers).
 
 ---
 
