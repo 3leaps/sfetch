@@ -1,7 +1,35 @@
+## v0.4.9
+
+### Summary
+Maintenance release: patches the Go toolchain and selected dependencies, adds a pinned vulnerability gate, hardens the self-bootstrap trust anchor, and moves release publish onto Node 24. No user-facing feature or API changes.
+
+### Highlights
+
+**Toolchain & supply chain**
+- `go.mod` pins `go 1.25.12` + `toolchain go1.26.5`; CI/release build with Go `1.26.5`. Clears reachable stdlib advisories while the module still builds on Go 1.25.x.
+- Updated `golang.org/x/crypto` (v0.54.0), `golang.org/x/sys` (v0.47.0), and `golang.org/x/text` (v0.40.0).
+- Precommit/CI runs pinned `govulncheck@v1.6.0` with zero reachable vulnerabilities as the pass condition.
+
+**CI / release**
+- `softprops/action-gh-release@v2` (Node 20) → `@v3` (Node 24) on both release steps.
+- Pinned goneat to `v0.5.15`, installed via sfetch with minisign verification.
+
+**Bootstrap & gates**
+- `make bootstrap` self-install uses `--dir`, `--tag` (N-1 pin `v0.4.8`), and `--require-minisign` so the script and binary match a reviewed release.
+- Corpus schema validation runs in-repo on `jsonschema/v6` v6.0.2 instead of an unpinned external CLI.
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+---
+
 ## v0.4.8
 
 ### Summary
-Maintenance release: refreshes the Go toolchain and dependencies, completes the GitHub Actions Node 20 → 24 migration, bumps goneat, and pins a repo-wide YAML formatting standard. No user-facing feature or behavior changes.
+Maintenance release: refreshes the Go toolchain and dependencies, retires archived Node12 release Actions in favor of softprops/action-gh-release@v2, bumps goneat, and pins a repo-wide YAML formatting standard. No user-facing feature or behavior changes.
 
 ### Highlights
 
@@ -10,7 +38,7 @@ Maintenance release: refreshes the Go toolchain and dependencies, completes the 
 - Updated `golang.org/x/crypto`, `golang.org/x/text`, `golang.org/x/sys`, `github.com/dlclark/regexp2`, and `github.com/jedisct1/go-minisign`. `govulncheck ./...` is clean.
 
 **CI / release**
-- Replaced the archived Node12 `actions/create-release@v1` + `actions/upload-release-asset@v1` with `softprops/action-gh-release@v2` (Node 24), completing the runner transition started in v0.4.7.
+- Replaced the archived Node12 `actions/create-release@v1` + `actions/upload-release-asset@v1` with `softprops/action-gh-release@v2` (Node 20). Checkout and setup-go had already moved to Node 24-era majors in v0.4.7.
 - Pinned goneat to `v0.5.13`.
 
 **Developer experience**

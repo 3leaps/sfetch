@@ -2058,6 +2058,36 @@ func TestResolveMinisignKey(t *testing.T) {
 	})
 }
 
+// TestCorpusSchemaValidity validates that testdata/corpus.schema.json is valid JSON Schema 2020-12.
+func TestCorpusSchemaValidity(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	if _, err := c.Compile("testdata/corpus.schema.json"); err != nil {
+		t.Fatalf("corpus schema is not valid JSON Schema 2020-12: %v", err)
+	}
+}
+
+// TestCorpusManifestValidates checks testdata/corpus.json against the in-repo
+// schema using the same jsonschema/v6 module the product requires (v6.0.2).
+// Replaces the previous unpinned external cmd/jv precommit invocation.
+func TestCorpusManifestValidates(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	schema, err := c.Compile("testdata/corpus.schema.json")
+	if err != nil {
+		t.Fatalf("compile corpus schema: %v", err)
+	}
+	raw, err := os.ReadFile("testdata/corpus.json")
+	if err != nil {
+		t.Fatalf("read testdata/corpus.json: %v", err)
+	}
+	var doc any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("unmarshal testdata/corpus.json: %v", err)
+	}
+	if err := schema.Validate(doc); err != nil {
+		t.Fatalf("testdata/corpus.json does not validate: %v", err)
+	}
+}
+
 // TestProvenanceSchemaValidity validates that provenance.schema.json is valid JSON Schema 2020-12.
 // This catches schema syntax errors during development.
 func TestProvenanceSchemaValidity(t *testing.T) {

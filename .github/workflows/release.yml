@@ -18,14 +18,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # softprops/action-gh-release@v2 (Node 24) replaces the archived,
-      # Node12-era actions/create-release@v1 + actions/upload-release-asset@v1.
-      # It creates the release for the pushed tag (idempotent) and uploads the
-      # install script. The build matrix below appends per-platform archives to
-      # the same release. Maintainer signs + adds SHA256SUMS/notes afterward via
-      # scripts/ (see README "Manual signing workflow").
+      # softprops/action-gh-release@v3 (Node 24) replaces the archived,
+      # Node12-era actions/create-release@v1 + actions/upload-release-asset@v1
+      # and the Node-20 softprops/action-gh-release@v2 pin. It creates the
+      # release for the pushed tag (idempotent) and uploads the install script.
+      # The build matrix below appends per-platform archives to the same release.
+      # Maintainer signs + adds SHA256SUMS/notes afterward via scripts/
+      # (see README "Manual signing workflow").
       - name: Create release and upload install script
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: sfetch ${{ github.ref_name }}
           body: |
@@ -68,7 +69,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.4'
+          go-version: '1.26.5'
 
       - name: License check
         # go-licenses v1.6.0 errors on stdlib packages ("Package fmt does not
@@ -120,10 +121,10 @@ jobs:
       # Maintainer generates SHA256SUMS locally and signs with minisign/pgp
 
       # Appends this matrix entry's archive to the release created above.
-      # action-gh-release@v2 is idempotent on the tag; parallel matrix jobs each
+      # action-gh-release@v3 is idempotent on the tag; parallel matrix jobs each
       # upload a distinctly-named asset, so no upload_url plumbing is needed.
       - name: Upload Archive
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ env.ASSET_FILE }}
 
