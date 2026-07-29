@@ -61,8 +61,15 @@ CORPUS_DEST ?= test-corpus
 .PHONY: release-verify-key release-verify-minisign-pubkey release-verify-keys release-verify-signatures
 .PHONY: release-clean bootstrap-script build-all gosec gosec-high update-scoop-manifest
 .PHONY: version-check version-set version-patch version-minor version-major
+.PHONY: print-sfetch-version
 
 all: build
+
+# Echo SFETCH_VERSION via make (not shell parsing of Makefile). CI install smoke
+# and other tools should use this so patch/minor/major pin values always expand
+# correctly regardless of assignment form or version shape.
+print-sfetch-version: ## Print bootstrap/CI smoke pin (SFETCH_VERSION)
+	@echo $(SFETCH_VERSION)
 
 help: ## Show this help
 	@echo "sfetch - secure, verifying binary fetcher for GitHub releases"
