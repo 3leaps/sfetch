@@ -41,6 +41,10 @@ SCOOP_BUCKET_REPO ?= https://github.com/3leaps/scoop-bucket.git
 BIN_DIR := $(CURDIR)/bin
 
 # Pinned tool versions (every gate/release tool is version-pinned; no @latest)
+# SFETCH_VERSION is the N-1 self-bootstrap pin AND the CI install-script smoke
+# pin (see .github/workflows/ci.yml). Always a fully-signed published release —
+# never "latest" and never the in-flight cut — so main CI cannot 404 during the
+# tag/upload window. Advance after each release publishes + signs.
 SFETCH_VERSION := v0.4.8
 GONEAT_VERSION ?= v0.5.15
 GOVULNCHECK_VERSION ?= v1.6.0
