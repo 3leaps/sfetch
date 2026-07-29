@@ -40,9 +40,10 @@ SCOOP_BUCKET_REPO ?= https://github.com/3leaps/scoop-bucket.git
 # Tool installation directory (repo-local)
 BIN_DIR := $(CURDIR)/bin
 
-# Pinned tool versions (minimums; existing installs are respected)
-SFETCH_VERSION := v0.3.4
-GONEAT_VERSION ?= v0.5.13
+# Pinned tool versions (every gate/release tool is version-pinned; no @latest)
+SFETCH_VERSION := v0.4.8
+GONEAT_VERSION ?= v0.5.15
+GOVULNCHECK_VERSION ?= v1.6.0
 
 # Tool paths (sfetch bootstrap may land in bin/; goneat must be on PATH)
 SFETCH = $(shell [ -x "$(BIN_DIR)/sfetch" ] && echo "$(BIN_DIR)/sfetch" || command -v sfetch 2>/dev/null)
@@ -94,7 +95,8 @@ bootstrap: ## Install development tools via trust chain
 	@mkdir -p "$(BIN_DIR)"
 	@if [ ! -x "$(BIN_DIR)/sfetch" ] && ! command -v sfetch >/dev/null 2>&1; then \
 		echo "[..] Installing sfetch $(SFETCH_VERSION) (self-bootstrap)..."; \
-		curl -fsSL https://github.com/3leaps/sfetch/releases/download/$(SFETCH_VERSION)/install-sfetch.sh | bash -s -- --dest "$(BIN_DIR)"; \
+		curl -fsSL https://github.com/3leaps/sfetch/releases/download/$(SFETCH_VERSION)/install-sfetch.sh | bash -s -- \
+			--dir "$(BIN_DIR)" --tag "$(SFETCH_VERSION)" --require-minisign; \
 	else \
 		echo "[ok] sfetch already installed"; \
 	fi
@@ -188,7 +190,7 @@ gosec-high: ## Run gosec (high confidence only)
 precommit: ## Run pre-commit checks (goneat assess + Go tests + build)
 	@command -v goneat >/dev/null 2>&1 || { echo "[!!] goneat not found on PATH"; exit 1; }
 	goneat assess --categories format,lint --check --fail-on critical
-	go run github.com/santhosh-tekuri/jsonschema/cmd/jv@latest testdata/corpus.schema.json testdata/corpus.json
+	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 	go test -v -race ./...
 	$(MAKE) gosec-high
 	$(MAKE) build-all

@@ -9,13 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-07-29
+
+### Changed
+- **Go toolchain pinned to 1.26.5.** `go.mod` now declares `go 1.25.12` with `toolchain go1.26.5`, and CI/release `setup-go` pins `1.26.5`. Clears reachable stdlib advisories (including GO-2026-5856) while remaining inside Go's supported-major window.
+- **Dependencies updated:** `golang.org/x/crypto` v0.53.0 → v0.54.0, `golang.org/x/sys` v0.46.0 → v0.47.0, `golang.org/x/text` v0.38.0 → v0.40.0. Pinned `govulncheck@v1.6.0` on the precommit/CI path reports zero reachable vulnerabilities.
+- **goneat pinned to v0.5.15** (was v0.5.13) across the `Makefile` and all CI dogfood install steps; installed via sfetch with minisign verification.
+- **Release publish action bumped to Node 24.** `softprops/action-gh-release@v2` (Node 20) → `@v3` (Node 24) on both release steps.
+
+### Fixed
+- **Self-bootstrap trust anchor.** `make bootstrap` now passes the installer `--dir` flag (was incorrect `--dest`), pins the binary with `--tag` matching `SFETCH_VERSION` (N-1: v0.4.8), and requires minisign verification. The installer script and installed binary are the same reviewed release.
+- **Unpinned schema CLI removed from precommit.** Corpus validation runs in-repo via `jsonschema/v6` v6.0.2 (the product dependency) instead of network-fetched `cmd/jv@latest`.
+
+### Added
+- **Pinned `govulncheck@v1.6.0` gate** in `make precommit` (and therefore CI Quality).
+
 ## [0.4.8] - 2026-06-22
 
 ### Changed
 - **Go toolchain pinned to 1.26.4.** `go.mod` now declares `go 1.25.5` with `toolchain go1.26.4`, and CI/release `setup-go` pins `1.26.4` (was the floating `1.26`). Default builds (`GOTOOLCHAIN=auto`) transparently use the patched 1.26.4 standard library while the module still builds on Go 1.25.x, keeping us inside Go's supported-major window and clearing the stdlib advisories that source-based vulnerability scans were flagging.
 - **Dependencies updated:** `golang.org/x/crypto` v0.47.0 → v0.53.0, `golang.org/x/text` v0.33.0 → v0.38.0, `golang.org/x/sys` v0.40.0 → v0.46.0, `github.com/dlclark/regexp2` v1.11.5 → v1.12.0, and `github.com/jedisct1/go-minisign` refreshed to its latest commit. `govulncheck ./...` reports no vulnerabilities.
 - **goneat pinned to v0.5.13** (was v0.5.10) across the `Makefile` and the CI dogfood install steps.
-- **Release workflow migrated off archived Node12 actions.** `actions/create-release@v1` and `actions/upload-release-asset@v1` (both archived, Node12-era) are replaced with `softprops/action-gh-release@v2` (Node 24), completing the Node 20 → 24 runner transition begun in v0.4.7 (which had already moved `checkout`/`setup-go`).
+- **Release workflow migrated off archived Node12 actions.** `actions/create-release@v1` and `actions/upload-release-asset@v1` (both archived, Node12-era) are replaced with `softprops/action-gh-release@v2` (Node 20). Checkout and setup-go had already moved to Node 24-era majors in v0.4.7.
 
 ### Added
 - **Pinned YAML formatting standard.** Added repo-root `.yamlfmt` and `.yamllint` so goneat's bundled yamlfmt and any standalone yamlfmt agree on inline-comment padding (two spaces) and document-start handling. Ends the intermittent `make precommit`/CI churn on workflow and config files. The config preserves sfetch's `---` + blank-line house style rather than collapsing it.
@@ -138,15 +153,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Block URL credentials by default to avoid leaking user info during redirects.
 
-## [0.3.4] - 2026-01-10
-
-### Added
-- **Proxy support:** New `--http-proxy`, `--https-proxy`, and `--no-proxy` flags with environment variable overrides (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`) for proxied networks.
-- **Proxy validation tests:** Added coverage for proxy URL validation and env overrides.
-
-### Documentation
-- Documented proxy support in `README.md`.
-
 ---
 
 > **Maintenance note:** This file is pruned to the latest 10 releases. For older entries, see `docs/releases/`.
+
+[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.9...HEAD
+[0.4.9]: https://github.com/3leaps/sfetch/compare/v0.4.8...v0.4.9
+[0.4.8]: https://github.com/3leaps/sfetch/compare/v0.4.7...v0.4.8
+[0.4.7]: https://github.com/3leaps/sfetch/compare/v0.4.6...v0.4.7
+[0.4.6]: https://github.com/3leaps/sfetch/compare/v0.4.5...v0.4.6
+[0.4.5]: https://github.com/3leaps/sfetch/compare/v0.4.4...v0.4.5
+[0.4.4]: https://github.com/3leaps/sfetch/compare/v0.4.3...v0.4.4
+[0.4.3]: https://github.com/3leaps/sfetch/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/3leaps/sfetch/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/3leaps/sfetch/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/3leaps/sfetch/compare/v0.3.4...v0.4.0
