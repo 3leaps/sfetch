@@ -54,8 +54,17 @@ jobs:
           export PATH="$PWD/bin:$PATH"
           make precommit
 
+      # Pin to Makefile SFETCH_VERSION (N-1 fully-signed release), never latest.
+      # Main CI after a release tag races incomplete asset uploads if dry-run
+      # follows latest (404 on platform archives still mid-matrix upload).
+      # Use `make print-sfetch-version` so make expands the pin (any semver shape).
       - name: Test install script
-        run: bash scripts/install-sfetch.sh --dry-run
+        run: |
+          set -euo pipefail
+          TAG=$(make -s print-sfetch-version)
+          test -n "$TAG"
+          echo "Install smoke pin: $TAG (make print-sfetch-version)"
+          bash scripts/install-sfetch.sh --dry-run --tag "$TAG" --require-minisign
 
   container-probe:
     name: Install probe (container)
