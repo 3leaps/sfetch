@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Release checksum verification is fail-closed.** `make release-verify-checksums` now requires non-empty `SHA256SUMS` and `SHA512SUMS` and runs `shasum -c` without piping away the exit status, so a corrupted asset or missing/empty manifest fails the target.
-- **Upload paths require full verification.** `make release-upload` and `make release-upload-provenance` both depend on `make release-verify` (checksums + signatures + keys), so provenance and binaries cannot be published without the verification chain succeeding.
+- **Maintainer Make upload targets require full verification.** `make release-upload` and `make release-upload-provenance` both depend on `make release-verify` (checksums + signatures + keys). Tag CI may still publish unsigned platform archives and the install script before the manual sign/verify/upload phase; this change gates the maintainer Make upload recipes only.
 
 ### Added
 

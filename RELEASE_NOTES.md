@@ -1,14 +1,14 @@
 ## v0.4.10
 
 ### Summary
-Release-path automation hardening: checksum verification fails closed, and both upload targets require the full verification chain before publishing. No user-facing feature or API changes.
+Release-path automation hardening: checksum verification fails closed, and both maintainer Make upload targets require the full verification chain. Tag CI may still publish unsigned archives before the manual sign/verify phase. No user-facing feature or API changes.
 
 ### Highlights
 
 **Release verification**
 - `make release-verify-checksums` requires non-empty `SHA256SUMS` and `SHA512SUMS` and fails when `shasum -c` fails (no masked exit status).
 - New composite `make release-verify` (checksums + signatures + keys).
-- `make release-upload` and `make release-upload-provenance` both depend on `release-verify`.
+- `make release-upload` and `make release-upload-provenance` both depend on `release-verify` (maintainer Make paths only; not initial CI asset publish).
 - Hermetic regression harness for corrupt/absent/empty manifests runs in `make precommit` (and therefore CI).
 
 ### Install

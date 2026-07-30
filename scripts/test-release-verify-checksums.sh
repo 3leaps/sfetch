@@ -8,18 +8,18 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 fail() {
-	echo "FAIL: $*" >&2
-	exit 1
+    echo "FAIL: $*" >&2
+    exit 1
 }
 
 pass() {
-	echo "PASS: $*"
+    echo "PASS: $*"
 }
 
 run_verify() {
-	local dir="$1"
-	# Force /bin/sh so Linux CI (dash) is exercised even on bash hosts.
-	make -s release-verify-checksums DIST_RELEASE="$dir" SHELL="${MAKE_SHELL:-/bin/sh}"
+    local dir="$1"
+    # Force /bin/sh so Linux CI (dash) is exercised even on bash hosts.
+    make -s release-verify-checksums DIST_RELEASE="$dir" SHELL="${MAKE_SHELL:-/bin/sh}"
 }
 
 # Initialize before trap so early exit never hits unbound variables under set -u.
@@ -37,14 +37,14 @@ valid="$(mktemp -d "${TMPDIR:-/tmp}/sft-rv-valid.XXXXXX")"
 printf 'payload-a\n' >"$valid/a.bin"
 printf 'payload-b\n' >"$valid/b.bin"
 (
-	cd "$valid"
-	shasum -a 256 a.bin b.bin >SHA256SUMS
-	shasum -a 512 a.bin b.bin >SHA512SUMS
+    cd "$valid"
+    shasum -a 256 a.bin b.bin >SHA256SUMS
+    shasum -a 512 a.bin b.bin >SHA512SUMS
 )
 if run_verify "$valid"; then
-	pass "valid fixture exits 0"
+    pass "valid fixture exits 0"
 else
-	fail "valid fixture should exit 0"
+    fail "valid fixture should exit 0"
 fi
 
 # --- Case 2: corrupted checksum exits non-zero ---
@@ -59,9 +59,9 @@ lines[0] = ('0' if c != '0' else '1') + lines[0][1:]
 p.write_text(''.join(lines))
 PY
 if run_verify "$corrupt"; then
-	fail "corrupted checksum should exit non-zero"
+    fail "corrupted checksum should exit non-zero"
 else
-	pass "corrupted checksum exits non-zero"
+    pass "corrupted checksum exits non-zero"
 fi
 
 # --- Case 3: absent SHA256SUMS exits non-zero ---
@@ -70,9 +70,9 @@ cp "$valid/a.bin" "$absent256/"
 cp "$valid/b.bin" "$absent256/"
 cp "$valid/SHA512SUMS" "$absent256/"
 if run_verify "$absent256"; then
-	fail "absent SHA256SUMS should exit non-zero"
+    fail "absent SHA256SUMS should exit non-zero"
 else
-	pass "absent SHA256SUMS exits non-zero"
+    pass "absent SHA256SUMS exits non-zero"
 fi
 
 # --- Case 4: absent SHA512SUMS exits non-zero ---
@@ -81,9 +81,9 @@ cp "$valid/a.bin" "$absent512/"
 cp "$valid/b.bin" "$absent512/"
 cp "$valid/SHA256SUMS" "$absent512/"
 if run_verify "$absent512"; then
-	fail "absent SHA512SUMS should exit non-zero"
+    fail "absent SHA512SUMS should exit non-zero"
 else
-	pass "absent SHA512SUMS exits non-zero"
+    pass "absent SHA512SUMS exits non-zero"
 fi
 
 # --- Case 5: empty SHA256SUMS exits non-zero ---
@@ -91,9 +91,9 @@ empty256="$(mktemp -d "${TMPDIR:-/tmp}/sft-rv-empty256.XXXXXX")"
 cp -R "$valid/." "$empty256/"
 : >"$empty256/SHA256SUMS"
 if run_verify "$empty256"; then
-	fail "empty SHA256SUMS should exit non-zero"
+    fail "empty SHA256SUMS should exit non-zero"
 else
-	pass "empty SHA256SUMS exits non-zero"
+    pass "empty SHA256SUMS exits non-zero"
 fi
 
 # --- Case 6: empty SHA512SUMS exits non-zero ---
@@ -101,9 +101,9 @@ empty512="$(mktemp -d "${TMPDIR:-/tmp}/sft-rv-empty512.XXXXXX")"
 cp -R "$valid/." "$empty512/"
 : >"$empty512/SHA512SUMS"
 if run_verify "$empty512"; then
-	fail "empty SHA512SUMS should exit non-zero"
+    fail "empty SHA512SUMS should exit non-zero"
 else
-	pass "empty SHA512SUMS exits non-zero"
+    pass "empty SHA512SUMS exits non-zero"
 fi
 
 echo "[ok] release-verify-checksums regression harness complete"
