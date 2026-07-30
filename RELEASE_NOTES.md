@@ -1,3 +1,30 @@
+## v0.4.10
+
+### Summary
+Release-path automation hardening: checksum verification fails closed, and both upload targets require the full verification chain before publishing. No user-facing feature or API changes.
+
+### Highlights
+
+**Release verification**
+- `make release-verify-checksums` requires non-empty `SHA256SUMS` and `SHA512SUMS` and fails when `shasum -c` fails (no masked exit status).
+- New composite `make release-verify` (checksums + signatures + keys).
+- `make release-upload` and `make release-upload-provenance` both depend on `release-verify`.
+- Hermetic regression harness for corrupt/absent/empty manifests runs in `make precommit` (and therefore CI).
+
+### Install
+
+```bash
+curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
+```
+
+Or self-update:
+
+```bash
+sfetch --self-update --yes
+```
+
+---
+
 ## v0.4.9
 
 ### Summary

@@ -58,10 +58,10 @@ CORPUS_DEST ?= test-corpus
 .PHONY: precommit prepush version corpus corpus-all corpus-dryrun corpus-validate
 .PHONY: release release-download release-checksums release-verify-checksums release-sign
 .PHONY: release-notes release-upload release-upload-provenance release-export-key release-export-minisign-key release-export-keys
-.PHONY: release-verify-key release-verify-minisign-pubkey release-verify-keys release-verify-signatures
+.PHONY: release-verify-key release-verify-minisign-pubkey release-verify-keys release-verify-signatures release-verify
 .PHONY: release-clean bootstrap-script build-all gosec gosec-high update-scoop-manifest
 .PHONY: version-check version-set version-patch version-minor version-major
-.PHONY: print-sfetch-version
+.PHONY: print-sfetch-version test-release-verify-checksums
 
 all: build
 
@@ -205,6 +205,8 @@ precommit: ## Run pre-commit checks (goneat assess + Go tests + build)
 	go test -v -race ./...
 	$(MAKE) gosec-high
 	$(MAKE) build-all
+	# CI runs make precommit (not prepush); keep fail-closed release-verify regression on this path.
+	$(MAKE) test-release-verify-checksums
 	@echo "[ok] Pre-commit checks passed"
 
 prepush: precommit ## Run pre-push checks (same as precommit + security)
@@ -250,19 +252,29 @@ bootstrap-script: ## Copy install script into release directory
 release-checksums: bootstrap-script ## Generate SHA256SUMS and SHA512SUMS
 	go run ./scripts/cmd/generate-checksums --dir $(DIST_RELEASE)
 
-release-verify-checksums: ## Verify checksums in dist/release
+release-verify-checksums: ## Verify checksums in dist/release (fail-closed; portable /bin/sh)
 	@if [ ! -d "$(DIST_RELEASE)" ]; then echo "error: $(DIST_RELEASE) not found (run make release-download first)" >&2; exit 1; fi
 	@echo "Verifying checksums in $(DIST_RELEASE)..."
-	@cd $(DIST_RELEASE) && \
-	if [ -f SHA256SUMS ]; then \
-		echo "=== SHA256SUMS ===" && \
-		shasum -a 256 -c SHA256SUMS 2>&1 | grep -v ': OK$$' || echo "All SHA256 checksums OK"; \
-	fi && \
-	if [ -f SHA512SUMS ]; then \
-		echo "=== SHA512SUMS ===" && \
-		shasum -a 512 -c SHA512SUMS 2>&1 | grep -v ': OK$$' || echo "All SHA512 checksums OK"; \
-	fi
-	@echo "[ok] Checksum verification complete"
+	@set -eu; \
+	cd "$(DIST_RELEASE)"; \
+	if [ ! -s SHA256SUMS ]; then \
+		echo "error: SHA256SUMS missing or empty in $(DIST_RELEASE)" >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -s SHA512SUMS ]; then \
+		echo "error: SHA512SUMS missing or empty in $(DIST_RELEASE)" >&2; \
+		exit 1; \
+	fi; \
+	echo "=== SHA256SUMS ==="; \
+	shasum -a 256 -c SHA256SUMS; \
+	echo "=== SHA512SUMS ==="; \
+	shasum -a 512 -c SHA512SUMS; \
+	echo "[ok] Checksum verification complete"
+
+# Negative + positive regression for release-verify-checksums (exit status only).
+# Wired into precommit because sfetch CI runs make precommit, not prepush.
+test-release-verify-checksums: ## Regression: fail-closed checksum verify (corrupt/absent/empty)
+	@./scripts/test-release-verify-checksums.sh
 
 release-notes: ## Copy release notes into dist/release
 	@if [ -z "$(RELEASE_TAG)" ]; then echo "error: RELEASE_TAG not set" >&2; exit 1; fi
@@ -319,13 +331,15 @@ release-verify-keys: release-verify-key ## Verify all exported public keys
 release-verify-signatures: ## Verify minisign and PGP signatures on checksum manifests
 	./scripts/verify-signatures.sh $(DIST_RELEASE)
 
-release-upload: release-notes release-verify-key ## Upload all assets and update release notes
+release-verify: release-verify-checksums release-verify-signatures release-verify-keys ## Full post-signing release verification
+
+release-upload: release-notes release-verify ## Upload all assets (requires full verification chain)
 	./scripts/upload-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
 	@echo ""
 	@echo "📝 Updating Scoop manifest..."
 	@$(MAKE) update-scoop-manifest
 
-release-upload-provenance: release-notes ## Upload provenance only (manifests, signatures, keys, notes)
+release-upload-provenance: release-notes release-verify ## Upload provenance only (requires full verification chain)
 	./scripts/release-upload-provenance.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
 update-scoop-manifest: ## Update Scoop bucket manifest with the current release version (requires sibling ../scoop-bucket)

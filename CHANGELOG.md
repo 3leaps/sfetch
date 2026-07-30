@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.10] - 2026-07-30
+
+### Fixed
+
+- **Release checksum verification is fail-closed.** `make release-verify-checksums` now requires non-empty `SHA256SUMS` and `SHA512SUMS` and runs `shasum -c` without piping away the exit status, so a corrupted asset or missing/empty manifest fails the target.
+- **Upload paths require full verification.** `make release-upload` and `make release-upload-provenance` both depend on `make release-verify` (checksums + signatures + keys), so provenance and binaries cannot be published without the verification chain succeeding.
+
+### Added
+
+- Composite `make release-verify` target and a hermetic regression harness (`scripts/test-release-verify-checksums.sh`) covering valid, corrupted, absent, and empty manifests. The harness is wired into `make precommit` (the gate CI runs).
+
 ## [0.4.9] - 2026-07-29
 
 ### Changed
@@ -157,7 +168,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Maintenance note:** This file is pruned to the latest 10 releases. For older entries, see `docs/releases/`.
 
-[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.9...HEAD
+[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.10...HEAD
+[0.4.10]: https://github.com/3leaps/sfetch/compare/v0.4.9...v0.4.10
 [0.4.9]: https://github.com/3leaps/sfetch/compare/v0.4.8...v0.4.9
 [0.4.8]: https://github.com/3leaps/sfetch/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/3leaps/sfetch/compare/v0.4.6...v0.4.7
