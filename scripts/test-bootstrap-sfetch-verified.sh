@@ -5,8 +5,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 SCRIPT="${ROOT}/scripts/bootstrap-sfetch-verified.sh"
-ACTION_ENGINE="${ROOT}/.github/actions/setup-sfetch/bootstrap-sfetch-verified.sh"
 VERSION_MATCH="${ROOT}/scripts/version-matches-pin.sh"
+# No colocated engine under the action directory — single SSOT under scripts/.
+[ ! -e "${ROOT}/.github/actions/setup-sfetch/bootstrap-sfetch-verified.sh" ] ||
+    fail "colocated action engine must not exist (single SSOT under scripts/)"
 [ -x "$SCRIPT" ] || chmod +x "$SCRIPT"
 [ -x "$VERSION_MATCH" ] || chmod +x "$VERSION_MATCH"
 
@@ -16,10 +18,7 @@ fail() {
 }
 pass() { echo "PASS: $*"; }
 
-# --- Engine copy identity (action-owned must match scripts/ SSOT) ---
-[ -f "$ACTION_ENGINE" ] || fail "action-owned engine missing: $ACTION_ENGINE"
-cmp -s "$SCRIPT" "$ACTION_ENGINE" || fail "action engine diverged from scripts/bootstrap-sfetch-verified.sh"
-pass "action engine identical to scripts SSOT"
+pass "single engine SSOT under scripts/ (no action-dir copy)"
 
 # --- version-matches-pin exact token semantics ---
 "$VERSION_MATCH" "sfetch 0.4.11" "v0.4.11" || fail "should match sfetch 0.4.11"
@@ -27,6 +26,10 @@ pass "action engine identical to scripts SSOT"
 if "$VERSION_MATCH" "sfetch 10x4y110" "v0.4.11"; then fail "must not soft-match 10x4y110"; fi
 if "$VERSION_MATCH" "sfetch 10.4.11" "v0.4.11"; then fail "must not match inside 10.4.11"; fi
 if "$VERSION_MATCH" "sfetch 0.4.110" "v0.4.11"; then fail "must not match 0.4.110"; fi
+if "$VERSION_MATCH" "sfetch 0.4.11-rc1" "v0.4.11"; then fail "must not match suffixed 0.4.11-rc1"; fi
+if "$VERSION_MATCH" "sfetch v0.4.11-beta" "v0.4.11"; then fail "must not match v0.4.11-beta"; fi
+if "$VERSION_MATCH" "sfetch x0.4.11" "v0.4.11"; then fail "must not match prefixed x0.4.11"; fi
+"$VERSION_MATCH" "minisign 0.12" "0.12" || fail "should match minisign 0.12"
 pass "version-matches-pin exact token rules"
 
 # --- Version rejection (no network) ---
@@ -55,16 +58,16 @@ OUT1040="$WORKDIR/out410.txt"
 SFETCH_BOOTSTRAP_BASE_URL="file://${WORKDIR}/empty" \
     "$SCRIPT" --version v0.4.10 --dir "$WORKDIR/d410" >"$OUT1040" 2>&1
 set -e
-grep -q 'route=sha256sums' "$OUT1040" || fail "v0.4.10 should select sha256sums route (log: $(cat "$OUT1040"))"
-pass "v0.4.10 → route=sha256sums"
+grep -Eq 'verify-route=sha256sums' "$OUT1040" || fail "v0.4.10 should select sha256sums (log: $(cat "$OUT1040"))"
+pass "v0.4.10 → verify-route=sha256sums"
 
 set +e
 OUT411="$WORKDIR/out411.txt"
 SFETCH_BOOTSTRAP_BASE_URL="file://${WORKDIR}/empty" \
     "$SCRIPT" --version v0.4.11 --dir "$WORKDIR/d411" >"$OUT411" 2>&1
 set -e
-grep -q 'route=minisig' "$OUT411" || fail "v0.4.11 should select minisig route (log: $(cat "$OUT411"))"
-pass "v0.4.11 → route=minisig"
+grep -Eq 'verify-route=minisig' "$OUT411" || fail "v0.4.11 should select minisig (log: $(cat "$OUT411"))"
+pass "v0.4.11 → verify-route=minisig"
 
 # --- Local dual-route fixtures with ephemeral minisign ---
 command -v minisign >/dev/null 2>&1 || fail "minisign required"
@@ -178,10 +181,13 @@ SFETCH_BOOTSTRAP_BASE_URL="$BASE" \
 RC=$?
 set -e
 [ "$RC" -eq 0 ] || fail "positive v0.4.11 minisig should succeed (log: $(cat "$OUT_GOOD"))"
-grep -q 'route=minisig' "$OUT_GOOD" || fail "positive minisig route log missing"
+# Machine field on stdout: exactly one route=
+ROUTE_LINES="$(grep -c '^route=' "$OUT_GOOD" || true)"
+[ "$ROUTE_LINES" -eq 1 ] || fail "expected exactly one stdout route= field, got ${ROUTE_LINES}"
+grep -q '^route=minisig$' "$OUT_GOOD" || fail "positive minisig machine route missing"
 [ -f "$GOOD411/.stub-ran" ] || fail "installer should execute after successful verify"
 [ -x "$GOOD411/sfetch" ] || fail "sfetch binary should be installed"
-"$GOOD411/sfetch" --version | grep -q '0.4.11' || fail "stub sfetch version"
+"$VERSION_MATCH" "$("$GOOD411/sfetch" --version 2>&1)" "v0.4.11" || fail "stub sfetch version"
 pass "positive v0.4.11 minisig route (patched ephemeral key)"
 
 # Positive: v0.4.10 sha256sums route with patched trust anchor
@@ -195,7 +201,8 @@ SFETCH_BOOTSTRAP_BASE_URL="$BASE" \
 RC=$?
 set -e
 [ "$RC" -eq 0 ] || fail "positive v0.4.10 sha256sums should succeed (log: $(cat "$OUT_GOOD410"))"
-grep -q 'route=sha256sums' "$OUT_GOOD410" || fail "positive sha256sums route log missing"
+[ "$(grep -c '^route=' "$OUT_GOOD410" || true)" -eq 1 ] || fail "expected one route= field"
+grep -q '^route=sha256sums$' "$OUT_GOOD410" || fail "positive sha256sums machine route missing"
 [ -f "$GOOD410/.stub-ran" ] || fail "installer should execute after sha256sums verify"
 pass "positive v0.4.10 sha256sums route (patched ephemeral key)"
 
@@ -213,7 +220,9 @@ set -e
 [ "$RC" -ne 0 ] || fail "wrong-key minisig should fail"
 [ ! -f "$BAD_DIR/.stub-ran" ] || fail "installer must not run before verify"
 [ ! -f "$BAD_DIR/sfetch" ] || fail "sfetch must not be installed on failed verify"
-grep -q 'route=minisig' "$OUTBAD" || fail "expected minisig route in log"
+grep -Eq 'verify-route=minisig' "$OUTBAD" || fail "expected minisig verify-route in log"
+# Failed run must not emit machine route=
+if grep -q '^route=' "$OUTBAD"; then fail "failed run must not emit machine route="; fi
 pass "wrong-key minisig fails closed without executing installer"
 
 # Negative: missing signature asset fails closed
@@ -247,54 +256,86 @@ set -e
 [ ! -f "$NOSIG_DIR/.stub-ran" ] || fail "installer must not run when sig missing"
 pass "missing install-sfetch.sh.minisig fails closed"
 
-# --- Action engine resolution simulation (no GITHUB_WORKSPACE fallback) ---
-# Simulate: GITHUB_ACTION_PATH has real engine; workspace has hostile same-named script.
+# --- Action engine resolution: package root scripts/, never GITHUB_WORKSPACE ---
+# Fake action checkout layout: <pkg>/.github/actions/setup-sfetch + <pkg>/scripts/engine
+FAKE_PKG="$WORKDIR/fake-action-repo"
+mkdir -p "$FAKE_PKG/.github/actions/setup-sfetch" "$FAKE_PKG/scripts"
+cp "$SCRIPT" "$FAKE_PKG/scripts/bootstrap-sfetch-verified.sh"
+chmod +x "$FAKE_PKG/scripts/bootstrap-sfetch-verified.sh"
 HOSTILE_WS="$WORKDIR/hostile-ws"
-mkdir -p "$HOSTILE_WS/scripts" "$WORKDIR/action-path"
-cp "$ACTION_ENGINE" "$WORKDIR/action-path/bootstrap-sfetch-verified.sh"
+mkdir -p "$HOSTILE_WS/scripts"
 cat >"$HOSTILE_WS/scripts/bootstrap-sfetch-verified.sh" <<'HOSTILE'
 #!/usr/bin/env bash
 echo "HOSTILE_ENGINE_EXECUTED" >&2
-echo "route=minisig" >&2
-echo "sfetch-bin=/tmp/evil"
+printf 'route=minisig\n'
+printf 'sfetch-bin=/tmp/evil\n'
 exit 0
 HOSTILE
-chmod +x "$HOSTILE_WS/scripts/bootstrap-sfetch-verified.sh" \
-    "$WORKDIR/action-path/bootstrap-sfetch-verified.sh"
+chmod +x "$HOSTILE_WS/scripts/bootstrap-sfetch-verified.sh"
 
-# Resolution logic mirrored from action.yml (must only use ACTION_PATH)
+# Resolution logic mirrored from action.yml
 resolve_engine() {
-    local ACTION_ROOT="$1"
-    local ENGINE="${ACTION_ROOT}/bootstrap-sfetch-verified.sh"
+    local GITHUB_ACTION_PATH="$1"
+    local GITHUB_WORKSPACE="${2-}"
+    local PACKAGE_ROOT ENGINE
+    PACKAGE_ROOT="$(cd "${GITHUB_ACTION_PATH}/../../.." && pwd)"
+    ENGINE="${PACKAGE_ROOT}/scripts/bootstrap-sfetch-verified.sh"
     if [ ! -f "${ENGINE}" ] || [ ! -r "${ENGINE}" ]; then
-        echo "error: action-owned engine missing" >&2
+        echo "error: action-repo engine missing" >&2
         return 1
     fi
     ENGINE="$(cd "$(dirname "${ENGINE}")" && pwd)/$(basename "${ENGINE}")"
     case "${ENGINE}" in
-        "${ACTION_ROOT}"/* | "$(cd "${ACTION_ROOT}" && pwd)"/*) ;;
+        "${PACKAGE_ROOT}"/*) ;;
         *)
-            echo "error: engine outside ACTION_PATH" >&2
+            echo "error: engine outside package root" >&2
             return 1
             ;;
     esac
+    if [ -n "${GITHUB_WORKSPACE}" ]; then
+        local WS_REAL
+        WS_REAL="$(cd "${GITHUB_WORKSPACE}" && pwd)"
+        if [ "${PACKAGE_ROOT}" != "${WS_REAL}" ]; then
+            case "${ENGINE}" in
+                "${WS_REAL}"/*)
+                    echo "error: engine in consumer workspace" >&2
+                    return 1
+                    ;;
+            esac
+        fi
+    fi
     printf '%s\n' "$ENGINE"
 }
 
-RESOLVED="$(resolve_engine "$WORKDIR/action-path")" || fail "action-path resolve failed"
+RESOLVED="$(resolve_engine "$FAKE_PKG/.github/actions/setup-sfetch" "$HOSTILE_WS")" ||
+    fail "package-root resolve failed"
 case "$RESOLVED" in
     *hostile*) fail "resolved engine under hostile workspace: $RESOLVED" ;;
 esac
-# Confirm hostile would not be chosen even if WORKSPACE were preferred by old bug
-[ -f "$HOSTILE_WS/scripts/bootstrap-sfetch-verified.sh" ] || fail "hostile fixture missing"
-# Don't actually run full bootstrap — just confirm path identity
-[ "$RESOLVED" = "$(cd "$WORKDIR/action-path" && pwd)/bootstrap-sfetch-verified.sh" ] ||
+[ "$RESOLVED" = "$(cd "$FAKE_PKG/scripts" && pwd)/bootstrap-sfetch-verified.sh" ] ||
     fail "unexpected resolve path: $RESOLVED"
-# Missing action engine must fail (no workspace fallback)
-if resolve_engine "$WORKDIR/missing-action" 2>/dev/null; then
-    fail "missing action engine must fail"
+if resolve_engine "$WORKDIR/missing-action/nested/deep" "$HOSTILE_WS" 2>/dev/null; then
+    fail "missing package engine must fail"
 fi
-pass "action engine resolves only under GITHUB_ACTION_PATH (hostile workspace ignored)"
+pass "action resolves package-root scripts/ engine (hostile workspace ignored)"
+
+# --- Action wrapper simulation: parse real successful engine stdout ---
+# Human logs may mention verify-route= twice; machine stdout has exactly one route=.
+SIM_OUT="$WORKDIR/sim-out.txt"
+SIM_ERR="$WORKDIR/sim-err.txt"
+SFETCH_BOOTSTRAP_BASE_URL="$BASE" \
+    SFETCH_BOOTSTRAP_SKIP_MINISIGN_INSTALL=1 \
+    "$PATCHED" --version v0.4.10 --dir "$WORKDIR/sim-install" >"$SIM_OUT" 2>"$SIM_ERR"
+# Mimic action parse of stdout only
+SIM_ROUTE_COUNT="$(grep -c '^route=' "$SIM_OUT" || true)"
+[ "$SIM_ROUTE_COUNT" -eq 1 ] || fail "action sim: expected one route= on stdout, got ${SIM_ROUTE_COUNT} (out=$(cat "$SIM_OUT"); err=$(cat "$SIM_ERR"))"
+SIM_ROUTE="$(awk -F= '/^route=/{print $2; exit}' "$SIM_OUT")"
+[ "$SIM_ROUTE" = "sha256sums" ] || fail "action sim: route=$SIM_ROUTE"
+SIM_BIN="$(awk -F= '/^sfetch-bin=/{print $2; exit}' "$SIM_OUT")"
+[ -n "$SIM_BIN" ] && [ -f "$SIM_BIN" ] || fail "action sim: sfetch-bin missing"
+# Human stderr may contain verify-route= without breaking parse
+grep -Eq 'verify-route=sha256sums' "$SIM_ERR" || fail "action sim: expected human verify-route log"
+pass "action wrapper parses single stdout route= from successful engine run"
 
 # Cleanup servers
 kill "$SRV_PID" 2>/dev/null || true

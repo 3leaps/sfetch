@@ -107,18 +107,24 @@ VERSION=""
 INSTALL_DIR=""
 GONEAT_VERSION=""
 REPO="${SFETCH_REPO_DEFAULT}"
+ACQUIRE_MINISIGN_ONLY=0
 usage() {
     cat <<'EOF' >&2
 Usage: bootstrap-sfetch-verified.sh --version vX.Y.Z --dir PATH [options]
+   or: bootstrap-sfetch-verified.sh --acquire-minisign-only --dir PATH
 
-Required:
+Required (install mode):
   --version TAG     Exact immutable tag (e.g. v0.4.11). Rejects latest/branches.
   --dir PATH        Install directory for sfetch (and optional goneat)
+
+Required (acquire-minisign-only mode):
+  --dir PATH        Directory to install pinned minisign 0.12 into
 
 Optional:
   --goneat-version TAG   Exact goneat tag to install via verified sfetch
   --repo owner/name      GitHub repo (default: 3leaps/sfetch)
   --yes                  Non-interactive (always on for this script; accepted for CLI parity)
+  --acquire-minisign-only  Only install pinned minisign (shared acquisition path for CI)
   -h, --help             Show help
 
 Env:
@@ -149,6 +155,10 @@ while [ $# -gt 0 ]; do
             REPO="$2"
             shift 2
             ;;
+        --acquire-minisign-only)
+            ACQUIRE_MINISIGN_ONLY=1
+            shift
+            ;;
         --yes)
             # Accepted for CLI parity with install-sfetch.sh (always non-interactive).
             shift
@@ -162,44 +172,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-[ -n "$VERSION" ] || die "--version is required"
 [ -n "$INSTALL_DIR" ] || die "--dir is required"
-
-# Reject floating / non-immutable refs (CI and Makefile must never use latest).
-case "$VERSION" in
-    "" | latest | LATEST | main | master | HEAD)
-        die "refusing floating version ${VERSION:-<empty>}; pin an exact tag (e.g. v0.4.11)"
-        ;;
-esac
-if ! is_exact_semver_tag "$VERSION"; then
-    die "version must be exact vMAJOR.MINOR.PATCH (got: $VERSION)"
-fi
-if [ -n "$GONEAT_VERSION" ]; then
-    case "$GONEAT_VERSION" in
-        "" | latest | LATEST | main | master | HEAD)
-            die "refusing floating goneat-version: ${GONEAT_VERSION:-<empty>}"
-            ;;
-    esac
-    if ! is_exact_semver_tag "$GONEAT_VERSION"; then
-        die "goneat-version must be exact vMAJOR.MINOR.PATCH (got: $GONEAT_VERSION)"
-    fi
-fi
-
-if ! semver_ge "$VERSION" "$SFETCH_BOOTSTRAP_MIN" || ! semver_le "$VERSION" "$SFETCH_BOOTSTRAP_MAX"; then
-    die "sfetch-version $VERSION outside supported range ${SFETCH_BOOTSTRAP_MIN}..${SFETCH_BOOTSTRAP_MAX} for this bootstrap revision"
-fi
-
-BASE_URL="${SFETCH_BOOTSTRAP_BASE_URL:-https://github.com/${REPO}/releases/download}"
-ASSET_BASE="${BASE_URL}/${VERSION}"
-
-# Route selection (logged; no silent downgrade between routes)
-ROUTE=""
-if semver_ge "$VERSION" "$SFETCH_MINISIG_SINCE"; then
-    ROUTE="minisig"
-else
-    ROUTE="sha256sums"
-fi
-log "bootstrap-sfetch-verified: version=${VERSION} route=${ROUTE} range=${SFETCH_BOOTSTRAP_MIN}..${SFETCH_BOOTSTRAP_MAX}"
 
 # -----------------------------------------------------------------------------
 # Platform
@@ -270,6 +243,8 @@ trap cleanup EXIT
 mkdir -p "$INSTALL_DIR"
 INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd)"
 
+# Install mode continues below; acquire-minisign-only jumps after helpers load.
+
 # -----------------------------------------------------------------------------
 # HTTPS fetch with bounded retries
 # -----------------------------------------------------------------------------
@@ -321,14 +296,33 @@ assert_sha256() {
 # -----------------------------------------------------------------------------
 MINISIGN_BIN=""
 
-# Exact version token match (same rules as scripts/version-matches-pin.sh).
+# Exact whitespace-delimited version token match (same rules as
+# scripts/version-matches-pin.sh). Rejects suffix/prefix soft matches.
 version_output_matches_pin() {
     local out="$1" pin="$2"
-    local ver="${pin#v}"
-    local esc
-    esc="$(printf '%s' "$ver" | sed 's/\./\\./g')"
-    printf '%s\n' "$out" | grep -Eq "(^|[^0-9])v?${esc}([^0-9]|$)"
+    local want="${pin#v}"
+    local tok
+    [ -n "$want" ] || return 1
+    while IFS= read -r tok; do
+        [ -n "$tok" ] || continue
+        case "$tok" in
+            v*)
+                if [ "${tok#v}" = "$want" ]; then
+                    return 0
+                fi
+                ;;
+        esac
+        if [ "$tok" = "$want" ]; then
+            return 0
+        fi
+    done <<EOF
+$(printf '%s\n' "$out" | tr -s '[:space:]' '\n')
+EOF
+    return 1
 }
+
+# Destination for pinned minisign binary (override for --acquire-minisign-only).
+MINISIGN_INSTALL_DIR="${WORK}/tools"
 
 ensure_minisign() {
     # Test-only seam: ambient minisign with exact version identity.
@@ -344,7 +338,7 @@ ensure_minisign() {
 
     # Always download + hash-verify the pinned upstream archive.
     # Do not prefer ambient PATH minisign (PATH shims must not become the verifier).
-    local tools="${WORK}/tools"
+    local tools="${MINISIGN_INSTALL_DIR}"
     mkdir -p "$tools"
     case "$OS" in
         windows)
@@ -407,11 +401,63 @@ ensure_minisign() {
 }
 
 assert_minisign_version() {
-    local out
-    out="$("$MINISIGN_BIN" -v 2>&1 | head -n1 || true)"
-    version_output_matches_pin "$out" "$MINISIGN_VERSION_EXPECTED" ||
-        die "minisign version assertion failed (want exact ${MINISIGN_VERSION_EXPECTED}): ${out}"
+    local out first
+    # Fail closed if the verifier cannot report a version (no || true).
+    out="$("$MINISIGN_BIN" -v 2>&1)" ||
+        die "minisign -v failed (cannot assert pinned version ${MINISIGN_VERSION_EXPECTED})"
+    first="$(printf '%s\n' "$out" | head -n1)"
+    version_output_matches_pin "$first" "$MINISIGN_VERSION_EXPECTED" ||
+        die "minisign version assertion failed (want exact ${MINISIGN_VERSION_EXPECTED}): ${first}"
 }
+
+# --acquire-minisign-only: shared acquisition path for CI Windows dogfood etc.
+if [ "$ACQUIRE_MINISIGN_ONLY" = "1" ]; then
+    MINISIGN_INSTALL_DIR="$INSTALL_DIR"
+    ensure_minisign
+    printf 'minisign-bin=%s\n' "$MINISIGN_BIN"
+    exit 0
+fi
+
+# -----------------------------------------------------------------------------
+# Install mode: version / route validation
+# -----------------------------------------------------------------------------
+[ -n "$VERSION" ] || die "--version is required"
+
+# Reject floating / non-immutable refs (CI and Makefile must never use latest).
+case "$VERSION" in
+    "" | latest | LATEST | main | master | HEAD)
+        die "refusing floating version ${VERSION:-<empty>}; pin an exact tag (e.g. v0.4.11)"
+        ;;
+esac
+if ! is_exact_semver_tag "$VERSION"; then
+    die "version must be exact vMAJOR.MINOR.PATCH (got: $VERSION)"
+fi
+if [ -n "$GONEAT_VERSION" ]; then
+    case "$GONEAT_VERSION" in
+        "" | latest | LATEST | main | master | HEAD)
+            die "refusing floating goneat-version: ${GONEAT_VERSION:-<empty>}"
+            ;;
+    esac
+    if ! is_exact_semver_tag "$GONEAT_VERSION"; then
+        die "goneat-version must be exact vMAJOR.MINOR.PATCH (got: $GONEAT_VERSION)"
+    fi
+fi
+
+if ! semver_ge "$VERSION" "$SFETCH_BOOTSTRAP_MIN" || ! semver_le "$VERSION" "$SFETCH_BOOTSTRAP_MAX"; then
+    die "sfetch-version $VERSION outside supported range ${SFETCH_BOOTSTRAP_MIN}..${SFETCH_BOOTSTRAP_MAX} for this bootstrap revision"
+fi
+
+BASE_URL="${SFETCH_BOOTSTRAP_BASE_URL:-https://github.com/${REPO}/releases/download}"
+ASSET_BASE="${BASE_URL}/${VERSION}"
+
+# Route selection (human log on stderr; machine field on stdout at end only).
+ROUTE=""
+if semver_ge "$VERSION" "$SFETCH_MINISIG_SINCE"; then
+    ROUTE="minisig"
+else
+    ROUTE="sha256sums"
+fi
+log "bootstrap-sfetch-verified: version=${VERSION} verify-route=${ROUTE} range=${SFETCH_BOOTSTRAP_MIN}..${SFETCH_BOOTSTRAP_MAX}"
 
 write_pubkey() {
     local path="$1"
@@ -429,18 +475,18 @@ verify_installer_minisig() {
     local script="$1"
     local _sig="$2"
     local pub="$3"
-    log "verify route=minisig: minisign -Vm install-sfetch.sh"
+    log "verify verify-route=minisig: minisign -Vm install-sfetch.sh"
     if ! "$MINISIGN_BIN" -Vm "$script" -p "$pub" -x "$_sig" >/dev/null; then
-        die "install-sfetch.sh.minisig verification failed (route=minisig; no fallback)"
+        die "install-sfetch.sh.minisig verification failed (verify-route=minisig; no fallback)"
     fi
     log "install-sfetch.sh.minisig: OK"
 }
 
 verify_installer_sha256sums() {
     local script="$1" sums="$2" sums_sig="$3" pub="$4"
-    log "verify route=sha256sums: minisign -Vm SHA256SUMS then hash install-sfetch.sh"
+    log "verify verify-route=sha256sums: minisign -Vm SHA256SUMS then hash install-sfetch.sh"
     if ! "$MINISIGN_BIN" -Vm "$sums" -p "$pub" -x "$sums_sig" >/dev/null; then
-        die "SHA256SUMS.minisig verification failed (route=sha256sums; no fallback)"
+        die "SHA256SUMS.minisig verification failed (verify-route=sha256sums; no fallback)"
     fi
     local expect got
     expect="$(awk '$2 == "install-sfetch.sh" { print $1; exit }' "$sums")"
@@ -519,8 +565,9 @@ if [ -n "$GONEAT_VERSION" ]; then
     log "goneat OK: ${GREP}"
 fi
 
-log "bootstrap-sfetch-verified complete: sfetch=${VERSION} route=${ROUTE} dir=${INSTALL_DIR}"
-# Emit install path for action consumers (stdout only machine line)
+log "bootstrap-sfetch-verified complete: sfetch=${VERSION} verify-route=${ROUTE} dir=${INSTALL_DIR}"
+# Machine-readable fields on stdout only (exactly one route= line for the action).
+printf 'route=%s\n' "$ROUTE"
 printf 'sfetch-bin=%s\n' "$SFETCH_BIN"
 if [ -n "$GONEAT_VERSION" ]; then
     printf 'goneat-bin=%s\n' "$GONEAT_BIN"
