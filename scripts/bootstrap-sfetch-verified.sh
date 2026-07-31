@@ -74,6 +74,11 @@ is_exact_semver_tag() {
 # Compare two non-negative integer decimal strings without machine arithmetic.
 # Inputs must already be digits-only with no leading zeros (except "0").
 # Longer digit string is larger; equal length uses C-locale lexical order.
+#
+# Why no $((10#…)) / arithmetic: Bash integers wrap silently (e.g. 2^64 → 0,
+# 2^64+11 → 11). That previously made huge components fail-open on the
+# supported-range gate and even alias into a valid route (minisig). For
+# canonical decimals, length-then-lexical is total and order-preserving.
 _semver_cmp_component() {
     local x="$1" y="$2"
     local lx=${#x} ly=${#y}
@@ -99,7 +104,7 @@ _semver_cmp_component() {
 
 # Compare two vX.Y.Z tags: echo -1 / 0 / 1 for a<b / a==b / a>b.
 # Fail loudly (return non-zero, no stdout) on non-canonical components —
-# never use Bash integer arithmetic (overflow would fail open on range).
+# never use Bash integer arithmetic (see _semver_cmp_component).
 semver_cmp() {
     local a="${1#v}" b="${2#v}"
     local a1 a2 a3 b1 b2 b3
@@ -390,6 +395,8 @@ ensure_minisign() {
                 unzip -q -o "$zip" -d "${WORK}/minisign-extract"
             else
                 # PowerShell Expand-Archive via env vars (no path interpolation into -Command).
+                # Single-quoted -Command intentionally keeps $env: for PowerShell, not Bash.
+                # shellcheck disable=SC2016
                 SFETCH_MINISIGN_ZIP_PATH="$zip" \
                     SFETCH_MINISIGN_EXTRACT_PATH="${WORK}/minisign-extract" \
                     powershell.exe -NoProfile -Command \

@@ -50,8 +50,6 @@ if "$SCRIPT" --version v0.4.12 --dir /tmp 2>/dev/null; then fail "above max shou
 # F2: leading-zero components must not pass range/route selection
 if "$SCRIPT" --version v0.4.09 --dir /tmp 2>/dev/null; then fail "v0.4.09 leading zero should fail"; else pass "rejects v0.4.09 leading zero"; fi
 if "$SCRIPT" --version v0.04.11 --dir /tmp 2>/dev/null; then fail "v0.04.11 leading zero should fail"; else pass "rejects v0.04.11 leading zero"; fi
-# Huge components must not wrap through Bash integer arithmetic into the supported range.
-if "$SCRIPT" --version v18446744073709551616.4.10 --dir /tmp 2>/dev/null; then fail "huge component should fail before route/network"; else pass "rejects huge component before range accept"; fi
 
 # --- Helpers: patch temporary engines for fixtures (never production seams) ---
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/sft-boot-test.XXXXXX")"
@@ -71,6 +69,31 @@ NO_SIDE="$WORKDIR/no-side"
 if "$SCRIPT" --version v0.4.09 --dir "$NO_SIDE" 2>/dev/null; then fail "v0.4.09 should fail"; fi
 [ ! -e "$NO_SIDE" ] || fail "rejected version must not create install dir"
 pass "rejected version has no mkdir side effect"
+
+# Huge components: both overflow faces must fail closed before route selection / network.
+# Face 1: wrap-to-zero major (2^64). Face 2: wrap-into-range patch (2^64+11 → was 11 under Bash $((10#…))).
+# A late 404 would also be nonzero — pin that rejection is early (no verify-route=, no fetch log, no install dir).
+assert_early_version_reject() {
+    local ver="$1" label="$2"
+    local idir="$WORKDIR/early-reject-${label}"
+    local logf="$WORKDIR/early-reject-${label}.log"
+    local rc=0
+    set +e
+    "$SCRIPT" --version "$ver" --dir "$idir" >"$logf" 2>&1
+    rc=$?
+    set -e
+    [ "$rc" -ne 0 ] || fail "${label}: expected nonzero exit for ${ver}"
+    if grep -q 'verify-route=' "$logf"; then
+        fail "${label}: must not emit verify-route= before range reject (${ver})"
+    fi
+    if grep -Eiq 'fetch attempt|failed to fetch|http(s)?://|curl |wget ' "$logf"; then
+        fail "${label}: must not perform network/fetch before range reject (${ver})"
+    fi
+    [ ! -e "$idir" ] || fail "${label}: install dir must remain absent for ${ver}"
+    pass "rejects ${label} early (${ver})"
+}
+assert_early_version_reject "v18446744073709551616.4.10" "huge-major-wrap-zero"
+assert_early_version_reject "v0.4.18446744073709551627" "huge-patch-wrap-into-range"
 
 PROD_PUBKEY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
 
