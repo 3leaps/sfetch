@@ -6,7 +6,10 @@ set -euo pipefail
 # Usage: verify-signatures.sh [dir]
 #
 # Env:
-#   SFETCH_MINISIGN_PUB - path to minisign public key (required for minisign)
+#   SFETCH_MINISIGN_PUB - path to operator minisign public key (required advisory).
+#     Must match the canonical consumer trust anchor. Actual minisign -V always
+#     uses scripts/sfetch-minisign-anchor.pub (SSOT) so parser divergence cannot
+#     reintroduce "signed with some key ≠ consumer key".
 #   SFETCH_GPG_HOMEDIR  - isolated gpg homedir for PGP verification (optional)
 #
 # Policy (deliberate divergence — do not re-harmonise without a lock):
@@ -36,18 +39,26 @@ _anchor_checked=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CANONICAL_ANCHOR_PUB="${SCRIPT_DIR}/sfetch-minisign-anchor.pub"
 
-extract_minisign_rw_line() {
+# Extract the operative minisign public key the same way minisign does:
+# line 1 = untrusted comment, line 2 = RW… key (when standard .pub format).
+minisign_operative_pubkey() {
     local f="$1"
-    # Prefer a line that is exactly the RW key; fall back to first RW token.
+    local l2
+    l2="$(sed -n '2p' "$f" | tr -d '\r\n')"
+    case "$l2" in
+        RW*)
+            printf '%s\n' "$l2"
+            return 0
+            ;;
+    esac
+    # Bare single-line key file (no comment header).
     local line
     line="$(grep -E '^RW[A-Za-z0-9+/]{54}$' "$f" 2>/dev/null | head -n1 | tr -d '\r\n' || true)"
     if [ -n "$line" ]; then
         printf '%s\n' "$line"
         return 0
     fi
-    line="$(grep -E 'RW[A-Za-z0-9+/]{54}' "$f" 2>/dev/null | head -n1 | tr -d '\r\n' || true)"
-    # Extract the RW token if surrounded by other text
-    printf '%s\n' "$line" | grep -oE 'RW[A-Za-z0-9+/]{54}' | head -n1
+    return 1
 }
 
 require_minisign_tool() {
@@ -59,9 +70,8 @@ require_minisign_tool() {
     return 0
 }
 
-# F1: gate must prove signatures verify against *the* consumer anchor, not an
-# arbitrary operator-supplied key that happens to match the signatures.
-assert_operator_pub_is_canonical_anchor() {
+# F1: operator pub must match the consumer SSOT; minisign always verifies with SSOT.
+assert_operator_pub_matches_canonical() {
     if [ "${_anchor_checked}" -eq 1 ]; then
         return 0
     fi
@@ -71,18 +81,16 @@ assert_operator_pub_is_canonical_anchor() {
         return 1
     fi
     local expect got
-    expect="$(extract_minisign_rw_line "${CANONICAL_ANCHOR_PUB}")"
-    got="$(extract_minisign_rw_line "${SFETCH_MINISIGN_PUB}")"
-    if [ -z "${expect}" ]; then
-        echo "error: canonical anchor has no RW… key line: ${CANONICAL_ANCHOR_PUB}" >&2
+    expect="$(minisign_operative_pubkey "${CANONICAL_ANCHOR_PUB}")" || {
+        echo "error: canonical anchor has no operative RW… key: ${CANONICAL_ANCHOR_PUB}" >&2
         failed=$((failed + 1))
         return 1
-    fi
-    if [ -z "${got}" ]; then
-        echo "error: SFETCH_MINISIGN_PUB has no RW… key line: ${SFETCH_MINISIGN_PUB}" >&2
+    }
+    got="$(minisign_operative_pubkey "${SFETCH_MINISIGN_PUB}")" || {
+        echo "error: SFETCH_MINISIGN_PUB has no operative RW… key: ${SFETCH_MINISIGN_PUB}" >&2
         failed=$((failed + 1))
         return 1
-    fi
+    }
     if [ "${got}" != "${expect}" ]; then
         echo "error: SFETCH_MINISIGN_PUB does not match the canonical consumer trust anchor" >&2
         echo "  expected (scripts/sfetch-minisign-anchor.pub): ${expect}" >&2
@@ -98,7 +106,7 @@ assert_operator_pub_is_canonical_anchor() {
 
 require_minisign_pub() {
     if [ -z "${SFETCH_MINISIGN_PUB}" ]; then
-        echo "error: SFETCH_MINISIGN_PUB not set, cannot verify minisign signatures" >&2
+        echo "error: SFETCH_MINISIGN_PUB not set (required advisory; must match consumer anchor)" >&2
         failed=$((failed + 1))
         return 1
     fi
@@ -107,8 +115,22 @@ require_minisign_pub() {
         failed=$((failed + 1))
         return 1
     fi
-    assert_operator_pub_is_canonical_anchor || return 1
+    assert_operator_pub_matches_canonical || return 1
     return 0
+}
+
+# Always verify against the in-repo canonical anchor (not the operator path).
+# SFETCH_MINISIGN_PUB is advisory-only after the match assert above.
+verify_minisign_with_anchor() {
+    local label="$1" base="$2"
+    echo "🔍 [minisign] Verifying ${label} (canonical anchor)"
+    if minisign -V -p "${CANONICAL_ANCHOR_PUB}" -m "${base}"; then
+        echo "✅ ${label}.minisig verified against consumer trust anchor"
+        verified=$((verified + 1))
+    else
+        echo "❌ ${label}.minisig verification FAILED against consumer trust anchor"
+        failed=$((failed + 1))
+    fi
 }
 
 # Optional: skip when signature file is absent (manifests only).
@@ -124,15 +146,7 @@ verify_minisign_optional() {
 
     require_minisign_pub || return 1
     require_minisign_tool || return 1
-
-    echo "🔍 [minisign] Verifying ${manifest}"
-    if minisign -V -p "${SFETCH_MINISIGN_PUB}" -m "${base}"; then
-        echo "✅ ${manifest}.minisig verified"
-        verified=$((verified + 1))
-    else
-        echo "❌ ${manifest}.minisig verification FAILED"
-        failed=$((failed + 1))
-    fi
+    verify_minisign_with_anchor "${manifest}" "${base}"
 }
 
 # Required: missing signature is a hard failure (installer only).
@@ -158,15 +172,7 @@ verify_minisign_required() {
 
     require_minisign_pub || return 1
     require_minisign_tool || return 1
-
-    echo "🔍 [minisign] Verifying ${target} (required)"
-    if minisign -V -p "${SFETCH_MINISIGN_PUB}" -m "${base}"; then
-        echo "✅ ${target}.minisig verified"
-        verified=$((verified + 1))
-    else
-        echo "❌ ${target}.minisig verification FAILED"
-        failed=$((failed + 1))
-    fi
+    verify_minisign_with_anchor "${target}" "${base}"
 }
 
 verify_pgp() {
