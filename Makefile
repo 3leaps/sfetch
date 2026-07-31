@@ -61,7 +61,7 @@ CORPUS_DEST ?= test-corpus
 .PHONY: release-verify-key release-verify-minisign-pubkey release-verify-keys release-verify-signatures release-verify
 .PHONY: release-clean bootstrap-script build-all gosec gosec-high update-scoop-manifest
 .PHONY: version-check version-set version-patch version-minor version-major
-.PHONY: print-sfetch-version test-release-verify-checksums
+.PHONY: print-sfetch-version test-release-verify-checksums test-release-verify-signatures test-bootstrap-sfetch-verified test-bootstrap-range-release
 
 all: build
 
@@ -82,15 +82,18 @@ help: ## Show this help
 # Bootstrap - Trust Anchor Chain
 # -----------------------------------------------------------------------------
 #
-# Trust chain: curl -> sfetch (self-bootstrap) -> goneat
+# Trust chain: verified bootstrap script -> sfetch (N-1 pin) -> goneat
 #
-# sfetch bootstraps itself via curl, then uses itself to install goneat.
-# This demonstrates sfetch eating its own dogfood.
+# N-1 pin (SFETCH_VERSION) is always a published release — never this cut.
+# At v0.4.11 the N-1 pin is v0.4.10, which has no install-sfetch.sh.minisig,
+# so the shared engine takes the signed SHA256SUMS route. From v0.4.12 onward
+# (when N-1 >= v0.4.11) the engine switches to the detached .minisig route.
+#
+# Do not pipe curl | bash here — that is the anti-pattern this release fixes.
 
-bootstrap: ## Install development tools via trust chain
+bootstrap: ## Install development tools via verified trust chain
 	@echo "Bootstrapping sfetch development environment..."
 	@echo ""
-	@# Step 0: Verify curl is available (required trust anchor)
 	@if ! command -v curl >/dev/null 2>&1; then \
 		echo "[!!] curl not found (required for bootstrap)"; \
 		echo ""; \
@@ -102,16 +105,16 @@ bootstrap: ## Install development tools via trust chain
 	fi
 	@echo "[ok] curl found"
 	@echo ""
-	@# Step 1: Install sfetch via curl (self-bootstrap trust anchor)
 	@mkdir -p "$(BIN_DIR)"
 	@if [ ! -x "$(BIN_DIR)/sfetch" ] && ! command -v sfetch >/dev/null 2>&1; then \
-		echo "[..] Installing sfetch $(SFETCH_VERSION) (self-bootstrap)..."; \
-		curl -fsSL https://github.com/3leaps/sfetch/releases/download/$(SFETCH_VERSION)/install-sfetch.sh | bash -s -- \
-			--dir "$(BIN_DIR)" --tag "$(SFETCH_VERSION)" --require-minisign; \
+		echo "[..] Installing sfetch $(SFETCH_VERSION) (verified bootstrap, N-1 pin)..."; \
+		./scripts/bootstrap-sfetch-verified.sh \
+			--version "$(SFETCH_VERSION)" \
+			--dir "$(BIN_DIR)" \
+			--yes; \
 	else \
 		echo "[ok] sfetch already installed"; \
 	fi
-	@# Verify sfetch
 	@SFETCH_BIN=""; \
 	if [ -x "$(BIN_DIR)/sfetch" ]; then SFETCH_BIN="$(BIN_DIR)/sfetch"; \
 	elif command -v sfetch >/dev/null 2>&1; then SFETCH_BIN="$$(command -v sfetch)"; fi; \
@@ -122,6 +125,7 @@ bootstrap: ## Install development tools via trust chain
 	@if ! command -v goneat >/dev/null 2>&1; then \
 		echo "[!!] goneat not found on PATH"; \
 		echo "    Install it from https://github.com/fulmenhq/goneat/releases (pinned: $(GONEAT_VERSION))"; \
+		echo "    Or: ./scripts/bootstrap-sfetch-verified.sh --version $(SFETCH_VERSION) --dir $(BIN_DIR) --goneat-version $(GONEAT_VERSION)"; \
 		exit 1; \
 	fi
 	@echo "[ok] goneat: $$(goneat version 2>&1 | head -n1)"
@@ -207,6 +211,9 @@ precommit: ## Run pre-commit checks (goneat assess + Go tests + build)
 	$(MAKE) build-all
 	# CI runs make precommit (not prepush); keep fail-closed release-verify regression on this path.
 	$(MAKE) test-release-verify-checksums
+	$(MAKE) test-release-verify-signatures
+	$(MAKE) test-bootstrap-sfetch-verified
+	$(MAKE) test-bootstrap-range-release
 	@echo "[ok] Pre-commit checks passed"
 
 prepush: precommit ## Run pre-push checks (same as precommit + security)
@@ -276,6 +283,15 @@ release-verify-checksums: ## Verify checksums in dist/release (fail-closed; port
 test-release-verify-checksums: ## Regression: fail-closed checksum verify (corrupt/absent/empty)
 	@./scripts/test-release-verify-checksums.sh
 
+test-release-verify-signatures: ## Regression: required installer minisig + sign targets
+	@./scripts/test-release-verify-signatures.sh
+
+test-bootstrap-sfetch-verified: ## Regression: dual-route bootstrap rejects + fail-closed
+	@./scripts/test-bootstrap-sfetch-verified.sh
+
+test-bootstrap-range-release: ## Assert MAX==v(VERSION) and MINISIG_SINCE in range (committed constants)
+	@./scripts/assert-bootstrap-range-release.sh
+
 release-notes: ## Copy release notes into dist/release
 	@if [ -z "$(RELEASE_TAG)" ]; then echo "error: RELEASE_TAG not set" >&2; exit 1; fi
 	@mkdir -p $(DIST_RELEASE)
@@ -287,7 +303,7 @@ release-notes: ## Copy release notes into dist/release
 	cp "$$src" "$(DIST_RELEASE)/release-notes-$(RELEASE_TAG).md"
 	@echo "[ok] Release notes copied to $(DIST_RELEASE)"
 
-release-sign: release-checksums ## Sign checksum manifests (minisign + optional PGP)
+release-sign: release-checksums ## Sign manifests + installer (minisign); PGP manifests-only
 	SFETCH_MINISIGN_KEY=$(SFETCH_MINISIGN_KEY) SFETCH_PGP_KEY_ID=$(SFETCH_PGP_KEY_ID) SFETCH_GPG_HOMEDIR=$(SFETCH_GPG_HOMEDIR) ./scripts/sign-release-manifests.sh $(RELEASE_TAG) $(DIST_RELEASE)
 
 release-export-key: ## Export PGP public key to dist/release
@@ -328,7 +344,7 @@ release-verify-keys: release-verify-key ## Verify all exported public keys
 		echo "ℹ️  No minisign public key to verify ($(MINISIGN_PUB_NAME) not found)"; \
 	fi
 
-release-verify-signatures: ## Verify minisign and PGP signatures on checksum manifests
+release-verify-signatures: ## Verify signatures (installer minisig required; PGP optional)
 	./scripts/verify-signatures.sh $(DIST_RELEASE)
 
 release-verify: release-verify-checksums release-verify-signatures release-verify-keys ## Full post-signing release verification

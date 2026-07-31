@@ -25,14 +25,21 @@ jobs:
       # The build matrix below appends per-platform archives to the same release.
       # Maintainer signs + adds SHA256SUMS/notes afterward via scripts/
       # (see README "Manual signing workflow").
-      - name: Create release and upload install script
+      # Draft until maintainer signs install-sfetch.sh + manifests and uploads
+      # via make release-upload. A published release without installer .minisig is
+      # non-consumable for verified bootstrap; draft keeps it off "latest".
+      - name: Create draft release and upload install script
         uses: softprops/action-gh-release@v3
         with:
           name: sfetch ${{ github.ref_name }}
           body: |
             ## sfetch ${{ github.ref_name }}
-            Auto-generated release.
-          draft: false
+            Draft release — incomplete until maintainer signs and publishes.
+
+            Do not bootstrap from this release until `install-sfetch.sh.minisig`
+            and signed checksum manifests are uploaded, then the release is
+            published (`gh release edit TAG --draft=false`).
+          draft: true
           prerelease: false
           files: scripts/install-sfetch.sh
 

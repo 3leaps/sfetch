@@ -19,8 +19,10 @@ func TestRunGeneratesChecksumsAndSkipsNonArtifacts(t *testing.T) {
 	}
 
 	writeFile("sfetch_one", "one")
-	writeFile("sfetch_one.asc", "sig")          // skipped
-	writeFile("install-sfetch.sh", "installer") // included
+	writeFile("sfetch_one.asc", "sig")                     // skipped
+	writeFile("install-sfetch.sh", "installer")            // included
+	writeFile("install-sfetch.sh.minisig", "detached-sig") // skipped by .minisig suffix
+	writeFile("SHA256SUMS.minisig", "manifest-sig")        // skipped
 	writeFile("release-notes-v0.0.1.md", "notes")
 	writeFile("SHA256SUMS", "old") // skipped/overwritten
 
@@ -33,7 +35,12 @@ func TestRunGeneratesChecksumsAndSkipsNonArtifacts(t *testing.T) {
 		t.Fatalf("read SHA256SUMS: %v", err)
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	content := string(data)
+	if strings.Contains(content, ".minisig") {
+		t.Fatalf("SHA256SUMS must not list .minisig files (self-reference hazard):\n%s", content)
+	}
+
+	lines := strings.Split(strings.TrimSpace(content), "\n")
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 entries, got %d: %v", len(lines), lines)
 	}

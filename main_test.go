@@ -2486,6 +2486,23 @@ func TestEmbeddedTrustAnchors(t *testing.T) {
 			t.Error("EmbeddedMinisignPubkey does not match key in scripts/install-sfetch.sh")
 		}
 	})
+
+	t.Run("matches SSOT anchor file and bootstrap engine", func(t *testing.T) {
+		anchor, err := os.ReadFile("scripts/sfetch-minisign-anchor.pub")
+		if err != nil {
+			t.Fatalf("read scripts/sfetch-minisign-anchor.pub: %v", err)
+		}
+		if !strings.Contains(string(anchor), EmbeddedMinisignPubkey) {
+			t.Error("EmbeddedMinisignPubkey does not match scripts/sfetch-minisign-anchor.pub")
+		}
+		engine, err := os.ReadFile("scripts/bootstrap-sfetch-verified.sh")
+		if err != nil {
+			t.Fatalf("read bootstrap engine: %v", err)
+		}
+		if !strings.Contains(string(engine), EmbeddedMinisignPubkey) {
+			t.Error("EmbeddedMinisignPubkey does not match bootstrap-sfetch-verified.sh")
+		}
+	})
 }
 
 func TestEmbeddedUpdateTargetConfigMatchesFile(t *testing.T) {

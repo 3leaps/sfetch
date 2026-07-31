@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.11] - 2026-07-31
+
+### Added
+
+- **Detached `install-sfetch.sh.minisig`** on releases. Minisign signs the installer plus checksum manifests; PGP remains manifests-only. The installer signature is **required** by `make release-verify-signatures` and `upload-release-assets` (missing/tampered/wrong-key ⇒ non-zero).
+- **`scripts/bootstrap-sfetch-verified.sh`** dual-route verified bootstrap: `.minisig` for ≥ v0.4.11, signed `SHA256SUMS` for earlier pins. Refuses `latest`/floating refs; embeds the trust anchor; pins minisign 0.12 provenance (including official Windows archive hashes).
+- **Composite action** `.github/actions/setup-sfetch` thin-wrapping the shared engine (pin by commit SHA).
+- Release signature and bootstrap regression harnesses wired into `make precommit`.
+
+### Changed
+
+- Tag **release workflow creates a draft** until maintainer sign/upload/publish so pre-signature assets never become `latest`.
+- **`make bootstrap`** uses the verified engine against the N-1 pin (no pipe-to-bash).
+- Security and CI docs: expanded signing set, dual-route consumer guidance, trust-anchor rotation notes, `--require-minisign` CLI vs installer default asymmetry.
+
 ## [0.4.10] - 2026-07-30
 
 ### Fixed
