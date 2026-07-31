@@ -287,8 +287,6 @@ case "$RESOLVED" in
 esac
 # Confirm hostile would not be chosen even if WORKSPACE were preferred by old bug
 [ -f "$HOSTILE_WS/scripts/bootstrap-sfetch-verified.sh" ] || fail "hostile fixture missing"
-# If we only resolve under action path, running it must not print HOSTILE
-OUT_RES="$WORKDIR/resolve-out.txt"
 # Don't actually run full bootstrap — just confirm path identity
 [ "$RESOLVED" = "$(cd "$WORKDIR/action-path" && pwd)/bootstrap-sfetch-verified.sh" ] ||
     fail "unexpected resolve path: $RESOLVED"
