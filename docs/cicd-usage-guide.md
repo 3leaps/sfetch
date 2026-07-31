@@ -87,50 +87,47 @@ bash /tmp/bootstrap-sfetch-verified.sh --version v0.4.11 --dir "$HOME/.local/bin
 still use `install-sfetch.sh` from a pinned tag or, carefully, from `latest`;
 CI and Makefile recipes must use exact tags.
 
-### Legacy pipe-to-bash (still works; not recommended)
+### Makefile / shell (immutable tag + verified engine)
 
-```yaml
-- name: Install sfetch + tool (legacy)
-  env:
-    GITHUB_TOKEN: ${{ github.token }}
-    GH_TOKEN: ${{ github.token }}
-    SFETCH_GITHUB_TOKEN: ${{ github.token }}
-  run: |
-    set -euo pipefail
-    BIN_DIR="$HOME/.local/bin"
-    mkdir -p "$BIN_DIR"
+For non-Actions consumers, retrieve the engine at an immutable SHA, verify its
+digest, then run it with an exact tag (never `latest`):
 
-    # Prefer a pinned tag. Avoid releases/latest in CI.
-    SFETCH_VERSION="v0.4.10"
-    curl -sSfL "https://github.com/3leaps/sfetch/releases/download/${SFETCH_VERSION}/install-sfetch.sh" \
-      | bash -s -- --yes --dir "$BIN_DIR" --tag "$SFETCH_VERSION" --require-minisign
-    export PATH="$BIN_DIR:$PATH"
+```bash
+set -euo pipefail
+BIN_DIR="$HOME/.local/bin"
+mkdir -p "$BIN_DIR"
+export PATH="$BIN_DIR:$PATH"
 
-    sfetch --repo owner/repo --tag v1.2.3 --dest-dir "$BIN_DIR" --require-minisign
+# Replace <sha> and <digest> with values published for the release you trust.
+SCRIPT_URL="https://raw.githubusercontent.com/3leaps/sfetch/<sha>/scripts/bootstrap-sfetch-verified.sh"
+SCRIPT_SHA256="<digest>"
+curl -fsSL "$SCRIPT_URL" -o /tmp/bootstrap-sfetch-verified.sh
+echo "${SCRIPT_SHA256}  /tmp/bootstrap-sfetch-verified.sh" | shasum -a 256 -c
+bash /tmp/bootstrap-sfetch-verified.sh --version v0.4.11 --dir "$BIN_DIR"
+
+export GITHUB_TOKEN="${GITHUB_TOKEN:-}" GH_TOKEN="${GH_TOKEN:-}" SFETCH_GITHUB_TOKEN="${SFETCH_GITHUB_TOKEN:-}"
+sfetch --repo owner/repo --tag v1.2.3 --dest-dir "$BIN_DIR" --require-minisign
 ```
 
 Exporting all three token variables at job or workflow scope keeps `sfetch`, `gh`, and child processes on authenticated GitHub API requests by default.
 
-### With explicit version pinning (legacy installer)
+### Backward pin (v0.4.10 still on SHA256SUMS route)
 
 ```yaml
-- name: Install tools (pinned versions)
-  run: |
-    set -euo pipefail
-    BIN_DIR="$HOME/.local/bin"
-    mkdir -p "$BIN_DIR"
-    export PATH="$BIN_DIR:$PATH"
-
-    SFETCH_VERSION="v0.4.10"
-    curl -sSfL "https://github.com/3leaps/sfetch/releases/download/${SFETCH_VERSION}/install-sfetch.sh" \
-      | bash -s -- --yes --dir "$BIN_DIR" --tag "$SFETCH_VERSION" --require-minisign
-
-    sfetch --repo owner/repo --tag v1.2.3 --dest-dir "$BIN_DIR" --require-minisign
+- uses: 3leaps/sfetch/.github/actions/setup-sfetch@<commit-sha>
+  with:
+    sfetch-version: v0.4.10   # pre-minisig release; engine selects sha256sums
+  env:
+    GITHUB_TOKEN: ${{ github.token }}
+    GH_TOKEN: ${{ github.token }}
+    SFETCH_GITHUB_TOKEN: ${{ github.token }}
 ```
 
 ### Container jobs
 
-When running in a container (e.g., with `container:` in GitHub Actions), the same approach works:
+When running in a container (e.g., with `container:` in GitHub Actions), prefer
+the composite action when the runner can reach it; otherwise use the verified
+engine at an immutable tag (never `releases/latest` in CI):
 
 ```yaml
 jobs:
@@ -140,13 +137,27 @@ jobs:
       image: golang:1.23
     steps:
       - uses: actions/checkout@v4
-      - name: Install tools
+      - uses: 3leaps/sfetch/.github/actions/setup-sfetch@<commit-sha>
+        with:
+          sfetch-version: v0.4.11
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          SFETCH_GITHUB_TOKEN: ${{ github.token }}
+      - name: Use sfetch
         run: |
-          BIN_DIR="$HOME/.local/bin"
-          mkdir -p "$BIN_DIR"
-          curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash -s -- --yes --dir "$BIN_DIR"
-          export PATH="$BIN_DIR:$PATH"
-          sfetch --repo owner/repo --latest --dest-dir "$BIN_DIR"
+          sfetch --repo owner/repo --tag v1.2.3 --dest-dir "$HOME/.local/bin" --require-minisign
+```
+
+Makefile / shell alternative inside the container (pinned tag + verified engine):
+
+```bash
+SFETCH_VERSION="v0.4.11"
+SCRIPT_URL="https://raw.githubusercontent.com/3leaps/sfetch/<sha>/scripts/bootstrap-sfetch-verified.sh"
+SCRIPT_SHA256="<digest>"
+curl -fsSL "$SCRIPT_URL" -o /tmp/bootstrap-sfetch-verified.sh
+echo "${SCRIPT_SHA256}  /tmp/bootstrap-sfetch-verified.sh" | shasum -a 256 -c
+bash /tmp/bootstrap-sfetch-verified.sh --version "${SFETCH_VERSION}" --dir "$HOME/.local/bin"
 ```
 
 ### Non-root container users
@@ -163,13 +174,16 @@ jobs:
       options: --user 1001
     steps:
       - uses: actions/checkout@v4
-      - name: Install tools
+      - uses: 3leaps/sfetch/.github/actions/setup-sfetch@<commit-sha>
+        with:
+          sfetch-version: v0.4.11
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          SFETCH_GITHUB_TOKEN: ${{ github.token }}
+      - name: Use sfetch
         run: |
-          BIN_DIR="$HOME/.local/bin"
-          mkdir -p "$BIN_DIR"
-          curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash -s -- --yes --dir "$BIN_DIR"
-          export PATH="$BIN_DIR:$PATH"
-          sfetch --repo owner/repo --latest --dest-dir "$BIN_DIR"
+          sfetch --repo owner/repo --tag v1.2.3 --dest-dir "$HOME/.local/bin" --require-minisign
 ```
 
 If you need to install system packages (e.g., `apt-get install`), you may temporarily need root access:
@@ -206,15 +220,26 @@ Or use POSIX-compatible options only:
 
 ## GitLab CI Example
 
+CI must use an immutable tag and the verified engine (never `releases/latest`):
+
 ```yaml
 install-tools:
   image: golang:1.23
+  variables:
+    SFETCH_VERSION: "v0.4.11"
+    # Pin the engine script to an immutable git SHA and its digest.
+    SFETCH_ENGINE_SHA: "<commit-sha>"
+    SFETCH_ENGINE_SHA256: "<digest>"
   script:
     - BIN_DIR="$HOME/.local/bin"
     - mkdir -p "$BIN_DIR"
-    - curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash -s -- --yes --dir "$BIN_DIR"
+    - |
+      curl -fsSL "https://raw.githubusercontent.com/3leaps/sfetch/${SFETCH_ENGINE_SHA}/scripts/bootstrap-sfetch-verified.sh" \
+        -o /tmp/bootstrap-sfetch-verified.sh
+      echo "${SFETCH_ENGINE_SHA256}  /tmp/bootstrap-sfetch-verified.sh" | shasum -a 256 -c
+      bash /tmp/bootstrap-sfetch-verified.sh --version "${SFETCH_VERSION}" --dir "$BIN_DIR"
     - export PATH="$BIN_DIR:$PATH"
-    - sfetch --repo owner/repo --latest --dest-dir "$BIN_DIR" --require-minisign
+    - sfetch --repo owner/repo --tag v1.2.3 --dest-dir "$BIN_DIR" --require-minisign
 ```
 
 ## Cache Directory
@@ -332,11 +357,14 @@ installs or asserts **minisign 0.12** from official jedisct1 release archives
 
 Windows maps `RUNNER_ARCH` X64 → `x86_64`, ARM64 → `aarch64`. **macOS Intel is
 not supported** by the upstream 0.12 macOS archive (arm64-only) and fails
-closed unless an ambient minisign 0.12 is already on PATH.
+closed.
 
-Do **not** use Chocolatey/winget community packages for the verified bootstrap
-path. Distro packages (apt/brew) are acceptable only when the binary reports
-exactly version 0.12 (the engine re-asserts identity after acquisition).
+Production and the composite action **always** download and hash-verify the
+pinned official archive. They never prefer ambient PATH minisign (a PATH shim
+must not become the verifier). Do **not** use Chocolatey/winget community
+packages for the verified bootstrap path. A test-only seam
+(`SFETCH_BOOTSTRAP_SKIP_MINISIGN_INSTALL=1`) exists for local fixtures and is
+scrubbed by the action.
 
 ## Incomplete release window
 

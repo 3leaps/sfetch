@@ -106,7 +106,7 @@ jobs:
           sfetch --version | tee /tmp/sfetch-ver.txt
           grep -E '0\.4\.10' /tmp/sfetch-ver.txt
 
-      - name: Fail-closed optional tool (goneat not requested; deliberate missing assert)
+      - name: Fail-closed optional tool (goneat not requested)
         shell: bash
         run: |
           set -euo pipefail
@@ -116,6 +116,21 @@ jobs:
           else
             echo "goneat absent as expected when goneat-version omitted"
           fi
+
+      - name: Fail-closed when requested goneat is unavailable
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Request a non-existent goneat tag; engine must exit non-zero (no soft skip).
+          if ./scripts/bootstrap-sfetch-verified.sh \
+              --version v0.4.10 \
+              --dir "$RUNNER_TEMP/goneat-fail" \
+              --goneat-version v0.0.0 \
+              --yes; then
+            echo "error: requested unavailable goneat must fail closed" >&2
+            exit 1
+          fi
+          echo "requested-goneat failure path OK"
 
       - name: Reject floating sfetch-version
         shell: bash
@@ -181,10 +196,13 @@ jobs:
         with:
           go-version: '1.26.5'
 
-      - name: Install minisign
-        shell: pwsh
+      # Pinned official minisign 0.12 archive (no Chocolatey/winget).
+      - name: Install pinned minisign 0.12
+        shell: bash
         run: |
-          choco install minisign -y --no-progress
+          set -euo pipefail
+          ./scripts/acquire-minisign-pinned.sh --dir "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build sfetch
         shell: pwsh
@@ -212,15 +230,13 @@ jobs:
         with:
           go-version: '1.26.5'
 
-      - name: Install minisign
-        shell: pwsh
+      # Pinned official minisign 0.12 archive (no Chocolatey/winget).
+      - name: Install pinned minisign 0.12
+        shell: bash
         run: |
-          if (Get-Command choco -ErrorAction SilentlyContinue) {
-            choco install minisign -y --no-progress
-          } else {
-            winget install -e --id FrankDenis.Minisign --silent `
-              --accept-source-agreements --accept-package-agreements
-          }
+          set -euo pipefail
+          ./scripts/acquire-minisign-pinned.sh --dir "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build sfetch
         shell: pwsh

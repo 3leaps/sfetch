@@ -131,4 +131,45 @@ fi
 grep -q 'install-sfetch.sh' "$GEN/SHA256SUMS" || fail "install-sfetch.sh should still be checksummed"
 pass "installer remains in checksums; minisig skipped"
 
+# Case 8: PGP-on-manifests-only when PGP is enabled (ephemeral key; no installer .asc)
+if command -v gpg >/dev/null 2>&1; then
+    GPG_HOME="${WORKDIR}/gnupg"
+    mkdir -p "$GPG_HOME"
+    chmod 700 "$GPG_HOME"
+    # Batch-generate an ephemeral RSA key (no passphrase)
+    cat >"${WORKDIR}/gpg-batch" <<EOF
+%no-protection
+Key-Type: RSA
+Key-Length: 2048
+Name-Real: sfetch-test
+Name-Email: sfetch-test@example.invalid
+Expire-Date: 0
+%commit
+EOF
+    gpg --homedir "$GPG_HOME" --batch --gen-key "${WORKDIR}/gpg-batch" >/dev/null 2>&1 ||
+        fail "ephemeral gpg keygen failed"
+    PGP_ID="$(gpg --homedir "$GPG_HOME" --list-keys --with-colons 2>/dev/null | awk -F: '/^pub/{print $5; exit}')"
+    [ -n "$PGP_ID" ] || fail "could not read ephemeral PGP key id"
+
+    PGP_DIR="${WORKDIR}/pgp"
+    mkdir -p "$PGP_DIR"
+    cp "$STAGE/install-sfetch.sh" "$PGP_DIR/"
+    cp "$STAGE/SHA256SUMS" "$PGP_DIR/"
+    cp "$STAGE/SHA512SUMS" "$PGP_DIR/"
+    SFETCH_MINISIGN_KEY="$KEY" \
+        SFETCH_PGP_KEY_ID="$PGP_ID" \
+        SFETCH_GPG_HOMEDIR="$GPG_HOME" \
+        ./scripts/sign-release-manifests.sh v0.0.0-pgp-test "$PGP_DIR"
+
+    [ -f "$PGP_DIR/SHA256SUMS.minisig" ] || fail "PGP path still needs SHA256SUMS.minisig"
+    [ -f "$PGP_DIR/SHA512SUMS.minisig" ] || fail "PGP path still needs SHA512SUMS.minisig"
+    [ -f "$PGP_DIR/install-sfetch.sh.minisig" ] || fail "PGP path still needs install-sfetch.sh.minisig"
+    [ -f "$PGP_DIR/SHA256SUMS.asc" ] || fail "PGP should sign SHA256SUMS"
+    [ -f "$PGP_DIR/SHA512SUMS.asc" ] || fail "PGP should sign SHA512SUMS"
+    [ ! -f "$PGP_DIR/install-sfetch.sh.asc" ] || fail "PGP must not sign install-sfetch.sh"
+    pass "PGP signs manifests only; installer minisign-only (no .asc)"
+else
+    pass "skip PGP target-set proof (gpg not available)"
+fi
+
 echo "[ok] release signature regression harness complete"
