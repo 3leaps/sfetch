@@ -97,8 +97,10 @@ assert_early_version_reject "v0.4.18446744073709551627" "huge-patch-wrap-into-ra
 
 PROD_PUBKEY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
 
-# Build a temporary engine: optional test pubkey, fixed BASE_URL, ambient minisign.
-# Ambient minisign is injected only into the temporary copy (not production).
+# Build a temporary engine: optional test pubkey + fixed BASE_URL for sfetch assets.
+# Minisign always comes from the engine's pinned 0.12 download (not ambient PATH).
+# CI runners often ship distro minisign 0.11; using ambient would fail the 0.12 assert
+# and is not how production runs.
 make_fixture_engine() {
     local dest="$1" base_url="$2" pubkey="${3-}"
     local src="$SCRIPT"
@@ -108,22 +110,6 @@ make_fixture_engine() {
     sed -i.bak \
         's|BASE_URL="https://github.com/${REPO}/releases/download"|BASE_URL="'"${base_url}"'"|' \
         "$dest"
-    # Force ambient minisign at start of ensure_minisign (fixture-only).
-    # Insert after "ensure_minisign() {"
-    awk '
-      /^ensure_minisign\(\) \{$/ {
-        print
-        print "    # FIXTURE: ambient minisign (temporary harness copy only)"
-        print "    command -v minisign >/dev/null 2>&1 || die \"fixture requires ambient minisign\""
-        print "    MINISIGN_BIN=\"$(command -v minisign)\""
-        print "    assert_minisign_version"
-        print "    log \"fixture ambient minisign: ${MINISIGN_BIN}\""
-        print "    return 0"
-        next
-      }
-      { print }
-    ' "$dest" >"${dest}.new"
-    mv "${dest}.new" "$dest"
     if [ -n "$pubkey" ]; then
         sed -i.bak "s|${PROD_PUBKEY}|${pubkey}|g" "$dest"
         grep -q "$pubkey" "$dest" || fail "patched engine missing test pubkey"

@@ -103,7 +103,8 @@ jobs:
         run: |
           set -euo pipefail
           command -v sfetch
-          sfetch --version | tee /tmp/sfetch-ver.txt
+          # sfetch --version writes to stderr (not stdout)
+          sfetch --version 2>&1 | tee /tmp/sfetch-ver.txt
           grep -E '0\.4\.10' /tmp/sfetch-ver.txt
 
       - name: Fail-closed optional tool (goneat not requested)
