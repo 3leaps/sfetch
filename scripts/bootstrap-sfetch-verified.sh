@@ -593,8 +593,11 @@ case "$ROUTE" in
         ;;
 esac
 
-# Execute only after verification (never pipe curl | bash)
+# Execute only after verification (never pipe curl | bash).
+# install-sfetch.sh requires minisign on PATH for its own SHA256SUMS verify;
+# export the same pinned binary we already acquired (temp dir is not on PATH).
 log "executing verified installer for ${VERSION} → ${INSTALL_DIR}"
+export PATH="$(dirname "${MINISIGN_BIN}"):${PATH}"
 # shellcheck disable=SC2086
 bash "$SCRIPT" --tag "$VERSION" --dir "$INSTALL_DIR" --yes --require-minisign
 
