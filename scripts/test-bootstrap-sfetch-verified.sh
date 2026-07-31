@@ -50,6 +50,8 @@ if "$SCRIPT" --version v0.4.12 --dir /tmp 2>/dev/null; then fail "above max shou
 # F2: leading-zero components must not pass range/route selection
 if "$SCRIPT" --version v0.4.09 --dir /tmp 2>/dev/null; then fail "v0.4.09 leading zero should fail"; else pass "rejects v0.4.09 leading zero"; fi
 if "$SCRIPT" --version v0.04.11 --dir /tmp 2>/dev/null; then fail "v0.04.11 leading zero should fail"; else pass "rejects v0.04.11 leading zero"; fi
+# Huge components must not wrap through Bash integer arithmetic into the supported range.
+if "$SCRIPT" --version v18446744073709551616.4.10 --dir /tmp 2>/dev/null; then fail "huge component should fail before route/network"; else pass "rejects huge component before range accept"; fi
 
 # --- Helpers: patch temporary engines for fixtures (never production seams) ---
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/sft-boot-test.XXXXXX")"

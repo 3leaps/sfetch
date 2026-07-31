@@ -71,9 +71,35 @@ is_exact_semver_tag() {
     [[ "$1" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
 }
 
+# Compare two non-negative integer decimal strings without machine arithmetic.
+# Inputs must already be digits-only with no leading zeros (except "0").
+# Longer digit string is larger; equal length uses C-locale lexical order.
+_semver_cmp_component() {
+    local x="$1" y="$2"
+    local lx=${#x} ly=${#y}
+    if [ "$lx" -lt "$ly" ]; then
+        echo -1
+        return 0
+    fi
+    if [ "$lx" -gt "$ly" ]; then
+        echo 1
+        return 0
+    fi
+    if [ "$x" = "$y" ]; then
+        echo 0
+        return 0
+    fi
+    # Equal width digit strings: C-locale lexical order == numeric order.
+    if [ "$(printf '%s\n%s\n' "$x" "$y" | LC_ALL=C sort | head -n1)" = "$x" ]; then
+        echo -1
+    else
+        echo 1
+    fi
+}
+
 # Compare two vX.Y.Z tags: echo -1 / 0 / 1 for a<b / a==b / a>b.
 # Fail loudly (return non-zero, no stdout) on non-canonical components —
-# never fall through to "equal" on arithmetic error.
+# never use Bash integer arithmetic (overflow would fail open on range).
 semver_cmp() {
     local a="${1#v}" b="${2#v}"
     local a1 a2 a3 b1 b2 b3
@@ -93,20 +119,18 @@ semver_cmp() {
                 ;;
         esac
     done
-    # Force base-10 integer comparison (avoid bash octal pitfalls).
-    if [ "$((10#$a1))" -ne "$((10#$b1))" ]; then
-        if [ "$((10#$a1))" -lt "$((10#$b1))" ]; then echo -1; else echo 1; fi
+    local r
+    r="$(_semver_cmp_component "$a1" "$b1")"
+    if [ "$r" != "0" ]; then
+        echo "$r"
         return 0
     fi
-    if [ "$((10#$a2))" -ne "$((10#$b2))" ]; then
-        if [ "$((10#$a2))" -lt "$((10#$b2))" ]; then echo -1; else echo 1; fi
+    r="$(_semver_cmp_component "$a2" "$b2")"
+    if [ "$r" != "0" ]; then
+        echo "$r"
         return 0
     fi
-    if [ "$((10#$a3))" -ne "$((10#$b3))" ]; then
-        if [ "$((10#$a3))" -lt "$((10#$b3))" ]; then echo -1; else echo 1; fi
-        return 0
-    fi
-    echo 0
+    _semver_cmp_component "$a3" "$b3"
 }
 
 semver_ge() {
