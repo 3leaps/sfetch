@@ -76,8 +76,7 @@ jobs:
           "$DEST/sfetch" --version
 
   # Dual-route consumer matrix: action thin-wraps the shared engine.
-  # v0.4.10 exercises sha256sums (backward pin). minisig route is unit-tested
-  # until v0.4.11 is published; after publish, add sfetch-version: v0.4.11 here.
+  # Default pin exercises minisig (v0.4.11+). Ubuntu also proves sha256sums on v0.4.10.
   setup-sfetch-matrix:
     name: setup-sfetch (${{ matrix.os }})
     strategy:
@@ -93,10 +92,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Setup sfetch via composite action (v0.4.10 sha256sums route)
+      - name: Setup sfetch via composite action (v0.4.11 minisig route)
         uses: ./.github/actions/setup-sfetch
         with:
-          sfetch-version: v0.4.10
+          sfetch-version: v0.4.11
 
       - name: Assert sfetch on PATH
         shell: bash
@@ -105,7 +104,7 @@ jobs:
           command -v sfetch
           # sfetch --version writes to stderr (not stdout)
           sfetch --version 2>&1 | tee /tmp/sfetch-ver.txt
-          grep -E '0\.4\.10' /tmp/sfetch-ver.txt
+          grep -E '0\.4\.11' /tmp/sfetch-ver.txt
 
       - name: Fail-closed optional tool (goneat not requested)
         shell: bash
@@ -124,7 +123,7 @@ jobs:
           set -euo pipefail
           # Request a non-existent goneat tag; engine must exit non-zero (no soft skip).
           if ./scripts/bootstrap-sfetch-verified.sh \
-              --version v0.4.10 \
+              --version v0.4.11 \
               --dir "$RUNNER_TEMP/goneat-fail" \
               --goneat-version v0.0.0 \
               --yes; then
@@ -132,6 +131,21 @@ jobs:
             exit 1
           fi
           echo "requested-goneat failure path OK"
+
+      - name: Backward pin v0.4.10 sha256sums route (ubuntu only)
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/setup-sfetch
+        with:
+          sfetch-version: v0.4.10
+          install-dir: ${{ runner.temp }}/sfetch-v0410
+
+      - name: Assert backward pin binary
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${RUNNER_TEMP}/sfetch-v0410/sfetch" --version 2>&1 | tee /tmp/sfetch-0410.txt
+          grep -E '0\.4\.10' /tmp/sfetch-0410.txt
 
       - name: Reject floating sfetch-version
         shell: bash
