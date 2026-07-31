@@ -69,7 +69,7 @@ export SFETCH_GPG_HOMEDIR=/path/to/custom/gpg/homedir   # optional, defaults to 
    make release-checksums
    ```
 
-4. **Verify checksums**
+4. **Verify checksums** (fail-closed: missing/empty manifests and bad hashes fail)
    ```bash
    make release-verify-checksums
    ```
@@ -96,6 +96,12 @@ export SFETCH_GPG_HOMEDIR=/path/to/custom/gpg/homedir   # optional, defaults to 
    make release-verify-keys
    ```
 
+   Or run the full post-signing chain in one step:
+
+   ```bash
+   make release-verify
+   ```
+
 9. **Copy release notes** (requires `docs/releases/$RELEASE_TAG.md`)
    ```bash
    make release-notes
@@ -105,12 +111,13 @@ export SFETCH_GPG_HOMEDIR=/path/to/custom/gpg/homedir   # optional, defaults to 
     ```bash
     make release-upload
     ```
-    > **Note:** This uploads ALL assets with `--clobber`, including binaries CI already uploaded.
+    > **Note:** This target depends on `release-verify` (checksums + signatures + keys).
+    > It uploads ALL assets with `--clobber`, including binaries CI already uploaded.
     > This is intentional for idempotency - rerun safely to fix any mistakes.
     >
     > If `../scoop-bucket` is present, this target also runs `make update-scoop-manifest` at the end so the bucket is ready for commit/push immediately after release upload.
     >
-    > To upload provenance only (manifests, signatures, keys, notes):
+    > To upload provenance only (manifests, signatures, keys, notes) — also requires `release-verify`:
     > ```bash
     > make release-upload-provenance
     > ```
