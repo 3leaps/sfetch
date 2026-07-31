@@ -25,7 +25,13 @@ Why this matters: `make release-upload` now uploads the signed GitHub release as
 ## 1. Prepare & Tag
 
 - [ ] Ensure `main` is clean and `make precommit` passes
-- [ ] Update `VERSION` file with new semver (e.g., `0.2.0`)
+- [ ] Update `VERSION` file with new semver (e.g., `0.4.12`)
+- [ ] **Advance verified-bootstrap range constants** (required every release — missing bump fails consumers, not sfetch CI, unless you run the assert):
+  - [ ] Set `SFETCH_BOOTSTRAP_MAX` in `scripts/bootstrap-sfetch-verified.sh` to `v$(cat VERSION)` (committed constant — **do not** derive at engine runtime from `VERSION` or the consumer tree)
+  - [ ] Review `SFETCH_MINISIG_SINCE` (first tag that publishes `install-sfetch.sh.minisig`). Wrong value mis-routes (3-step vs 5-step); both routes still verify, but route selection is part of the contract
+  - [ ] Update boundary tests in `scripts/test-bootstrap-sfetch-verified.sh` (e.g. assert `v(MAX+1)` is refused)
+  - [ ] Run `make test-bootstrap-range-release` (or full `make precommit`) — asserts `SFETCH_BOOTSTRAP_MAX == v$(cat VERSION)` and `MINISIG_SINCE` ∈ `[MIN, MAX]`
+  - [ ] After merge/tag, publish the new **action SHA** (and engine script digest if documenting Makefile consumers) — action SHA and `sfetch-version` pins are coupled in time; consumers advancing the pin must also advance the action ref when the range expands
 - [ ] Update `CHANGELOG.md` (move Unreleased to new version section)
 - [ ] Update `RELEASE_NOTES.md`
 - [ ] Create `docs/releases/vX.Y.Z.md`
@@ -146,7 +152,14 @@ export SFETCH_GPG_HOMEDIR=/path/to/custom/gpg/homedir   # optional, defaults to 
 ## 3. Post-Release
 
 - [ ] Verify release: `gh release view v$(cat VERSION)`
-- [ ] Test install script: `curl -sSfL .../install-sfetch.sh | bash -s -- --dry-run`
+- [ ] Smoke-test install via the **verified engine** (not pipe-to-bash), against the just-published tag:
+  ```bash
+  TAG=v$(cat VERSION)
+  DEST=$(mktemp -d)
+  ./scripts/bootstrap-sfetch-verified.sh --version "$TAG" --dir "$DEST" --yes
+  "$DEST/sfetch" --version   # must report $TAG
+  ```
+  (After first publish of this tag's signatures; draft/unsigned releases are non-consumable.)
 - [ ] Verify binary version: `sfetch --version` shows correct version
 - [ ] Commit and push `../scoop-bucket` after confirming `bucket/sfetch.json` has the right version and hashes
 - [ ] Test on local Windows VM: `scoop bucket add 3leaps <path-or-url>` then `scoop install sfetch`

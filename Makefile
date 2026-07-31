@@ -61,7 +61,7 @@ CORPUS_DEST ?= test-corpus
 .PHONY: release-verify-key release-verify-minisign-pubkey release-verify-keys release-verify-signatures release-verify
 .PHONY: release-clean bootstrap-script build-all gosec gosec-high update-scoop-manifest
 .PHONY: version-check version-set version-patch version-minor version-major
-.PHONY: print-sfetch-version test-release-verify-checksums test-release-verify-signatures test-bootstrap-sfetch-verified
+.PHONY: print-sfetch-version test-release-verify-checksums test-release-verify-signatures test-bootstrap-sfetch-verified test-bootstrap-range-release
 
 all: build
 
@@ -213,6 +213,7 @@ precommit: ## Run pre-commit checks (goneat assess + Go tests + build)
 	$(MAKE) test-release-verify-checksums
 	$(MAKE) test-release-verify-signatures
 	$(MAKE) test-bootstrap-sfetch-verified
+	$(MAKE) test-bootstrap-range-release
 	@echo "[ok] Pre-commit checks passed"
 
 prepush: precommit ## Run pre-push checks (same as precommit + security)
@@ -287,6 +288,9 @@ test-release-verify-signatures: ## Regression: required installer minisig + sign
 
 test-bootstrap-sfetch-verified: ## Regression: dual-route bootstrap rejects + fail-closed
 	@./scripts/test-bootstrap-sfetch-verified.sh
+
+test-bootstrap-range-release: ## Assert MAX==v(VERSION) and MINISIG_SINCE in range (committed constants)
+	@./scripts/assert-bootstrap-range-release.sh
 
 release-notes: ## Copy release notes into dist/release
 	@if [ -z "$(RELEASE_TAG)" ]; then echo "error: RELEASE_TAG not set" >&2; exit 1; fi

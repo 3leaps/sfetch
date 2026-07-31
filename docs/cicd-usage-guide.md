@@ -68,6 +68,16 @@ Never fall back from a failed `.minisig` attempt to checksums.
 `action.yml` into consumer repos (that re-creates the drift the action exists
 to eliminate).
 
+**Pin coupling (action SHA ↔ `sfetch-version`):** each action commit freezes a
+supported version range (`SFETCH_BOOTSTRAP_MIN`..`SFETCH_BOOTSTRAP_MAX` in the
+engine at that SHA). A new sfetch release that raises the ceiling requires a
+new action SHA that includes the advanced constants — bumping only
+`sfetch-version` without moving the action ref fails closed with
+`outside supported range`. That is intentional (fail-closed on unknown
+versions). Plan consumer upgrades as **two coordinated pins**: action SHA and
+exact tag. Do not read `VERSION` from a consumer workspace to “auto-advance”
+the range at runtime; the range is a committed property of the pinned action.
+
 ### Makefile / shell: shared engine (D2b)
 
 ```bash

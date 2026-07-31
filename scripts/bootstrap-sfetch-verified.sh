@@ -33,9 +33,17 @@ set -euo pipefail
 # Supported sfetch-version range for THIS script revision. Outside range ⇒ fail.
 # Action SHA identifies this contract; consumers pin the action/script, then a
 # version within the range it declares.
+#
+# Do NOT derive MAX/MIN/MINISIG_SINCE from VERSION or any path at runtime —
+# that would float the pinned contract and reintroduce a workspace trust seam.
+# Advance these constants at release-prep time (RELEASE_CHECKLIST.md §1);
+# make test-bootstrap-range-release asserts MAX == v$(cat VERSION) using two
+# committed values at the same SHA (never self-advancing at install time).
 readonly SFETCH_BOOTSTRAP_MIN="v0.4.9"
 readonly SFETCH_BOOTSTRAP_MAX="v0.4.11"
-# First release that publishes install-sfetch.sh.minisig
+# First release that publishes install-sfetch.sh.minisig (route selection).
+# Keep this accurate: too low → minisig route without asset; too high → 5-step
+# when 3-step exists. Both routes verify; neither silently falls back.
 readonly SFETCH_MINISIG_SINCE="v0.4.11"
 
 # Embedded trust anchor — must match scripts/sfetch-minisign-anchor.pub (SSOT),
