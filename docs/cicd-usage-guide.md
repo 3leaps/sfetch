@@ -33,10 +33,64 @@ This is fragile and version-dependent—upgrading is recommended.
 
 ## GitHub Actions Examples
 
-### Basic usage (recommended)
+### Recommended: composite action (v0.4.11+)
+
+Pin the action by **commit SHA** (not a moving tag). The action embeds the
+supported `sfetch-version` range for that SHA and fails closed outside it.
 
 ```yaml
-- name: Install sfetch + tool
+- uses: 3leaps/sfetch/.github/actions/setup-sfetch@<commit-sha>
+  with:
+    sfetch-version: v0.4.11          # exact tag; never latest
+    goneat-version: v0.5.15          # optional; exact tag if set
+  env:
+    GITHUB_TOKEN: ${{ github.token }}
+    GH_TOKEN: ${{ github.token }}
+    SFETCH_GITHUB_TOKEN: ${{ github.token }}
+
+- name: Use sfetch
+  run: |
+    sfetch --version
+    sfetch --repo owner/repo --tag v1.2.3 --dest-dir "$HOME/.local/bin" --require-minisign
+```
+
+**Dual-route behavior (logged as `route=minisig` or `route=sha256sums`):**
+
+| `sfetch-version` | Verification |
+|------------------|--------------|
+| ≥ v0.4.11 | Detached `install-sfetch.sh.minisig` |
+| v0.4.9 – v0.4.10 | Signed `SHA256SUMS` + installer hash |
+| outside action range / `latest` | **Fail closed** |
+
+Never fall back from a failed `.minisig` attempt to checksums.
+
+**Adoption mode:** link the action by SHA from this repository. Do not copy
+`action.yml` into consumer repos (that re-creates the drift the action exists
+to eliminate).
+
+### Makefile / shell: shared engine (D2b)
+
+```bash
+# Prefer in-repo script when developing sfetch itself:
+./scripts/bootstrap-sfetch-verified.sh --version v0.4.11 --dir "$HOME/.local/bin"
+
+# Other repos: fetch at an immutable SHA, verify digest, then execute.
+# Replace <sha> and <digest> with values published for the release you trust.
+SCRIPT_URL="https://raw.githubusercontent.com/3leaps/sfetch/<sha>/scripts/bootstrap-sfetch-verified.sh"
+SCRIPT_SHA256="<digest>"
+curl -fsSL "$SCRIPT_URL" -o /tmp/bootstrap-sfetch-verified.sh
+echo "${SCRIPT_SHA256}  /tmp/bootstrap-sfetch-verified.sh" | shasum -a 256 -c
+bash /tmp/bootstrap-sfetch-verified.sh --version v0.4.11 --dir "$HOME/.local/bin"
+```
+
+`latest` is refused by the engine (and by the action). Interactive humans may
+still use `install-sfetch.sh` from a pinned tag or, carefully, from `latest`;
+CI and Makefile recipes must use exact tags.
+
+### Legacy pipe-to-bash (still works; not recommended)
+
+```yaml
+- name: Install sfetch + tool (legacy)
   env:
     GITHUB_TOKEN: ${{ github.token }}
     GH_TOKEN: ${{ github.token }}
@@ -46,20 +100,18 @@ This is fragile and version-dependent—upgrading is recommended.
     BIN_DIR="$HOME/.local/bin"
     mkdir -p "$BIN_DIR"
 
-    # Install sfetch
-    curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash -s -- --yes --dir "$BIN_DIR"
+    # Prefer a pinned tag. Avoid releases/latest in CI.
+    SFETCH_VERSION="v0.4.10"
+    curl -sSfL "https://github.com/3leaps/sfetch/releases/download/${SFETCH_VERSION}/install-sfetch.sh" \
+      | bash -s -- --yes --dir "$BIN_DIR" --tag "$SFETCH_VERSION" --require-minisign
     export PATH="$BIN_DIR:$PATH"
 
-    # Install your tool (sfetch handles cross-device automatically)
-    sfetch --repo owner/repo --latest --dest-dir "$BIN_DIR" --require-minisign
-
-    # Verify
-    tool --version
+    sfetch --repo owner/repo --tag v1.2.3 --dest-dir "$BIN_DIR" --require-minisign
 ```
 
 Exporting all three token variables at job or workflow scope keeps `sfetch`, `gh`, and child processes on authenticated GitHub API requests by default.
 
-### With explicit version pinning
+### With explicit version pinning (legacy installer)
 
 ```yaml
 - name: Install tools (pinned versions)
@@ -69,11 +121,10 @@ Exporting all three token variables at job or workflow scope keeps `sfetch`, `gh
     mkdir -p "$BIN_DIR"
     export PATH="$BIN_DIR:$PATH"
 
-    # Install sfetch (pinned; choose the minimum version you require)
-    SFETCH_VERSION="v0.2.6"
-    curl -sSfL "https://github.com/3leaps/sfetch/releases/download/${SFETCH_VERSION}/install-sfetch.sh" | bash -s -- --yes --dir "$BIN_DIR"
+    SFETCH_VERSION="v0.4.10"
+    curl -sSfL "https://github.com/3leaps/sfetch/releases/download/${SFETCH_VERSION}/install-sfetch.sh" \
+      | bash -s -- --yes --dir "$BIN_DIR" --tag "$SFETCH_VERSION" --require-minisign
 
-    # Install tool (pinned)
     sfetch --repo owner/repo --tag v1.2.3 --dest-dir "$BIN_DIR" --require-minisign
 ```
 
@@ -266,3 +317,30 @@ precedence model.
 - [Examples & Pattern Matching](examples.md) - Real-world verification examples
 - [Security Documentation](security.md) - Verification workflows explained
 - [Key Handling](key-handling.md) - PGP and minisign key configuration
+
+## Minisign provenance (verifier pin)
+
+`minisign` is part of the trust-critical path. The verified bootstrap engine
+installs or asserts **minisign 0.12** from official jedisct1 release archives
+(hash-pinned before extract):
+
+| Platform | Artifact | SHA-256 |
+|----------|----------|---------|
+| Windows x64 / arm64 | `minisign-0.12-win64.zip` | `37b600344e20c19314b2e82813db2bfdcc408b77b876f7727889dbd46d539479` |
+| macOS arm64 | `minisign-0.12-macos.zip` | `89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63` |
+| Linux x86_64 / aarch64 | `minisign-0.12-linux.tar.gz` | `9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73` |
+
+Windows maps `RUNNER_ARCH` X64 → `x86_64`, ARM64 → `aarch64`. **macOS Intel is
+not supported** by the upstream 0.12 macOS archive (arm64-only) and fails
+closed unless an ambient minisign 0.12 is already on PATH.
+
+Do **not** use Chocolatey/winget community packages for the verified bootstrap
+path. Distro packages (apt/brew) are acceptable only when the binary reports
+exactly version 0.12 (the engine re-asserts identity after acquisition).
+
+## Incomplete release window
+
+Between tag CI (draft + unsigned installer upload) and maintainer
+`make release-upload` + publish, a release is **non-consumable** for verified
+bootstrap. Consumers must not treat draft assets or an unsigned installer as a
+trust anchor. Prefer exact tags over `latest` so you never race that window.

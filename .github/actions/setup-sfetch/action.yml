@@ -1,0 +1,142 @@
+---
+# setup-sfetch — verified sfetch bootstrap for GitHub Actions
+#
+# Public contract (additive-only inputs after first release):
+#   sfetch-version  (required)  exact tag in this action SHA's supported range
+#   goneat-version  (optional)  exact tag; no floating default
+#   install-dir     (optional)  binary install directory
+#
+# Trust model:
+#   Consumers pin this action by commit SHA (not a moving tag). That SHA is the
+#   TCB for the verification engine — same model as actions/checkout.
+#   The sfetch trust anchor is embedded in the engine script; never fetched from
+#   the release being authenticated.
+#
+# Dual-route (selected by sfetch-version; logged; no silent fallback):
+#   >= v0.4.11 → install-sfetch.sh.minisig
+#   <  v0.4.11 → signed SHA256SUMS + installer hash
+#
+# Fail-closed: no continue-on-error, no || true soft skips, no @latest tools,
+# no Go toolchain requirement.
+#
+# Supported sfetch-version range is declared by the engine revision shipped with
+# this action SHA (see scripts/bootstrap-sfetch-verified.sh constants).
+name: "Setup sfetch"
+description: "Install a pinned, minisign-verified sfetch (optional goneat) without pipe-to-bash"
+author: "3leaps"
+
+inputs:
+  sfetch-version:
+    description: >-
+      Exact sfetch release tag (vMAJOR.MINOR.PATCH). Required. Never "latest". Must fall within the supported range of this action commit SHA.
+    required: true
+  goneat-version:
+    description: >-
+      Optional exact goneat release tag to install via verified sfetch after sfetch is installed. Empty means skip goneat. Never "latest".
+    required: false
+    default: ""
+  install-dir:
+    description: >-
+      Directory for installed binaries. Default: $HOME/.local/bin (created).
+    required: false
+    default: ""
+
+outputs:
+  sfetch-bin:
+    description: "Absolute path to the installed sfetch binary"
+    value: ${{ steps.install.outputs.sfetch-bin }}
+  goneat-bin:
+    description: "Absolute path to goneat when goneat-version was set"
+    value: ${{ steps.install.outputs.goneat-bin }}
+  route:
+    description: "Verification route taken (minisig or sha256sums)"
+    value: ${{ steps.install.outputs.route }}
+
+runs:
+  using: composite
+  steps:
+    - name: Verified sfetch install
+      id: install
+      shell: bash
+      env:
+        INPUT_SFETCH_VERSION: ${{ inputs.sfetch-version }}
+        INPUT_GONEAT_VERSION: ${{ inputs.goneat-version }}
+        INPUT_INSTALL_DIR: ${{ inputs.install-dir }}
+      run: |
+        set -euo pipefail
+
+        # Resolve engine: prefer same-repo scripts/ relative to this action
+        # (full repo tree is available for monorepo path actions).
+        ACTION_ROOT="${GITHUB_ACTION_PATH}"
+        ENGINE="${ACTION_ROOT}/../../../scripts/bootstrap-sfetch-verified.sh"
+        if [ ! -f "${ENGINE}" ]; then
+          # Fallback: workspace checkout of sfetch (same-repo CI)
+          if [ -f "${GITHUB_WORKSPACE}/scripts/bootstrap-sfetch-verified.sh" ]; then
+            ENGINE="${GITHUB_WORKSPACE}/scripts/bootstrap-sfetch-verified.sh"
+          else
+            echo "error: bootstrap-sfetch-verified.sh not found relative to action or workspace" >&2
+            exit 1
+          fi
+        fi
+        ENGINE="$(cd "$(dirname "${ENGINE}")" && pwd)/$(basename "${ENGINE}")"
+        chmod +x "${ENGINE}"
+
+        VERSION="${INPUT_SFETCH_VERSION:-}"
+        if [ -z "${VERSION}" ]; then
+          echo "error: sfetch-version is required" >&2
+          exit 1
+        fi
+        case "${VERSION}" in
+          latest|LATEST|main|master|HEAD|"")
+            echo "error: sfetch-version must be an exact tag (refusing ${VERSION:-empty})" >&2
+            exit 1
+            ;;
+        esac
+
+        DIR="${INPUT_INSTALL_DIR:-}"
+        if [ -z "${DIR}" ]; then
+          DIR="${HOME}/.local/bin"
+        fi
+        mkdir -p "${DIR}"
+
+        ARGS=(--version "${VERSION}" --dir "${DIR}" --yes)
+        if [ -n "${INPUT_GONEAT_VERSION:-}" ]; then
+          case "${INPUT_GONEAT_VERSION}" in
+            latest|LATEST)
+              echo "error: goneat-version must be an exact tag (refusing ${INPUT_GONEAT_VERSION})" >&2
+              exit 1
+              ;;
+          esac
+          ARGS+=(--goneat-version "${INPUT_GONEAT_VERSION}")
+        fi
+
+        # Capture route from stderr log while still failing closed on non-zero.
+        LOG="$(mktemp)"
+        set +e
+        OUT="$("${ENGINE}" "${ARGS[@]}" 2>"${LOG}")"
+        RC=$?
+        set -e
+        cat "${LOG}" >&2
+        if [ "${RC}" -ne 0 ]; then
+          echo "error: verified bootstrap failed (exit ${RC})" >&2
+          exit "${RC}"
+        fi
+
+        ROUTE="$(grep -E 'route=(minisig|sha256sums)' "${LOG}" | tail -n1 | sed -E 's/.*route=([a-z0-9]+).*/\1/' || true)"
+        SFETCH_BIN="$(printf '%s\n' "${OUT}" | awk -F= '/^sfetch-bin=/{print $2; exit}')"
+        GONEAT_BIN="$(printf '%s\n' "${OUT}" | awk -F= '/^goneat-bin=/{print $2; exit}')"
+        rm -f "${LOG}"
+
+        if [ -z "${SFETCH_BIN}" ] || [ ! -f "${SFETCH_BIN}" ]; then
+          echo "error: sfetch binary path missing after bootstrap" >&2
+          exit 1
+        fi
+
+        echo "${DIR}" >> "${GITHUB_PATH}"
+        {
+          echo "sfetch-bin=${SFETCH_BIN}"
+          echo "goneat-bin=${GONEAT_BIN}"
+          echo "route=${ROUTE}"
+        } >> "${GITHUB_OUTPUT}"
+
+        echo "setup-sfetch complete: version=${VERSION} route=${ROUTE} sfetch-bin=${SFETCH_BIN}"

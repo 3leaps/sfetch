@@ -39,7 +39,8 @@ Why this matters: `make release-upload` now uploads the signed GitHub release as
 - [ ] Wait for GitHub Actions release workflow to complete
   - CI validates VERSION file matches tag
   - Builds unsigned archives
-  - Uploads install-sfetch.sh
+  - Creates a **draft** release and uploads install-sfetch.sh
+  - Release remains non-consumable until you sign, upload signatures, and publish
 
 ## 2. Manual Signing (local machine)
 
@@ -74,13 +75,17 @@ export SFETCH_GPG_HOMEDIR=/path/to/custom/gpg/homedir   # optional, defaults to 
    make release-verify-checksums
    ```
 
-5. **Sign checksum manifests** with minisign + PGP
+5. **Sign checksum manifests + installer** with minisign (+ optional PGP on manifests)
    ```bash
    make release-sign
    ```
-   Produces: `SHA256SUMS`, `SHA512SUMS` plus `.minisig`/`.asc`
+   Produces:
+   - `SHA256SUMS.minisig`, `SHA512SUMS.minisig` (minisign)
+   - **`install-sfetch.sh.minisig` (minisign, required)** — second password prompt is expected
+   - optional `SHA256SUMS.asc` / `SHA512SUMS.asc` if `SFETCH_PGP_KEY_ID` is set
+   - PGP does **not** sign the installer
 
-6. **Verify signatures**
+6. **Verify signatures** (installer minisig required — missing fails the gate)
    ```bash
    make release-verify-signatures
    ```
@@ -113,6 +118,13 @@ export SFETCH_GPG_HOMEDIR=/path/to/custom/gpg/homedir   # optional, defaults to 
     ```
     > **Note:** This target depends on `release-verify` (checksums + signatures + keys).
     > It uploads ALL assets with `--clobber`, including binaries CI already uploaded.
+    > `install-sfetch.sh.minisig` is required; upload refuses a missing installer signature.
+    > Tag CI creates a **draft** release — after upload, publish:
+    > ```bash
+    > gh release edit v$(cat VERSION) --draft=false
+    > ```
+    > Until publish, the release is incomplete / non-consumable for bootstrap consumers.
+    >
     > This is intentional for idempotency - rerun safely to fix any mistakes.
     >
     > If `../scoop-bucket` is present, this target also runs `make update-scoop-manifest` at the end so the bucket is ready for commit/push immediately after release upload.

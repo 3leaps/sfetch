@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Verify release signatures (minisign and optional PGP) on checksum manifests.
+# Verify release signatures (minisign and optional PGP).
 #
 # Usage: verify-signatures.sh [dir]
 #
 # Env:
 #   SFETCH_MINISIGN_PUB - path to minisign public key (required for minisign)
 #   SFETCH_GPG_HOMEDIR  - isolated gpg homedir for PGP verification (optional)
+#
+# Policy (deliberate divergence — do not re-harmonise without a lock):
+#   - install-sfetch.sh.minisig is REQUIRED. Missing signature ⇒ non-zero exit.
+#     This is the gate that prevents declaring a release consumable before the
+#     installer is signed (bootstrap consumers must not race the pre-signature window).
+#   - SHA256SUMS / SHA512SUMS minisign: optional-skip when absent (legacy path);
+#     if present, verification must pass.
+#   - PGP (.asc) remains optional: skip when absent; verify when present.
 
 DIR=${1:-dist/release}
 
@@ -22,7 +30,31 @@ SFETCH_GPG_HOMEDIR=${SFETCH_GPG_HOMEDIR:-}
 verified=0
 failed=0
 
-verify_minisign() {
+require_minisign_tool() {
+    if ! command -v minisign >/dev/null 2>&1; then
+        echo "error: minisign not found in PATH" >&2
+        failed=$((failed + 1))
+        return 1
+    fi
+    return 0
+}
+
+require_minisign_pub() {
+    if [ -z "${SFETCH_MINISIGN_PUB}" ]; then
+        echo "error: SFETCH_MINISIGN_PUB not set, cannot verify minisign signatures" >&2
+        failed=$((failed + 1))
+        return 1
+    fi
+    if [ ! -f "${SFETCH_MINISIGN_PUB}" ]; then
+        echo "error: SFETCH_MINISIGN_PUB=${SFETCH_MINISIGN_PUB} not found" >&2
+        failed=$((failed + 1))
+        return 1
+    fi
+    return 0
+}
+
+# Optional: skip when signature file is absent (manifests only).
+verify_minisign_optional() {
     local manifest="$1"
     local base="${DIR}/${manifest}"
     local sig="${base}.minisig"
@@ -32,23 +64,8 @@ verify_minisign() {
         return 0
     fi
 
-    if [ -z "${SFETCH_MINISIGN_PUB}" ]; then
-        echo "⚠️  SFETCH_MINISIGN_PUB not set, cannot verify ${manifest}.minisig"
-        failed=$((failed + 1))
-        return 1
-    fi
-
-    if [ ! -f "${SFETCH_MINISIGN_PUB}" ]; then
-        echo "error: SFETCH_MINISIGN_PUB=${SFETCH_MINISIGN_PUB} not found" >&2
-        failed=$((failed + 1))
-        return 1
-    fi
-
-    if ! command -v minisign >/dev/null 2>&1; then
-        echo "error: minisign not found in PATH" >&2
-        failed=$((failed + 1))
-        return 1
-    fi
+    require_minisign_pub || return 1
+    require_minisign_tool || return 1
 
     echo "🔍 [minisign] Verifying ${manifest}"
     if minisign -V -p "${SFETCH_MINISIGN_PUB}" -m "${base}"; then
@@ -56,6 +73,40 @@ verify_minisign() {
         verified=$((verified + 1))
     else
         echo "❌ ${manifest}.minisig verification FAILED"
+        failed=$((failed + 1))
+    fi
+}
+
+# Required: missing signature is a hard failure (installer only).
+verify_minisign_required() {
+    local target="$1"
+    local base="${DIR}/${target}"
+    local sig="${base}.minisig"
+
+    if [ ! -f "${base}" ]; then
+        echo "❌ required file missing: ${target}"
+        failed=$((failed + 1))
+        return 1
+    fi
+
+    if [ ! -f "${sig}" ]; then
+        # POLICY: installer signature is required — no skip-on-missing.
+        # (Manifests may still skip via verify_minisign_optional; do not merge.)
+        echo "❌ required minisign signature missing: ${target}.minisig"
+        echo "   Release is incomplete until the installer is signed (make release-sign)."
+        failed=$((failed + 1))
+        return 1
+    fi
+
+    require_minisign_pub || return 1
+    require_minisign_tool || return 1
+
+    echo "🔍 [minisign] Verifying ${target} (required)"
+    if minisign -V -p "${SFETCH_MINISIGN_PUB}" -m "${base}"; then
+        echo "✅ ${target}.minisig verified"
+        verified=$((verified + 1))
+    else
+        echo "❌ ${target}.minisig verification FAILED"
         failed=$((failed + 1))
     fi
 }
@@ -94,8 +145,11 @@ verify_pgp() {
 echo "Verifying release signatures in ${DIR}..."
 echo ""
 
-verify_minisign "SHA256SUMS"
-verify_minisign "SHA512SUMS"
+# Required first so a missing installer signature fails before optional skips.
+verify_minisign_required "install-sfetch.sh"
+
+verify_minisign_optional "SHA256SUMS"
+verify_minisign_optional "SHA512SUMS"
 
 echo ""
 

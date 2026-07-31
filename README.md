@@ -208,8 +208,35 @@ INSTALL_BINDIR=~/bin make install  # override install location
 
 ### Bootstrap install
 
+**Recommended (v0.4.11+):** verify the installer before execution.
+
 ```bash
-# Using curl
+# Three-step path when install-sfetch.sh.minisig is published (v0.4.11+)
+TAG=v0.4.11
+curl -fsSL "https://github.com/3leaps/sfetch/releases/download/${TAG}/install-sfetch.sh" -o install-sfetch.sh
+curl -fsSL "https://github.com/3leaps/sfetch/releases/download/${TAG}/install-sfetch.sh.minisig" -o install-sfetch.sh.minisig
+minisign -Vm install-sfetch.sh -P RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC
+bash install-sfetch.sh --tag "$TAG" --yes
+
+# Or use the shared engine (CI/Makefile; refuses "latest"):
+# ./scripts/bootstrap-sfetch-verified.sh --version v0.4.11 --dir ~/.local/bin
+```
+
+**GitHub Actions:** pin the composite action by commit SHA — see [CI/CD Usage Guide](docs/cicd-usage-guide.md).
+
+```yaml
+- uses: 3leaps/sfetch/.github/actions/setup-sfetch@<commit-sha>
+  with:
+    sfetch-version: v0.4.11
+```
+
+#### Quick install (interactive humans)
+
+Prefer a pinned tag. `latest` is fine for interactive use only — CI and Makefile
+bootstrap **refuse** floating refs.
+
+```bash
+# Using curl (human interactive)
 curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh | bash
 
 # Using wget
@@ -225,7 +252,7 @@ Pass arguments using `bash -s --`:
 curl -sSfL .../install-sfetch.sh | bash -s -- --dir ~/bin
 
 # Install specific version
-curl -sSfL .../install-sfetch.sh | bash -s -- --tag v0.2.0
+curl -sSfL .../install-sfetch.sh | bash -s -- --tag v0.4.11
 
 # Dry run (download and verify, don't install)
 curl -sSfL .../install-sfetch.sh | bash -s -- --dry-run
@@ -242,9 +269,7 @@ The installer:
 - Requires minisign verification by default using the embedded trust anchor
 - Optional GPG fallback with pinned fingerprint; checksum-only requires explicit `--allow-checksum-only`
 
-#### Verify before piping to bash
-
-For users who prefer to verify the installer before execution:
+#### Verify via signed SHA256SUMS (pins ≤ v0.4.10)
 
 ```bash
 # Detect OS-appropriate SHA256 command (macOS uses shasum, Linux uses sha256sum)
@@ -254,47 +279,32 @@ else
   SHA_CMD="shasum -a 256"
 fi
 
-# Download assets (curl)
-curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh -o install-sfetch.sh
-curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS -o SHA256SUMS
-
-# Download assets (wget alternative - use -O to overwrite existing files)
-# wget -qO install-sfetch.sh https://github.com/3leaps/sfetch/releases/latest/download/install-sfetch.sh
-# wget -qO SHA256SUMS https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS
-
-# Option A: Verify with minisign (recommended)
-curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS.minisig -o SHA256SUMS.minisig
+TAG=v0.4.10
+curl -sSfL "https://github.com/3leaps/sfetch/releases/download/${TAG}/install-sfetch.sh" -o install-sfetch.sh
+curl -sSfL "https://github.com/3leaps/sfetch/releases/download/${TAG}/SHA256SUMS" -o SHA256SUMS
+curl -sSfL "https://github.com/3leaps/sfetch/releases/download/${TAG}/SHA256SUMS.minisig" -o SHA256SUMS.minisig
 minisign -Vm SHA256SUMS -P RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC
 $SHA_CMD -c SHA256SUMS --ignore-missing
-
-# Option B: Verify with GPG (uses temp keyring)
-curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/SHA256SUMS.asc -o SHA256SUMS.asc
-curl -sSfL https://github.com/3leaps/sfetch/releases/latest/download/sfetch-release-signing-key.asc -o sfetch-release-signing-key.asc
-GPG_TMPDIR=$(mktemp -d)
-gpg --homedir "$GPG_TMPDIR" --import sfetch-release-signing-key.asc
-gpg --homedir "$GPG_TMPDIR" --verify SHA256SUMS.asc SHA256SUMS
-rm -rf "$GPG_TMPDIR"
-$SHA_CMD -c SHA256SUMS --ignore-missing
-
-# Run after verification
-bash install-sfetch.sh
+bash install-sfetch.sh --tag "$TAG"
 ```
 
 ### Manual signing workflow
 
-CI uploads unsigned archives. Maintainers generate `SHA256SUMS` and `SHA512SUMS` locally, then sign them with minisign (primary) and optionally PGP:
+Tag CI creates a **draft** release with unsigned archives. Maintainers generate
+`SHA256SUMS` / `SHA512SUMS`, sign them **and** `install-sfetch.sh` with minisign
+(optional PGP on manifests only), verify, upload, then publish the draft:
 
 ```bash
-export MINISIGN_KEY=/path/to/sfetch.key
-export PGP_KEY_ID=security@fulmenhq.dev  # optional
+export SFETCH_MINISIGN_KEY=/path/to/sfetch.key
+export SFETCH_PGP_KEY_ID=security@fulmenhq.dev  # optional
 
-RELEASE_TAG=v0.2.0 make release-download
-RELEASE_TAG=v0.2.0 make release-checksums
-RELEASE_TAG=v0.2.0 make release-sign
-make release-export-minisign-key
-make release-export-key                   # if using PGP
-RELEASE_TAG=v0.2.0 make release-notes
-RELEASE_TAG=v0.2.0 make release-upload
+RELEASE_TAG=v0.4.11 make release-download
+RELEASE_TAG=v0.4.11 make release-checksums
+RELEASE_TAG=v0.4.11 make release-sign      # signs manifests + install-sfetch.sh
+make release-verify
+RELEASE_TAG=v0.4.11 make release-notes
+RELEASE_TAG=v0.4.11 make release-upload
+gh release edit v0.4.11 --draft=false      # publish only after signatures upload
 ```
 
 Set `RELEASE_TAG` to the tag you're publishing. The scripts in `scripts/` can be used individually if you prefer manual control.

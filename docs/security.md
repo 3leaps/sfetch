@@ -128,27 +128,94 @@ discoverable from the error message.
 
 ## Manual release signing
 
-CI uploads unsigned archives only. Maintainers generate and sign checksum manifests (`SHA256SUMS`, `SHA512SUMS`) locally with minisign (primary) and optionally PGP:
+Tag CI creates a **draft** release and uploads unsigned platform archives plus
+`install-sfetch.sh`. The draft is **incomplete / non-consumable** for verified
+bootstrap until the maintainer signs and publishes.
+
+Maintainers download artifacts, generate checksums, and sign **locally** with
+minisign (primary) and optionally PGP:
 
 ```bash
-export MINISIGN_KEY=/path/to/key.key
-export PGP_KEY_ID=your-key-id  # optional
+export SFETCH_MINISIGN_KEY=/path/to/key.key
+export SFETCH_MINISIGN_PUB=/path/to/key.pub
+export SFETCH_PGP_KEY_ID=your-key-id  # optional
 
-RELEASE_TAG=v0.2.0 make release-download
-RELEASE_TAG=v0.2.0 make release-checksums
-RELEASE_TAG=v0.2.0 make release-sign
+RELEASE_TAG=v0.4.11 make release-download
+RELEASE_TAG=v0.4.11 make release-checksums
+RELEASE_TAG=v0.4.11 make release-sign
 make release-verify-signatures
 make release-export-keys
 make release-verify-keys
-RELEASE_TAG=v0.2.0 make release-notes
-RELEASE_TAG=v0.2.0 make release-upload
+RELEASE_TAG=v0.4.11 make release-notes
+RELEASE_TAG=v0.4.11 make release-upload
+gh release edit v0.4.11 --draft=false
 ```
 
-Only the checksum manifests are signed (not individual files). Users verify the signature on `SHA256SUMS`/`SHA512SUMS`, then verify archive checksums against them. This is standard practice - signing individual files would be redundant.
+### What is signed (v0.4.11+)
 
-Installer hardening: `scripts/install-sfetch.sh` now requires minisign verification by default (embedded trust anchor). GPG fallback is pinned by fingerprint. Checksum-only installs require explicit opt-in (`--allow-checksum-only`) and emit low-trust warnings.
+| Artifact | minisign | PGP |
+|----------|----------|-----|
+| `SHA256SUMS` / `SHA512SUMS` | yes | optional |
+| `install-sfetch.sh` | **yes (required)** | no |
+| Platform archives | covered by signed manifests | covered by signed manifests |
+
+**Why the installer is the one file signed outside the manifests:** consumers
+must execute it *before* any sfetch binary exists. A detached
+`install-sfetch.sh.minisig` makes the verified path three steps instead of five.
+All other assets remain covered by the signed checksum manifests (signing every
+archive would be redundant).
+
+`make release-verify-signatures` **requires** `install-sfetch.sh.minisig`
+(missing ⇒ non-zero). Manifest minisign signatures remain skip-if-absent for
+legacy staging; if present they must verify. Do not re-harmonise these branches
+without a deliberate lock — the installer requirement exists specifically to
+block incomplete releases.
+
+`SHA256SUMS` never lists `*.minisig` files (suffix skip in the checksum
+generator); a regression harness asserts this so the manifest cannot become
+self-referential.
+
+Installer runtime hardening: `scripts/install-sfetch.sh` requires minisign
+verification by default (embedded trust anchor). GPG fallback is pinned by
+fingerprint. Checksum-only installs require explicit opt-in
+(`--allow-checksum-only`) and emit low-trust warnings.
 
 See [docs/security/signing-runbook.md](security/signing-runbook.md) for detailed workflow.
+
+### Trust-anchor rotation
+
+The minisign public key is embedded in:
+
+- `main.go` (`EmbeddedMinisignPubkey`)
+- `scripts/install-sfetch.sh`
+- `scripts/bootstrap-sfetch-verified.sh`
+
+All three must stay identical. The published `sfetch-minisign.pub` on each
+release is for **human out-of-band comparison only** — verification tools must
+not fetch the key from the same release they are authenticating (circular).
+
+If the key ever rotates:
+
+1. Announce the rotation in release notes and a security advisory *before* the
+   first release signed with the new key.
+2. Publish the new public key through a channel independent of a single GitHub
+   release (project site / signed mailing list / prior release notes).
+3. Bump major tooling that hard-codes the old key; consumers who pin the old
+   key must update deliberately — a rotation will look like a signature failure
+   by design.
+4. Do not silently dual-sign with both keys without documenting the transition
+   window.
+
+### `--require-minisign` default asymmetry
+
+| Surface | Default | Rationale |
+|---------|---------|-----------|
+| `install-sfetch.sh` | **require minisign = true** | Bootstrap path; no prior binary trust |
+| CLI (`sfetch`) | **require minisign = false** | Works against releases that only ship checksums / PGP; opt-in strictness via `--require-minisign` |
+
+Same flag name, opposite defaults — intentional. Do not "tidy" them into one
+behavior without a migration plan; CI examples should pass `--require-minisign`
+on the CLI explicitly.
 
 ## Verifying Your Installation
 

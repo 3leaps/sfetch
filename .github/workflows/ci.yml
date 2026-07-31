@@ -66,6 +66,67 @@ jobs:
           echo "Install smoke pin: $TAG (make print-sfetch-version)"
           bash scripts/install-sfetch.sh --dry-run --tag "$TAG" --require-minisign
 
+      - name: Live verified bootstrap (N-1 SHA256SUMS route)
+        run: |
+          set -euo pipefail
+          TAG=$(make -s print-sfetch-version)
+          DEST="$RUNNER_TEMP/sfetch-bootstrap-live"
+          mkdir -p "$DEST"
+          ./scripts/bootstrap-sfetch-verified.sh --version "$TAG" --dir "$DEST" --yes
+          "$DEST/sfetch" --version
+
+  # Dual-route consumer matrix: action thin-wraps the shared engine.
+  # v0.4.10 exercises sha256sums (backward pin). minisig route is unit-tested
+  # until v0.4.11 is published; after publish, add sfetch-version: v0.4.11 here.
+  setup-sfetch-matrix:
+    name: setup-sfetch (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: macos-latest
+          - os: windows-latest
+          # Named org runner when available
+          - os: windows-latest-arm64-s
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup sfetch via composite action (v0.4.10 sha256sums route)
+        uses: ./.github/actions/setup-sfetch
+        with:
+          sfetch-version: v0.4.10
+
+      - name: Assert sfetch on PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v sfetch
+          sfetch --version | tee /tmp/sfetch-ver.txt
+          grep -E '0\.4\.10' /tmp/sfetch-ver.txt
+
+      - name: Fail-closed optional tool (goneat not requested; deliberate missing assert)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # goneat must not be soft-installed when not requested
+          if command -v goneat >/dev/null 2>&1; then
+            echo "note: ambient goneat present on runner (not installed by action)"
+          else
+            echo "goneat absent as expected when goneat-version omitted"
+          fi
+
+      - name: Reject floating sfetch-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Exercise engine reject path directly (action would also fail)
+          if ./scripts/bootstrap-sfetch-verified.sh --version latest --dir "$RUNNER_TEMP/bad" --yes; then
+            echo "error: latest must be rejected" >&2
+            exit 1
+          fi
+
   container-probe:
     name: Install probe (container)
     runs-on: ubuntu-latest
