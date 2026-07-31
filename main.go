@@ -255,16 +255,29 @@ const (
 // minisignPubkeyRegex matches a valid minisign public key line (with or without comment header)
 var minisignPubkeyRegex = regexp.MustCompile(`^RW[A-Za-z0-9+/]{54}$`)
 
-// Embedded trust anchors for self-verification and transparency.
-// Users can compare these against keys published at:
-//   - https://github.com/3leaps/sfetch/releases (sfetch-minisign.pub)
-//   - scripts/install-sfetch.sh (SFETCH_MINISIGN_PUBKEY)
+// Canonical minisign trust anchor SSOT: scripts/sfetch-minisign-anchor.pub
+// EmbeddedMinisignPubkey is derived from that file (go:embed). Standalone
+// consumers (install-sfetch.sh, bootstrap-sfetch-verified.sh) embed the same
+// RW line and are checked against the SSOT in tests / release verify.
 //
-// Changing these keys requires updating both this file and install-sfetch.sh.
-const (
-	EmbeddedMinisignPubkey = "RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
-	EmbeddedMinisignKeyID  = "3leaps/sfetch release signing key"
-)
+//go:embed scripts/sfetch-minisign-anchor.pub
+var embeddedMinisignPubFile string
+
+// EmbeddedMinisignPubkey is the RW… line from scripts/sfetch-minisign-anchor.pub.
+var EmbeddedMinisignPubkey = mustMinisignPubkeyLine(embeddedMinisignPubFile)
+
+// EmbeddedMinisignKeyID is a human label for the release signing key.
+const EmbeddedMinisignKeyID = "3leaps/sfetch release signing key"
+
+func mustMinisignPubkeyLine(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "RW") && len(line) == 56 {
+			return line
+		}
+	}
+	panic("scripts/sfetch-minisign-anchor.pub: missing RW… public key line")
+}
 
 // minisignSecretkeyPrefixes are known prefixes for secret key files
 var minisignSecretkeyPrefixes = []string{

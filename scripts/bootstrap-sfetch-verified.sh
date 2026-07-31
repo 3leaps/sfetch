@@ -38,9 +38,9 @@ readonly SFETCH_BOOTSTRAP_MAX="v0.4.11"
 # First release that publishes install-sfetch.sh.minisig
 readonly SFETCH_MINISIG_SINCE="v0.4.11"
 
-# Embedded trust anchor — must match EmbeddedMinisignPubkey in main.go and
-# scripts/install-sfetch.sh. Do NOT fetch sfetch-minisign.pub from the release
-# for authentication (circular: same origin as the artifact under test).
+# Embedded trust anchor — must match scripts/sfetch-minisign-anchor.pub (SSOT),
+# main.go (go:embed of that file), and scripts/install-sfetch.sh. Do NOT fetch
+# sfetch-minisign.pub from the release for authentication (circular).
 # The published .pub is for human out-of-band comparison only.
 readonly SFETCH_MINISIGN_PUBKEY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
 
@@ -66,39 +66,59 @@ die() {
 # -----------------------------------------------------------------------------
 # Semver helpers (tags must be vMAJOR.MINOR.PATCH, optional -prerelease rejected)
 # -----------------------------------------------------------------------------
+# Canonical numeric components only: no leading zeros (v0.4.09 / v0.04.11 rejected).
 is_exact_semver_tag() {
-    case "$1" in
-        v[0-9]*.[0-9]*.[0-9]*)
-            # Reject extra suffix (pre-release / build) and non-numeric parts
-            [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-            ;;
-        *) return 1 ;;
-    esac
+    [[ "$1" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
 }
 
-# Compare two vX.Y.Z tags: echo -1 / 0 / 1 for a<b / a==b / a>b
+# Compare two vX.Y.Z tags: echo -1 / 0 / 1 for a<b / a==b / a>b.
+# Fail loudly (return non-zero, no stdout) on non-canonical components —
+# never fall through to "equal" on arithmetic error.
 semver_cmp() {
     local a="${1#v}" b="${2#v}"
     local a1 a2 a3 b1 b2 b3
     IFS=. read -r a1 a2 a3 <<<"$a"
     IFS=. read -r b1 b2 b3 <<<"$b"
-    if ((a1 != b1)); then
-        if ((a1 < b1)); then echo -1; else echo 1; fi
-        return
+    local c
+    for c in "$a1" "$a2" "$a3" "$b1" "$b2" "$b3"; do
+        case "$c" in
+            '' | *[!0-9]*)
+                log "error: semver_cmp: non-numeric component in $1 vs $2"
+                return 2
+                ;;
+            0) ;;
+            0*)
+                log "error: semver_cmp: leading zero in component ($c) for $1 vs $2"
+                return 2
+                ;;
+        esac
+    done
+    # Force base-10 integer comparison (avoid bash octal pitfalls).
+    if [ "$((10#$a1))" -ne "$((10#$b1))" ]; then
+        if [ "$((10#$a1))" -lt "$((10#$b1))" ]; then echo -1; else echo 1; fi
+        return 0
     fi
-    if ((a2 != b2)); then
-        if ((a2 < b2)); then echo -1; else echo 1; fi
-        return
+    if [ "$((10#$a2))" -ne "$((10#$b2))" ]; then
+        if [ "$((10#$a2))" -lt "$((10#$b2))" ]; then echo -1; else echo 1; fi
+        return 0
     fi
-    if ((a3 != b3)); then
-        if ((a3 < b3)); then echo -1; else echo 1; fi
-        return
+    if [ "$((10#$a3))" -ne "$((10#$b3))" ]; then
+        if [ "$((10#$a3))" -lt "$((10#$b3))" ]; then echo -1; else echo 1; fi
+        return 0
     fi
     echo 0
 }
 
-semver_ge() { [[ "$(semver_cmp "$1" "$2")" != "-1" ]]; }
-semver_le() { [[ "$(semver_cmp "$1" "$2")" != "1" ]]; }
+semver_ge() {
+    local r
+    r="$(semver_cmp "$1" "$2")" || die "semver comparison failed for $1 vs $2"
+    [[ "$r" != "-1" ]]
+}
+semver_le() {
+    local r
+    r="$(semver_cmp "$1" "$2")" || die "semver comparison failed for $1 vs $2"
+    [[ "$r" != "1" ]]
+}
 
 # -----------------------------------------------------------------------------
 # Args
@@ -228,6 +248,13 @@ if [ "$OS" = "darwin" ] && [ "$ARCH" = "x86_64" ]; then
     die "macOS x86_64 is not supported by the pinned minisign 0.12 macOS archive (arm64-only); use an arm64 runner"
 fi
 
+# Reject unsafe TMPDIR characters before any path-derived shelling out (F3).
+case "${TMPDIR:-}" in
+    *\'* | *\"* | *$'\n'* | *$'\r'*)
+        die "TMPDIR contains quote or newline characters (unsafe for path handling)"
+        ;;
+esac
+
 # -----------------------------------------------------------------------------
 # Temp workspace (private; cleaned on exit)
 # -----------------------------------------------------------------------------
@@ -237,10 +264,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$INSTALL_DIR"
-INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd)"
-
-# Install mode continues below; acquire-minisign-only jumps after helpers load.
+# Resolve install dir path without creating it yet (validate before side effects).
+# acquire-minisign-only / install mode create the directory after validation.
+_parent="$(dirname "$INSTALL_DIR")"
+if [ -d "$_parent" ]; then
+    INSTALL_DIR="$(cd "$_parent" && pwd)/$(basename "$INSTALL_DIR")"
+fi
+unset _parent
 
 # -----------------------------------------------------------------------------
 # HTTPS fetch with bounded retries
@@ -335,9 +365,11 @@ ensure_minisign() {
             if command -v unzip >/dev/null 2>&1; then
                 unzip -q -o "$zip" -d "${WORK}/minisign-extract"
             else
-                # PowerShell Expand-Archive on Windows runners
-                powershell.exe -NoProfile -Command \
-                    "Expand-Archive -LiteralPath '$zip' -DestinationPath '${WORK}/minisign-extract' -Force" ||
+                # PowerShell Expand-Archive via env vars (no path interpolation into -Command).
+                SFETCH_MINISIGN_ZIP_PATH="$zip" \
+                    SFETCH_MINISIGN_EXTRACT_PATH="${WORK}/minisign-extract" \
+                    powershell.exe -NoProfile -Command \
+                        'Expand-Archive -LiteralPath $env:SFETCH_MINISIGN_ZIP_PATH -DestinationPath $env:SFETCH_MINISIGN_EXTRACT_PATH -Force' ||
                     die "failed to extract minisign zip"
             fi
             local sub
@@ -399,6 +431,8 @@ assert_minisign_version() {
 
 # --acquire-minisign-only: shared acquisition path for CI Windows dogfood etc.
 if [ "$ACQUIRE_MINISIGN_ONLY" = "1" ]; then
+    mkdir -p "$INSTALL_DIR"
+    INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd)"
     MINISIGN_INSTALL_DIR="$INSTALL_DIR"
     ensure_minisign
     printf 'minisign-bin=%s\n' "$MINISIGN_BIN"
@@ -406,7 +440,7 @@ if [ "$ACQUIRE_MINISIGN_ONLY" = "1" ]; then
 fi
 
 # -----------------------------------------------------------------------------
-# Install mode: version / route validation
+# Install mode: version / route validation (before mkdir side effects)
 # -----------------------------------------------------------------------------
 [ -n "$VERSION" ] || die "--version is required"
 
@@ -433,6 +467,10 @@ fi
 if ! semver_ge "$VERSION" "$SFETCH_BOOTSTRAP_MIN" || ! semver_le "$VERSION" "$SFETCH_BOOTSTRAP_MAX"; then
     die "sfetch-version $VERSION outside supported range ${SFETCH_BOOTSTRAP_MIN}..${SFETCH_BOOTSTRAP_MAX} for this bootstrap revision"
 fi
+
+# Side effects only after version/range validation succeeds.
+mkdir -p "$INSTALL_DIR"
+INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd)"
 
 # Fixed download base (no env override — fixtures patch a temporary copy).
 BASE_URL="https://github.com/${REPO}/releases/download"

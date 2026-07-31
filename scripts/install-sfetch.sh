@@ -37,7 +37,8 @@ SFETCH_API="https://api.github.com/repos/${SFETCH_REPO}/releases"
 # This key is pinned here to prevent TOCTOU attacks where an attacker
 # could replace both the release artifacts and the verification key.
 #
-# IMPORTANT: This key must match EmbeddedMinisignPubkey in main.go
+# IMPORTANT: This key must match scripts/sfetch-minisign-anchor.pub (SSOT)
+# and EmbeddedMinisignPubkey in main.go (go:embed of that file).
 # Update both when rotating keys (see docs/security/signing-runbook.md)
 SFETCH_MINISIGN_PUBKEY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
 # Pinned PGP fingerprint (for optional fallback)

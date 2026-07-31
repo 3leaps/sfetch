@@ -29,6 +29,26 @@ SFETCH_GPG_HOMEDIR=${SFETCH_GPG_HOMEDIR:-}
 
 verified=0
 failed=0
+_anchor_checked=0
+
+# Canonical consumer-facing trust anchor SSOT (must match main.go embed,
+# install-sfetch.sh, and bootstrap-sfetch-verified.sh).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CANONICAL_ANCHOR_PUB="${SCRIPT_DIR}/sfetch-minisign-anchor.pub"
+
+extract_minisign_rw_line() {
+    local f="$1"
+    # Prefer a line that is exactly the RW key; fall back to first RW token.
+    local line
+    line="$(grep -E '^RW[A-Za-z0-9+/]{54}$' "$f" 2>/dev/null | head -n1 | tr -d '\r\n' || true)"
+    if [ -n "$line" ]; then
+        printf '%s\n' "$line"
+        return 0
+    fi
+    line="$(grep -E 'RW[A-Za-z0-9+/]{54}' "$f" 2>/dev/null | head -n1 | tr -d '\r\n' || true)"
+    # Extract the RW token if surrounded by other text
+    printf '%s\n' "$line" | grep -oE 'RW[A-Za-z0-9+/]{54}' | head -n1
+}
 
 require_minisign_tool() {
     if ! command -v minisign >/dev/null 2>&1; then
@@ -36,6 +56,43 @@ require_minisign_tool() {
         failed=$((failed + 1))
         return 1
     fi
+    return 0
+}
+
+# F1: gate must prove signatures verify against *the* consumer anchor, not an
+# arbitrary operator-supplied key that happens to match the signatures.
+assert_operator_pub_is_canonical_anchor() {
+    if [ "${_anchor_checked}" -eq 1 ]; then
+        return 0
+    fi
+    if [ ! -f "${CANONICAL_ANCHOR_PUB}" ]; then
+        echo "error: canonical trust anchor missing: ${CANONICAL_ANCHOR_PUB}" >&2
+        failed=$((failed + 1))
+        return 1
+    fi
+    local expect got
+    expect="$(extract_minisign_rw_line "${CANONICAL_ANCHOR_PUB}")"
+    got="$(extract_minisign_rw_line "${SFETCH_MINISIGN_PUB}")"
+    if [ -z "${expect}" ]; then
+        echo "error: canonical anchor has no RW… key line: ${CANONICAL_ANCHOR_PUB}" >&2
+        failed=$((failed + 1))
+        return 1
+    fi
+    if [ -z "${got}" ]; then
+        echo "error: SFETCH_MINISIGN_PUB has no RW… key line: ${SFETCH_MINISIGN_PUB}" >&2
+        failed=$((failed + 1))
+        return 1
+    fi
+    if [ "${got}" != "${expect}" ]; then
+        echo "error: SFETCH_MINISIGN_PUB does not match the canonical consumer trust anchor" >&2
+        echo "  expected (scripts/sfetch-minisign-anchor.pub): ${expect}" >&2
+        echo "  got (SFETCH_MINISIGN_PUB):                     ${got}" >&2
+        echo "  Signing with a non-consumer key would make the release gate green while" >&2
+        echo "  every bootstrap consumer fails against the embedded anchor." >&2
+        failed=$((failed + 1))
+        return 1
+    fi
+    _anchor_checked=1
     return 0
 }
 
@@ -50,6 +107,7 @@ require_minisign_pub() {
         failed=$((failed + 1))
         return 1
     fi
+    assert_operator_pub_is_canonical_anchor || return 1
     return 0
 }
 

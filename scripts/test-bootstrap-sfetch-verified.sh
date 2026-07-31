@@ -47,6 +47,9 @@ if "$SCRIPT" --version main --dir /tmp 2>/dev/null; then fail "main should fail"
 if "$SCRIPT" --version v0.4.11-rc1 --dir /tmp 2>/dev/null; then fail "prerelease should fail"; else pass "rejects prerelease"; fi
 if "$SCRIPT" --version v0.4.8 --dir /tmp 2>/dev/null; then fail "below min should fail"; else pass "rejects below min"; fi
 if "$SCRIPT" --version v0.4.12 --dir /tmp 2>/dev/null; then fail "above max should fail"; else pass "rejects above max"; fi
+# F2: leading-zero components must not pass range/route selection
+if "$SCRIPT" --version v0.4.09 --dir /tmp 2>/dev/null; then fail "v0.4.09 leading zero should fail"; else pass "rejects v0.4.09 leading zero"; fi
+if "$SCRIPT" --version v0.04.11 --dir /tmp 2>/dev/null; then fail "v0.04.11 leading zero should fail"; else pass "rejects v0.04.11 leading zero"; fi
 
 # --- Helpers: patch temporary engines for fixtures (never production seams) ---
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/sft-boot-test.XXXXXX")"
@@ -60,6 +63,12 @@ cleanup_harness() {
     rm -rf "${WORKDIR}"
 }
 trap cleanup_harness EXIT
+
+# Rejected inputs must not create install dirs (validate-before-side-effect)
+NO_SIDE="$WORKDIR/no-side"
+if "$SCRIPT" --version v0.4.09 --dir "$NO_SIDE" 2>/dev/null; then fail "v0.4.09 should fail"; fi
+[ ! -e "$NO_SIDE" ] || fail "rejected version must not create install dir"
+pass "rejected version has no mkdir side effect"
 
 PROD_PUBKEY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
 

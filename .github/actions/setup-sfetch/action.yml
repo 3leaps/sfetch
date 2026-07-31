@@ -73,7 +73,6 @@ runs:
         # Resolve single canonical engine inside the action repository checkout.
         # Nested composite actions live at .github/actions/<name>/; the package
         # root is three levels up. Never consult GITHUB_WORKSPACE (consumer).
-        ACTION_PATH_REAL="$(cd "${GITHUB_ACTION_PATH}" && pwd)"
         PACKAGE_ROOT="$(cd "${GITHUB_ACTION_PATH}/../../.." && pwd)"
         ENGINE="${PACKAGE_ROOT}/scripts/bootstrap-sfetch-verified.sh"
         if [ ! -f "${ENGINE}" ] || [ ! -r "${ENGINE}" ]; then
@@ -166,8 +165,9 @@ runs:
             ;;
         esac
 
-        SFETCH_BIN="$(printf '%s\n' "${OUT}" | awk -F= '/^sfetch-bin=/{print $2; exit}')"
-        GONEAT_BIN="$(printf '%s\n' "${OUT}" | awk -F= '/^goneat-bin=/{print $2; exit}')"
+        # Prefix strip (not field-split) so install paths containing '=' survive.
+        SFETCH_BIN="$(printf '%s\n' "${OUT}" | sed -n 's/^sfetch-bin=//p' | head -n1)"
+        GONEAT_BIN="$(printf '%s\n' "${OUT}" | sed -n 's/^goneat-bin=//p' | head -n1)"
 
         if [ -z "${SFETCH_BIN}" ] || [ ! -f "${SFETCH_BIN}" ]; then
           echo "error: sfetch binary path missing after bootstrap" >&2
