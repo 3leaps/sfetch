@@ -408,7 +408,7 @@ ensure_minisign() {
                 SFETCH_MINISIGN_ZIP_PATH="$zip" \
                     SFETCH_MINISIGN_EXTRACT_PATH="${WORK}/minisign-extract" \
                     powershell.exe -NoProfile -Command \
-                        'Expand-Archive -LiteralPath $env:SFETCH_MINISIGN_ZIP_PATH -DestinationPath $env:SFETCH_MINISIGN_EXTRACT_PATH -Force' ||
+                    'Expand-Archive -LiteralPath $env:SFETCH_MINISIGN_ZIP_PATH -DestinationPath $env:SFETCH_MINISIGN_EXTRACT_PATH -Force' ||
                     die "failed to extract minisign zip"
             fi
             local sub
