@@ -12,18 +12,18 @@
 # Usage:
 #   bootstrap-sfetch-verified.sh --version v0.4.11 --dir ~/.local/bin
 #   bootstrap-sfetch-verified.sh --version v0.4.10 --dir ./bin --goneat-version v0.5.15
+#   bootstrap-sfetch-verified.sh --acquire-minisign-only --dir PATH
 #
-# Env (test fixtures only — never set in production/CI action path):
-#   SFETCH_BOOTSTRAP_BASE_URL  Override GitHub download base
-#     (default: https://github.com/3leaps/sfetch/releases/download)
-#   SFETCH_BOOTSTRAP_SKIP_MINISIGN_INSTALL  If set to 1, use ambient minisign
-#     already on PATH (unit fixtures only). Production always downloads the
-#     pinned official 0.12 archive and hash-verifies it.
+# No runtime env overrides for trust-critical paths (download base, minisign
+# acquisition). Production always uses GitHub release URLs and always downloads
+# the hash-pinned official minisign 0.12 archive. Local harnesses patch a
+# temporary copy of this script for fixture URLs / ambient minisign.
 #
 # Makefile consumers outside this repo should retrieve this script at an
 # immutable git SHA and verify a pinned SHA-256 of the script before executing
-# it (see docs/cicd-usage-guide.md). The composite action trusts the script
-# via the pinned action SHA instead (engine is colocated under the action path).
+# it (see docs/cicd-usage-guide.md). The composite action is a thin wrapper:
+# it resolves this single canonical engine from the action repository checkout
+# at scripts/bootstrap-sfetch-verified.sh (never from the consumer workspace).
 #
 set -euo pipefail
 
@@ -126,9 +126,6 @@ Optional:
   --yes                  Non-interactive (always on for this script; accepted for CLI parity)
   --acquire-minisign-only  Only install pinned minisign (shared acquisition path for CI)
   -h, --help             Show help
-
-Env:
-  SFETCH_BOOTSTRAP_BASE_URL   Override download base (tests)
 EOF
     exit 2
 }
@@ -296,8 +293,8 @@ assert_sha256() {
 # -----------------------------------------------------------------------------
 MINISIGN_BIN=""
 
-# Exact whitespace-delimited version token match (same rules as
-# scripts/version-matches-pin.sh). Rejects suffix/prefix soft matches.
+# Exact whitespace-delimited version token match (authoritative for this engine).
+# Rejects substring soft matches and suffix/prefix extensions (e.g. 0.4.11-rc1).
 version_output_matches_pin() {
     local out="$1" pin="$2"
     local want="${pin#v}"
@@ -325,19 +322,9 @@ EOF
 MINISIGN_INSTALL_DIR="${WORK}/tools"
 
 ensure_minisign() {
-    # Test-only seam: ambient minisign with exact version identity.
-    # Production and the composite action never set this (action scrubs it).
-    if [ "${SFETCH_BOOTSTRAP_SKIP_MINISIGN_INSTALL:-0}" = "1" ]; then
-        command -v minisign >/dev/null 2>&1 ||
-            die "minisign required on PATH when SFETCH_BOOTSTRAP_SKIP_MINISIGN_INSTALL=1"
-        MINISIGN_BIN="$(command -v minisign)"
-        assert_minisign_version
-        log "using ambient minisign (test seam SFETCH_BOOTSTRAP_SKIP_MINISIGN_INSTALL=1): ${MINISIGN_BIN}"
-        return 0
-    fi
-
     # Always download + hash-verify the pinned upstream archive.
     # Do not prefer ambient PATH minisign (PATH shims must not become the verifier).
+    # No runtime env seam: fixture tests patch a temporary engine copy.
     local tools="${MINISIGN_INSTALL_DIR}"
     mkdir -p "$tools"
     case "$OS" in
@@ -447,7 +434,8 @@ if ! semver_ge "$VERSION" "$SFETCH_BOOTSTRAP_MIN" || ! semver_le "$VERSION" "$SF
     die "sfetch-version $VERSION outside supported range ${SFETCH_BOOTSTRAP_MIN}..${SFETCH_BOOTSTRAP_MAX} for this bootstrap revision"
 fi
 
-BASE_URL="${SFETCH_BOOTSTRAP_BASE_URL:-https://github.com/${REPO}/releases/download}"
+# Fixed download base (no env override — fixtures patch a temporary copy).
+BASE_URL="https://github.com/${REPO}/releases/download"
 ASSET_BASE="${BASE_URL}/${VERSION}"
 
 # Route selection (human log on stderr; machine field on stdout at end only).

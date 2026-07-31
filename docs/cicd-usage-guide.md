@@ -359,12 +359,13 @@ Windows maps `RUNNER_ARCH` X64 → `x86_64`, ARM64 → `aarch64`. **macOS Intel 
 not supported** by the upstream 0.12 macOS archive (arm64-only) and fails
 closed.
 
-Production and the composite action **always** download and hash-verify the
-pinned official archive. They never prefer ambient PATH minisign (a PATH shim
-must not become the verifier). Do **not** use Chocolatey/winget community
-packages for the verified bootstrap path. A test-only seam
-(`SFETCH_BOOTSTRAP_SKIP_MINISIGN_INSTALL=1`) exists for local fixtures and is
-scrubbed by the action.
+Production, Makefile D2b, and the composite action **always** download and
+hash-verify the pinned official archive. They never prefer ambient PATH
+minisign (a PATH shim must not become the verifier) and do not honor runtime
+env overrides for download base or verifier acquisition. Local regression
+harnesses patch a temporary engine copy when they need fixture URLs or ambient
+minisign. Do **not** use Chocolatey/winget community packages for the verified
+bootstrap path.
 
 ## Incomplete release window
 
