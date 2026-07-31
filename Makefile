@@ -45,7 +45,7 @@ BIN_DIR := $(CURDIR)/bin
 # pin (see .github/workflows/ci.yml). Always a fully-signed published release —
 # never "latest" and never the in-flight cut — so main CI cannot 404 during the
 # tag/upload window. Advance after each release publishes + signs.
-SFETCH_VERSION := v0.4.10
+SFETCH_VERSION := v0.4.11
 GONEAT_VERSION ?= v0.5.15
 GOVULNCHECK_VERSION ?= v1.6.0
 
@@ -85,9 +85,8 @@ help: ## Show this help
 # Trust chain: verified bootstrap script -> sfetch (N-1 pin) -> goneat
 #
 # N-1 pin (SFETCH_VERSION) is always a published release — never this cut.
-# At v0.4.11 the N-1 pin is v0.4.10, which has no install-sfetch.sh.minisig,
-# so the shared engine takes the signed SHA256SUMS route. From v0.4.12 onward
-# (when N-1 >= v0.4.11) the engine switches to the detached .minisig route.
+# N-1 pin is a published release. At/after v0.4.11 the engine takes the
+# detached install-sfetch.sh.minisig route when N-1 >= MINISIG_SINCE (v0.4.11).
 #
 # Do not pipe curl | bash here — that is the anti-pattern this release fixes.
 
