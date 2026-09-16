@@ -11,7 +11,7 @@
 #
 # Usage:
 #   bootstrap-sfetch-verified.sh --version v0.4.11 --dir ~/.local/bin
-#   bootstrap-sfetch-verified.sh --version v0.4.10 --dir ./bin --goneat-version v0.5.15
+#   bootstrap-sfetch-verified.sh --version v0.4.10 --dir ./bin --goneat-version v0.6.0
 #   bootstrap-sfetch-verified.sh --acquire-minisign-only --dir PATH
 #
 # No runtime env overrides for trust-critical paths (download base, minisign

@@ -460,7 +460,7 @@ STUB
     mkdir -p "$GONEAT_DIR"
     set +e
     OUT_GO="$WORKDIR/out-goneat-offline.txt"
-    "$GONEAT_ENG" --version v0.4.11 --dir "$GONEAT_DIR" --goneat-version v0.5.15 >"$OUT_GO" 2>&1
+    "$GONEAT_ENG" --version v0.4.11 --dir "$GONEAT_DIR" --goneat-version v0.6.0 >"$OUT_GO" 2>&1
     RC=$?
     set -e
     [ "$RC" -ne 0 ] || fail "goneat install failure must fail closed (log: $(cat "$OUT_GO"))"

@@ -16,7 +16,7 @@ jobs:
   create_release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
 
       # softprops/action-gh-release@v3 (Node 24) replaces the archived,
       # Node12-era actions/create-release@v1 + actions/upload-release-asset@v1
@@ -29,7 +29,7 @@ jobs:
       # via make release-upload. A published release without installer .minisig is
       # non-consumable for verified bootstrap; draft keeps it off "latest".
       - name: Create draft release and upload install script
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
         with:
           name: sfetch ${{ github.ref_name }}
           body: |
@@ -60,7 +60,7 @@ jobs:
           - goos: windows
             goarch: arm64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
 
       - name: Validate VERSION matches tag
         run: |
@@ -74,9 +74,9 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
-          go-version: '1.26.5'
+          go-version: '1.26.8'
 
       - name: License check
         # go-licenses v1.6.0 errors on stdlib packages ("Package fmt does not
@@ -131,7 +131,7 @@ jobs:
       # action-gh-release@v3 is idempotent on the tag; parallel matrix jobs each
       # upload a distinctly-named asset, so no upload_url plumbing is needed.
       - name: Upload Archive
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
         with:
           files: ${{ env.ASSET_FILE }}
 

@@ -46,8 +46,8 @@ BIN_DIR := $(CURDIR)/bin
 # never "latest" and never the in-flight cut — so main CI cannot 404 during the
 # tag/upload window. Advance after each release publishes + signs.
 SFETCH_VERSION := v0.4.11
-GONEAT_VERSION ?= v0.5.15
-GOVULNCHECK_VERSION ?= v1.6.0
+GONEAT_VERSION ?= v0.6.0
+GOVULNCHECK_VERSION ?= v1.8.0
 
 # Tool paths (sfetch bootstrap may land in bin/; goneat must be on PATH)
 SFETCH = $(shell [ -x "$(BIN_DIR)/sfetch" ] && echo "$(BIN_DIR)/sfetch" || command -v sfetch 2>/dev/null)
