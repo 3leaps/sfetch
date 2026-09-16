@@ -65,8 +65,9 @@ extract_const() {
 MAX="$(extract_const SFETCH_BOOTSTRAP_MAX)"
 MIN="$(extract_const SFETCH_BOOTSTRAP_MIN)"
 SINCE="$(extract_const SFETCH_MINISIG_SINCE)"
+PREVKEY="$(extract_const SFETCH_PREVKEY_MAX)"
 
-echo "bootstrap-range assert: VERSION=${VER} MAX=${MAX} MIN=${MIN} MINISIG_SINCE=${SINCE}"
+echo "bootstrap-range assert: VERSION=${VER} MAX=${MAX} MIN=${MIN} MINISIG_SINCE=${SINCE} PREVKEY_MAX=${PREVKEY}"
 
 [ "$MAX" = "$TAG" ] ||
     fail "SFETCH_BOOTSTRAP_MAX (${MAX}) must equal v\$(cat VERSION) (${TAG}). Advance the constant (and boundary tests) before cutting this release — see RELEASE_CHECKLIST.md §1."
@@ -137,4 +138,14 @@ semver_cmp_tag() {
 [ "$(semver_cmp_tag "$MIN" "$MAX")" != "1" ] ||
     fail "SFETCH_BOOTSTRAP_MIN (${MIN}) is above SFETCH_BOOTSTRAP_MAX (${MAX})"
 
-echo "[ok] bootstrap range coherent: MAX=${MAX} == VERSION tag; MINISIG_SINCE=${SINCE} in [${MIN}..${MAX}]"
+# PREVKEY_MAX is the last tag signed with the previous org key: a historical
+# fact, never advanced. Pins at or below it select the legacy anchor.
+[ "$PREVKEY" = "v0.4.11" ] ||
+    fail "SFETCH_PREVKEY_MAX (${PREVKEY}) must stay v0.4.11 (last previous-key tag)"
+# Sunset forcing function: once MIN advances past the cutoff, the legacy branch
+# is unreachable — delete it (and the LEGACY anchors) instead of leaving a dead
+# second root.
+[ "$(semver_cmp_tag "$PREVKEY" "$MIN")" != "-1" ] ||
+    fail "SFETCH_PREVKEY_MAX (${PREVKEY}) is below SFETCH_BOOTSTRAP_MIN (${MIN}): sunset — remove the legacy anchor path"
+
+echo "[ok] bootstrap range coherent: MAX=${MAX} == VERSION tag; MINISIG_SINCE=${SINCE} in [${MIN}..${MAX}]; PREVKEY_MAX=${PREVKEY}"

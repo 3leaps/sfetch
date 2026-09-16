@@ -8,6 +8,9 @@
 # Never falls back from a failed .minisig attempt to checksums.
 # Never accepts "latest", branches, or floating refs.
 # Trust anchor is embedded here — never fetched from the release being authenticated.
+# Pin map (tag -> exactly one pubkey): tags at or below SFETCH_PREVKEY_MAX verify
+# against the previous-key anchor; tags above verify against the current anchor.
+# Never tries both keys for one tag.
 #
 # Usage:
 #   bootstrap-sfetch-verified.sh --version v0.4.11 --dir ~/.local/bin
@@ -51,6 +54,16 @@ readonly SFETCH_MINISIG_SINCE="v0.4.11"
 # sfetch-minisign.pub from the release for authentication (circular).
 # The published .pub is for human out-of-band comparison only.
 readonly SFETCH_MINISIGN_PUBKEY="RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVqjKj3ctSA1"
+
+# Previous-key anchor, pin-scoped ONLY. SFETCH_PREVKEY_MAX is the last tag signed
+# with the previous org key (historical fact, never advance it): pins at or below
+# it verify against SFETCH_MINISIGN_PUBKEY_LEGACY; pins above verify against
+# SFETCH_MINISIGN_PUBKEY. Never try both keys for one tag, and never treat the
+# legacy anchor as a default trust anchor. Sunset: delete this constant and the
+# legacy selection branch once nothing in-tree pins <= SFETCH_PREVKEY_MAX (the
+# range-release assert fails once MIN advances past it, forcing the removal).
+readonly SFETCH_PREVKEY_MAX="v0.4.11"
+readonly SFETCH_MINISIGN_PUBKEY_LEGACY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
 
 readonly MINISIGN_VERSION_EXPECTED="0.12"
 readonly MINISIGN_WIN_URL="https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip"
@@ -522,14 +535,25 @@ if semver_ge "$VERSION" "$SFETCH_MINISIG_SINCE"; then
 else
     ROUTE="sha256sums"
 fi
-log "bootstrap-sfetch-verified: version=${VERSION} verify-route=${ROUTE} range=${SFETCH_BOOTSTRAP_MIN}..${SFETCH_BOOTSTRAP_MAX}"
+
+# Anchor selection: pin map, exactly one key per tag (VERSION is exact semver
+# and range-checked above, so the comparison cannot fail open).
+ANCHOR_GEN="current"
+ACTIVE_MINISIGN_PUBKEY="$SFETCH_MINISIGN_PUBKEY"
+if semver_le "$VERSION" "$SFETCH_PREVKEY_MAX"; then
+    ANCHOR_GEN="legacy"
+    ACTIVE_MINISIGN_PUBKEY="$SFETCH_MINISIGN_PUBKEY_LEGACY"
+fi
+log "bootstrap-sfetch-verified: version=${VERSION} verify-route=${ROUTE} anchor=${ANCHOR_GEN} range=${SFETCH_BOOTSTRAP_MIN}..${SFETCH_BOOTSTRAP_MAX}"
 
 write_pubkey() {
     local path="$1"
-    # minisign -p expects a file with optional comment + RW... key line
+    # minisign -p expects a file with optional comment + RW... key line.
+    # ACTIVE_MINISIGN_PUBKEY is the pin-selected anchor (never a second guess).
+    [ -n "${ACTIVE_MINISIGN_PUBKEY:-}" ] || die "internal error: anchor not selected"
     {
         echo "untrusted comment: sfetch release signing key (embedded trust anchor)"
-        echo "${SFETCH_MINISIGN_PUBKEY}"
+        echo "${ACTIVE_MINISIGN_PUBKEY}"
     } >"$path"
 }
 

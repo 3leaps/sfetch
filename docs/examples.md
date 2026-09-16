@@ -150,6 +150,8 @@ untrusted comment: 3leaps org release signing
 RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVqjKj3ctSA1
 ```
 
+Releases ≤ v0.4.11 publish the previous key asset instead; auto-detect selects the key from the release being verified.
+
 ## Minisign Workflow B: `jedisct1/minisign`
 
 Per-asset signing - signature directly over each asset. No checksum file.

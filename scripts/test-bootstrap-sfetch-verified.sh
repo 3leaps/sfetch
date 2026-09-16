@@ -96,13 +96,23 @@ assert_early_version_reject "v18446744073709551616.4.10" "huge-major-wrap-zero"
 assert_early_version_reject "v0.4.18446744073709551627" "huge-patch-wrap-into-range"
 
 PROD_PUBKEY="RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVqjKj3ctSA1"
+LEGACY_PUBKEY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
+
+# Harness pins must track the engine's anchors exactly; drift fails here, loudly.
+grep -q "SFETCH_MINISIGN_PUBKEY=\"$PROD_PUBKEY\"" "$SCRIPT" || fail "harness PROD_PUBKEY drifted from engine"
+grep -q "SFETCH_MINISIGN_PUBKEY_LEGACY=\"$LEGACY_PUBKEY\"" "$SCRIPT" || fail "harness LEGACY_PUBKEY drifted from engine"
+grep -q 'SFETCH_PREVKEY_MAX="v0.4.11"' "$SCRIPT" || fail "engine PREVKEY cutoff moved; update pin-map tests"
 
 # Build a temporary engine: optional test pubkey + fixed BASE_URL for sfetch assets.
 # Minisign always comes from the engine's pinned 0.12 download (not ambient PATH).
 # CI runners often ship distro minisign 0.11; using ambient would fail the 0.12 assert
 # and is not how production runs.
+#
+# varname selects which anchor the test pubkey replaces: pin-map tests must patch
+# exactly the anchor the requested pin selects, leaving the other production
+# anchor intact (patching both would mask selection bugs).
 make_fixture_engine() {
-    local dest="$1" base_url="$2" pubkey="${3-}"
+    local dest="$1" base_url="$2" pubkey="${3-}" varname="${4-}"
     local src="$SCRIPT"
     cp "$src" "$dest"
     # Fixed download base → fixture URL (literal, no env).
@@ -111,9 +121,25 @@ make_fixture_engine() {
         's|BASE_URL="https://github.com/${REPO}/releases/download"|BASE_URL="'"${base_url}"'"|' \
         "$dest"
     if [ -n "$pubkey" ]; then
-        sed -i.bak "s|${PROD_PUBKEY}|${pubkey}|g" "$dest"
+        [ -n "$varname" ] || fail "make_fixture_engine: varname required with pubkey"
+        local old other
+        case "$varname" in
+            SFETCH_MINISIGN_PUBKEY)
+                old="$PROD_PUBKEY"
+                other="$LEGACY_PUBKEY"
+                ;;
+            SFETCH_MINISIGN_PUBKEY_LEGACY)
+                old="$LEGACY_PUBKEY"
+                other="$PROD_PUBKEY"
+                ;;
+            *)
+                fail "make_fixture_engine: unknown anchor var $varname"
+                ;;
+        esac
+        sed -i.bak "s|${old}|${pubkey}|g" "$dest"
         grep -q "$pubkey" "$dest" || fail "patched engine missing test pubkey"
-        grep -q "$PROD_PUBKEY" "$dest" && fail "patched engine still has production pubkey"
+        grep -q "$old" "$dest" && fail "patched engine still has production $varname"
+        grep -q "$other" "$dest" || fail "patched engine lost the other anchor (must patch exactly one var)"
     fi
     rm -f "${dest}.bak"
     chmod +x "$dest"
@@ -128,6 +154,7 @@ OUT1040="$WORKDIR/out410.txt"
 "$ROUTE_ENG" --version v0.4.10 --dir "$WORKDIR/d410" >"$OUT1040" 2>&1
 set -e
 grep -Eq 'verify-route=sha256sums' "$OUT1040" || fail "v0.4.10 should select sha256sums (log: $(cat "$OUT1040"))"
+grep -Eq 'anchor=legacy' "$OUT1040" || fail "v0.4.10 should select legacy anchor (log: $(cat "$OUT1040"))"
 pass "v0.4.10 → verify-route=sha256sums"
 
 set +e
@@ -135,6 +162,7 @@ OUT411="$WORKDIR/out411.txt"
 "$ROUTE_ENG" --version v0.4.11 --dir "$WORKDIR/d411" >"$OUT411" 2>&1
 set -e
 grep -Eq 'verify-route=minisig' "$OUT411" || fail "v0.4.11 should select minisig (log: $(cat "$OUT411"))"
+grep -Eq 'anchor=legacy' "$OUT411" || fail "v0.4.11 should select legacy anchor (log: $(cat "$OUT411"))"
 pass "v0.4.11 → verify-route=minisig"
 
 # Production engine ignores inherited BASE_URL / SKIP env (no seams).
@@ -166,8 +194,25 @@ minisign -G -W -p "$PUB" -s "$KEY" >/dev/null 2>&1 ||
 TEST_PUBKEY="$(grep -E '^RW' "$PUB" | head -n1 | tr -d '\r\n')"
 [ -n "$TEST_PUBKEY" ] || fail "could not read test pubkey"
 
+# Second ephemeral pair: post-cutover selection tests need distinct legacy/current keys.
+OLDKEY="$WORKDIR/old.key"
+OLDPUB="$WORKDIR/old.pub"
+minisign -G -W -p "$OLDPUB" -s "$OLDKEY" >/dev/null 2>&1 ||
+    minisign -G -n -p "$OLDPUB" -s "$OLDKEY" >/dev/null 2>&1 ||
+    fail "keygen (legacy stand-in)"
+NEWKEY="$WORKDIR/new.key"
+NEWPUB="$WORKDIR/new.pub"
+minisign -G -W -p "$NEWPUB" -s "$NEWKEY" >/dev/null 2>&1 ||
+    minisign -G -n -p "$NEWPUB" -s "$NEWKEY" >/dev/null 2>&1 ||
+    fail "keygen (current stand-in)"
+OLD_EPHEMERAL_PUBKEY="$(grep -E '^RW' "$OLDPUB" | head -n1 | tr -d '\r\n')"
+NEW_EPHEMERAL_PUBKEY="$(grep -E '^RW' "$NEWPUB" | head -n1 | tr -d '\r\n')"
+[ -n "$OLD_EPHEMERAL_PUBKEY" ] || fail "could not read legacy stand-in pubkey"
+[ -n "$NEW_EPHEMERAL_PUBKEY" ] || fail "could not read current stand-in pubkey"
+[ "$OLD_EPHEMERAL_PUBKEY" != "$NEW_EPHEMERAL_PUBKEY" ] || fail "stand-in keys must differ"
+
 SRV_ROOT="$WORKDIR/www"
-mkdir -p "$SRV_ROOT/v0.4.11" "$SRV_ROOT/v0.4.10"
+mkdir -p "$SRV_ROOT/v0.4.11" "$SRV_ROOT/v0.4.10" "$SRV_ROOT/v0.4.12"
 
 make_stub_installer() {
     local dest="$1"
@@ -199,6 +244,7 @@ STUB
 
 make_stub_installer "$SRV_ROOT/v0.4.11/install-sfetch.sh"
 make_stub_installer "$SRV_ROOT/v0.4.10/install-sfetch.sh"
+make_stub_installer "$SRV_ROOT/v0.4.12/install-sfetch.sh"
 
 minisign -S -s "$KEY" -t "test-v0.4.11" -m "$SRV_ROOT/v0.4.11/install-sfetch.sh"
 (
@@ -237,7 +283,7 @@ PORT="$(cat "$PORTFILE")"
 BASE="http://127.0.0.1:${PORT}"
 
 PATCHED="$WORKDIR/bootstrap-patched.sh"
-make_fixture_engine "$PATCHED" "$BASE" "$TEST_PUBKEY"
+make_fixture_engine "$PATCHED" "$BASE" "$TEST_PUBKEY" "SFETCH_MINISIGN_PUBKEY_LEGACY"
 
 # Positive: v0.4.11 minisig route
 GOOD411="$WORKDIR/good411"
@@ -251,6 +297,7 @@ set -e
 ROUTE_LINES="$(awk 'BEGIN{c=0} /^route=/{c++} END{print c}' "$OUT_GOOD")"
 [ "$ROUTE_LINES" -eq 1 ] || fail "expected exactly one stdout route= field, got ${ROUTE_LINES}"
 grep -q '^route=minisig$' "$OUT_GOOD" || fail "positive minisig machine route missing"
+grep -Eq 'anchor=legacy' "$OUT_GOOD" || fail "positive v0.4.11 should log anchor=legacy"
 [ -f "$GOOD411/.stub-ran" ] || fail "installer should execute after successful verify"
 [ -x "$GOOD411/sfetch" ] || fail "sfetch binary should be installed"
 version_output_matches_pin "$("$GOOD411/sfetch" --version 2>&1)" "v0.4.11" || fail "stub sfetch version"
@@ -267,12 +314,78 @@ set -e
 [ "$RC" -eq 0 ] || fail "positive v0.4.10 sha256sums should succeed (log: $(cat "$OUT_GOOD410"))"
 [ "$(awk 'BEGIN{c=0} /^route=/{c++} END{print c}' "$OUT_GOOD410")" -eq 1 ] || fail "expected one route= field"
 grep -q '^route=sha256sums$' "$OUT_GOOD410" || fail "positive sha256sums machine route missing"
+grep -Eq 'anchor=legacy' "$OUT_GOOD410" || fail "positive v0.4.10 should log anchor=legacy"
 [ -f "$GOOD410/.stub-ran" ] || fail "installer should execute after sha256sums verify"
 pass "positive v0.4.10 sha256sums route (patched ephemeral key)"
 
-# Negative: wrong-key minisig (production pubkey engine against test-key sig)
+# Negative: old pin must NOT use the current anchor (pin map, not fallback).
+# Fixtures are TEST_PUBKEY-signed; patching only the current anchor leaves the
+# selected legacy anchor at its production value, so verify must fail.
+CURONLY_ENG="$WORKDIR/current-only-engine.sh"
+make_fixture_engine "$CURONLY_ENG" "$BASE" "$TEST_PUBKEY" "SFETCH_MINISIGN_PUBKEY"
+CURONLY_DIR="$WORKDIR/curonly"
+mkdir -p "$CURONLY_DIR"
+set +e
+OUT_CURONLY="$WORKDIR/out-curonly.txt"
+"$CURONLY_ENG" --version v0.4.11 --dir "$CURONLY_DIR" >"$OUT_CURONLY" 2>&1
+RC=$?
+set -e
+[ "$RC" -ne 0 ] || fail "v0.4.11 against current-only patched engine must fail"
+[ ! -f "$CURONLY_DIR/.stub-ran" ] || fail "installer must not run when pin selects unpatched anchor"
+[ ! -f "$CURONLY_DIR/sfetch" ] || fail "sfetch must not be installed on failed verify"
+grep -Eq 'anchor=legacy' "$OUT_CURONLY" || fail "expected anchor=legacy selection for v0.4.11"
+if grep -q '^route=' "$OUT_CURONLY"; then fail "failed run must not emit machine route="; fi
+pass "old pin ignores current anchor (no fallback)"
+
+# Post-cutover selection: fake v0.4.12 pin (MAX patched in temp copy only).
+# Stand-in keys prove the rule: new pins use current, previous-key sigs fail.
+NEWENG="$WORKDIR/newpin-engine.sh"
+make_fixture_engine "$NEWENG" "$BASE" "$OLD_EPHEMERAL_PUBKEY" "SFETCH_MINISIGN_PUBKEY_LEGACY"
+sed -i.bak "s|${PROD_PUBKEY}|${NEW_EPHEMERAL_PUBKEY}|g" "$NEWENG"
+grep -q "$NEW_EPHEMERAL_PUBKEY" "$NEWENG" || fail "new-pin engine missing current stand-in"
+grep -q "$PROD_PUBKEY" "$NEWENG" && fail "new-pin engine still has production current key"
+grep -q "$OLD_EPHEMERAL_PUBKEY" "$NEWENG" || fail "new-pin engine lost legacy stand-in"
+sed -i.bak 's|SFETCH_BOOTSTRAP_MAX="v0.4.11"|SFETCH_BOOTSTRAP_MAX="v0.4.12"|' "$NEWENG"
+grep -q 'SFETCH_BOOTSTRAP_MAX="v0.4.12"' "$NEWENG" || fail "new-pin engine MAX patch failed"
+rm -f "${NEWENG}.bak"
+
+# Positive: post-cutover pin verifies against the current anchor.
+minisign -S -s "$NEWKEY" -t "test-v0.4.12-new" -m "$SRV_ROOT/v0.4.12/install-sfetch.sh"
+NEWGOOD_DIR="$WORKDIR/newgood"
+mkdir -p "$NEWGOOD_DIR"
+set +e
+OUT_NEWGOOD="$WORKDIR/out-newgood.txt"
+"$NEWENG" --version v0.4.12 --dir "$NEWGOOD_DIR" >"$OUT_NEWGOOD" 2>&1
+RC=$?
+set -e
+[ "$RC" -eq 0 ] || fail "positive v0.4.12 should succeed (log: $(cat "$OUT_NEWGOOD"))"
+[ "$(awk 'BEGIN{c=0} /^route=/{c++} END{print c}' "$OUT_NEWGOOD")" -eq 1 ] || fail "expected one route= field"
+grep -q '^route=minisig$' "$OUT_NEWGOOD" || fail "positive v0.4.12 machine route missing"
+grep -Eq 'anchor=current' "$OUT_NEWGOOD" || fail "positive v0.4.12 should log anchor=current"
+[ -f "$NEWGOOD_DIR/.stub-ran" ] || fail "installer should execute after successful verify"
+[ -x "$NEWGOOD_DIR/sfetch" ] || fail "sfetch binary should be installed"
+version_output_matches_pin "$("$NEWGOOD_DIR/sfetch" --version 2>&1)" "v0.4.12" || fail "stub sfetch version"
+pass "post-cutover pin uses current anchor"
+
+# Negative: previous-key signature must fail for a post-cutover pin (no downgrade).
+minisign -S -s "$OLDKEY" -t "test-v0.4.12-old" -m "$SRV_ROOT/v0.4.12/install-sfetch.sh"
+NEWDOWNGRADE_DIR="$WORKDIR/newdowngrade"
+mkdir -p "$NEWDOWNGRADE_DIR"
+set +e
+OUT_DOWNGRADE="$WORKDIR/out-downgrade.txt"
+"$NEWENG" --version v0.4.12 --dir "$NEWDOWNGRADE_DIR" >"$OUT_DOWNGRADE" 2>&1
+RC=$?
+set -e
+[ "$RC" -ne 0 ] || fail "previous-key signature for v0.4.12 must fail"
+[ ! -f "$NEWDOWNGRADE_DIR/.stub-ran" ] || fail "installer must not run on downgrade attempt"
+[ ! -f "$NEWDOWNGRADE_DIR/sfetch" ] || fail "sfetch must not be installed on failed verify"
+grep -Eq 'anchor=current' "$OUT_DOWNGRADE" || fail "expected anchor=current selection for v0.4.12"
+if grep -q '^route=' "$OUT_DOWNGRADE"; then fail "failed run must not emit machine route="; fi
+pass "post-cutover pin rejects previous-key signature (no downgrade)"
+
+# Negative: wrong-key minisig (production anchors engine against test-key sig)
 WRONG_ENG="$WORKDIR/wrong-key-engine.sh"
-make_fixture_engine "$WRONG_ENG" "$BASE" # keep production pubkey
+make_fixture_engine "$WRONG_ENG" "$BASE" # keep production anchors
 BAD_DIR="$WORKDIR/bad"
 mkdir -p "$BAD_DIR"
 set +e
@@ -301,7 +414,7 @@ done
 [ -f "$PORTFILE2" ] || fail "second HTTP fixture server failed to start"
 PORT2="$(cat "$PORTFILE2")"
 NOSIG_ENG="$WORKDIR/nosig-engine.sh"
-make_fixture_engine "$NOSIG_ENG" "http://127.0.0.1:${PORT2}" "$TEST_PUBKEY"
+make_fixture_engine "$NOSIG_ENG" "http://127.0.0.1:${PORT2}" "$TEST_PUBKEY" "SFETCH_MINISIGN_PUBKEY_LEGACY"
 NOSIG_DIR="$WORKDIR/nosig"
 mkdir -p "$NOSIG_DIR"
 set +e
@@ -455,7 +568,7 @@ STUB
     [ -f "$PORTFILE3" ] || fail "goneat HTTP fixture server failed to start"
     PORT3="$(cat "$PORTFILE3")"
     GONEAT_ENG="$WORKDIR/goneat-engine.sh"
-    make_fixture_engine "$GONEAT_ENG" "http://127.0.0.1:${PORT3}" "$TEST_PUBKEY"
+    make_fixture_engine "$GONEAT_ENG" "http://127.0.0.1:${PORT3}" "$TEST_PUBKEY" "SFETCH_MINISIGN_PUBKEY_LEGACY"
     GONEAT_DIR="$WORKDIR/goneat-offline"
     mkdir -p "$GONEAT_DIR"
     set +e

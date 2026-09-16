@@ -210,12 +210,14 @@ INSTALL_BINDIR=~/bin make install  # override install location
 
 **Recommended (v0.4.11+):** verify the installer before execution.
 
+Match `-P` to the tag: tags ≤ v0.4.11 verify under the previous key; newer tags use the current key.
+
 ```bash
 # Three-step path when install-sfetch.sh.minisig is published (v0.4.11+)
 TAG=v0.4.11
 curl -fsSL "https://github.com/3leaps/sfetch/releases/download/${TAG}/install-sfetch.sh" -o install-sfetch.sh
 curl -fsSL "https://github.com/3leaps/sfetch/releases/download/${TAG}/install-sfetch.sh.minisig" -o install-sfetch.sh.minisig
-minisign -Vm install-sfetch.sh -P RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVqjKj3ctSA1
+minisign -Vm install-sfetch.sh -P RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC
 bash install-sfetch.sh --tag "$TAG" --yes
 
 # Or use the shared engine (CI/Makefile; refuses "latest"):
