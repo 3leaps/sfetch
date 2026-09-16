@@ -3435,14 +3435,14 @@ func extractZip(zipPath, extractDir string) error {
 		}
 
 		if f.FileInfo().IsDir() {
-			// #nosec G301 -- SDR-002: tar extraction dir
+			// #nosec G301,G703 -- SDR-002: tar extraction dir; SDR-006: prefix-contained path
 			if err := os.MkdirAll(destPathClean, 0o755); err != nil {
 				return fmt.Errorf("mkdir %s: %w", destPathClean, err)
 			}
 			continue
 		}
 
-		// #nosec G301 -- SDR-002: tar extraction dir
+		// #nosec G301,G703 -- SDR-002: tar extraction dir; SDR-006: prefix-contained path
 		if err := os.MkdirAll(filepath.Dir(destPathClean), 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", filepath.Dir(destPathClean), err)
 		}
@@ -3452,7 +3452,7 @@ func extractZip(zipPath, extractDir string) error {
 			return fmt.Errorf("open %s in zip: %w", f.Name, err)
 		}
 
-		// #nosec G302 -- SDR-003: extracted file permissions
+		// #nosec G302,G703 -- SDR-003: extracted file permissions; SDR-006: prefix-contained path
 		out, err := os.OpenFile(destPathClean, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 		if err != nil {
 			_ = rc.Close()

@@ -168,6 +168,56 @@ The provenance file (JSON metadata about a download) is written with 0644 permis
 
 ---
 
+## SDR-006: Contained Extraction Paths (G703)
+
+**Rule:** G703 - Path traversal via taint analysis
+**Severity:** High
+**Instances:** 3
+**Decision:** Suppress with `#nosec G703 -- SDR-006`
+
+### Context
+
+G703 flags `os.MkdirAll` and `os.OpenFile` sinks in `extractZip` whose path
+argument is tainted by archive entry names, warning of zip-slip path traversal.
+
+### Why Suppression is Appropriate
+
+Every flagged sink operates only on `destPathClean`, which cannot escape the
+extraction directory:
+
+1. **Entry names are normalized and pre-filtered**: `filepath.FromSlash` +
+   `filepath.Clean`; `.` skipped; `..`, absolute paths, and volume names are
+   hard errors before any path is built.
+
+2. **Joined path must stay under the prefix**: after `filepath.Join` +
+   `filepath.Clean`, a path that is neither the extraction dir itself nor
+   prefixed by it is a hard error. The analyzer cannot follow this
+   string-prefix containment proof, so it reports the residual taint at high
+   confidence despite the runtime gate.
+
+3. **No symlink or special-file escape**: symlinks and non-regular files are
+   refused before any directory creation or file write.
+
+### Proof
+
+Covered by maintained regression tests, not by inspection alone:
+
+- `TestExtractZipRejectsZipSlip` (`../evil` rejected; asserts nothing is
+  written outside the extraction dir)
+- `TestExtractZipRejectsAbsolutePaths`
+- `TestExtractZipRejectsSymlinks`
+- `TestExtractZipNestedPaths` (legitimate nested paths still extract)
+
+### Affected Locations
+
+| File | Function | Purpose |
+|------|----------|---------|
+| main.go | extractZip | MkdirAll for entry dir (contained path) |
+| main.go | extractZip | MkdirAll for entry parent dir (contained path) |
+| main.go | extractZip | OpenFile for entry content (contained path) |
+
+---
+
 ## Suppression Audit Log
 
 | Date | SDR | Action | Author |
@@ -177,3 +227,4 @@ The provenance file (JSON metadata about a download) is written with 0644 permis
 | 2026-01-10 | SDR-003 | Created | Claude Opus 4.5 |
 | 2026-01-10 | SDR-004 | Created | Claude Opus 4.5 |
 | 2026-01-10 | SDR-005 | Created | Claude Opus 4.5 |
+| 2026-09-16 | SDR-006 | Created | Muse Spark |
