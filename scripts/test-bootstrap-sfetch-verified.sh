@@ -95,7 +95,7 @@ assert_early_version_reject() {
 assert_early_version_reject "v18446744073709551616.4.10" "huge-major-wrap-zero"
 assert_early_version_reject "v0.4.18446744073709551627" "huge-patch-wrap-into-range"
 
-PROD_PUBKEY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
+PROD_PUBKEY="RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVqjKj3ctSA1"
 
 # Build a temporary engine: optional test pubkey + fixed BASE_URL for sfetch assets.
 # Minisign always comes from the engine's pinned 0.12 download (not ambient PATH).

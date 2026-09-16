@@ -40,9 +40,9 @@ SFETCH_API="https://api.github.com/repos/${SFETCH_REPO}/releases"
 # IMPORTANT: This key must match scripts/sfetch-minisign-anchor.pub (SSOT)
 # and EmbeddedMinisignPubkey in main.go (go:embed of that file).
 # Update both when rotating keys (see docs/security/signing-runbook.md)
-SFETCH_MINISIGN_PUBKEY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
+SFETCH_MINISIGN_PUBKEY="RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVqjKj3ctSA1"
 # Pinned PGP fingerprint (for optional fallback)
-SFETCH_PGP_FPR="94BB7811D4AD49B2310E0C08FA0651DE91B828ED"
+SFETCH_PGP_FPR="0CACA49B3119B6BC12B2CA11B9B485F294B9FE07"
 TRUST_LEVEL="unknown"
 
 # -----------------------------------------------------------------------------

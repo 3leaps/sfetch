@@ -50,7 +50,7 @@ readonly SFETCH_MINISIG_SINCE="v0.4.11"
 # main.go (go:embed of that file), and scripts/install-sfetch.sh. Do NOT fetch
 # sfetch-minisign.pub from the release for authentication (circular).
 # The published .pub is for human out-of-band comparison only.
-readonly SFETCH_MINISIGN_PUBKEY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
+readonly SFETCH_MINISIGN_PUBKEY="RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVqjKj3ctSA1"
 
 readonly MINISIGN_VERSION_EXPECTED="0.12"
 readonly MINISIGN_WIN_URL="https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip"

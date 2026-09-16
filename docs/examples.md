@@ -146,8 +146,8 @@ sfetch --repo 3leaps/sfetch --latest \
 
 **Public key** (3leaps/sfetch):
 ```
-untrusted comment: sfetch release signing key
-RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC
+untrusted comment: 3leaps org release signing
+RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVqjKj3ctSA1
 ```
 
 ## Minisign Workflow B: `jedisct1/minisign`
