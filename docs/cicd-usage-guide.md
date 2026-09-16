@@ -42,7 +42,7 @@ supported `sfetch-version` range for that SHA and fails closed outside it.
 - uses: 3leaps/sfetch/.github/actions/setup-sfetch@<commit-sha>
   with:
     sfetch-version: v0.4.11          # exact tag; never latest
-    goneat-version: v0.5.15          # optional; exact tag if set
+    goneat-version: v0.6.0           # optional; exact tag if set
   env:
     GITHUB_TOKEN: ${{ github.token }}
     GH_TOKEN: ${{ github.token }}
@@ -146,7 +146,7 @@ jobs:
     container:
       image: golang:1.23
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
       - uses: 3leaps/sfetch/.github/actions/setup-sfetch@<commit-sha>
         with:
           sfetch-version: v0.4.11
@@ -183,7 +183,7 @@ jobs:
       # Match the GitHub-hosted runner workspace ownership (UID 1001)
       options: --user 1001
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
       - uses: 3leaps/sfetch/.github/actions/setup-sfetch@<commit-sha>
         with:
           sfetch-version: v0.4.11
@@ -264,7 +264,7 @@ In CI, you can:
 
 ```yaml
 - name: Cache sfetch downloads
-  uses: actions/cache@v4
+  uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
   with:
     path: ~/.cache/sfetch
     key: sfetch-${{ runner.os }}-${{ hashFiles('.tool-versions') }}
