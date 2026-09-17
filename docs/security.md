@@ -140,15 +140,15 @@ export SFETCH_MINISIGN_KEY=/path/to/key.key
 export SFETCH_MINISIGN_PUB=/path/to/key.pub
 export SFETCH_PGP_KEY_ID=your-key-id  # optional
 
-RELEASE_TAG=v0.4.11 make release-download
-RELEASE_TAG=v0.4.11 make release-checksums
-RELEASE_TAG=v0.4.11 make release-sign
+RELEASE_TAG=v0.4.12 make release-download
+RELEASE_TAG=v0.4.12 make release-checksums
+RELEASE_TAG=v0.4.12 make release-sign
 make release-verify-signatures
 make release-export-keys
 make release-verify-keys
-RELEASE_TAG=v0.4.11 make release-notes
-RELEASE_TAG=v0.4.11 make release-upload
-gh release edit v0.4.11 --draft=false
+RELEASE_TAG=v0.4.12 make release-notes
+RELEASE_TAG=v0.4.12 make release-upload
+gh release edit v0.4.12 --draft=false
 ```
 
 ### What is signed (v0.4.11+)

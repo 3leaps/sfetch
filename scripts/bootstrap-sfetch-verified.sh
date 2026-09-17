@@ -43,7 +43,7 @@ set -euo pipefail
 # make test-bootstrap-range-release asserts MAX == v$(cat VERSION) using two
 # committed values at the same SHA (never self-advancing at install time).
 readonly SFETCH_BOOTSTRAP_MIN="v0.4.9"
-readonly SFETCH_BOOTSTRAP_MAX="v0.4.11"
+readonly SFETCH_BOOTSTRAP_MAX="v0.4.12"
 # First release that publishes install-sfetch.sh.minisig (route selection).
 # Keep this accurate: too low → minisig route without asset; too high → 5-step
 # when 3-step exists. Both routes verify; neither silently falls back.

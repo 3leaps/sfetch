@@ -1,3 +1,49 @@
+## v0.4.12
+
+### Summary
+
+Supply-chain maintenance release with refreshed Go dependencies and immutable
+CI action pins. It also completes the release-key rotation for verified
+installation: within the bootstrap engine and installer's supported
+v0.4.9–v0.4.12 range, v0.4.12 selects only the current organization keys while
+pins through v0.4.11 select only the previous keys, without fallback.
+
+### Highlights
+
+**Trust anchors**
+- The embedded minisign key and installer OpenPGP fingerprint now match the
+  current organization release-signing keys.
+- For supported bootstrap and installer pins, exactly one key generation is
+  selected: v0.4.9–v0.4.11 use the previous keys; v0.4.12 uses the current
+  keys. Releases are not dual-signed and these install paths do not fall back
+  between anchors.
+
+**Toolchain and dependencies**
+- Go module baseline 1.26.0 with toolchain 1.26.8.
+- jsonschema/v6 6.0.3 plus refreshed `x/crypto`, `x/sys`, and `x/text` modules.
+- Goneat v0.6.0 and govulncheck v1.8.0.
+
+**CI and security checks**
+- GitHub Actions are pinned to immutable commit SHAs.
+- Archive-extraction G703 dispositions are scoped to sinks already protected
+  by path-containment checks and zip-slip rejection tests.
+
+### Install
+
+Use the verified bootstrap engine with an exact tag:
+
+```bash
+./scripts/bootstrap-sfetch-verified.sh --version v0.4.12 --dir "$HOME/.local/bin"
+```
+
+The action revision and `sfetch-version` pin are coupled: consumers advancing
+to v0.4.12 must also select an action revision whose declared range includes
+v0.4.12. Outside a checkout, retrieve the bootstrap engine at an immutable
+revision and verify its pinned digest before execution; see the
+[CI/CD Usage Guide](docs/cicd-usage-guide.md).
+
+---
+
 ## v0.4.10
 
 ### Summary

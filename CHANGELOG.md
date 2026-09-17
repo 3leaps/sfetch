@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.12] - 2026-09-17
+
+### Changed
+
+- **Release trust anchors rotated to the current organization keys.** Within
+  the bootstrap engine and installer's supported v0.4.9–v0.4.12 pin range,
+  v0.4.12 selects only the new minisign and OpenPGP anchors. Pins through
+  v0.4.11 select only the previous anchors; these install paths never fall
+  back between keys.
+- **Go and module refresh.** The module now declares Go 1.26.0 with the Go
+  1.26.8 toolchain, jsonschema/v6 6.0.3, and current `x/crypto`, `x/sys`, and
+  `x/text` releases.
+- **CI and security tooling refreshed.** Goneat moves to v0.6.0,
+  govulncheck to v1.8.0, and GitHub Actions use immutable commit pins.
+
+### Fixed
+
+- **Security-scanner compatibility for archive extraction.** Scoped G703
+  dispositions document the existing path-containment checks at filesystem
+  sinks while the zip-slip rejection tests continue to enforce the boundary.
+
 ## [0.4.11] - 2026-07-31
 
 ### Added
@@ -183,7 +204,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Maintenance note:** This file is pruned to the latest 10 releases. For older entries, see `docs/releases/`.
 
-[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.10...HEAD
+[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.12...HEAD
+[0.4.12]: https://github.com/3leaps/sfetch/compare/v0.4.11...v0.4.12
+[0.4.11]: https://github.com/3leaps/sfetch/compare/v0.4.10...v0.4.11
 [0.4.10]: https://github.com/3leaps/sfetch/compare/v0.4.9...v0.4.10
 [0.4.9]: https://github.com/3leaps/sfetch/compare/v0.4.8...v0.4.9
 [0.4.8]: https://github.com/3leaps/sfetch/compare/v0.4.7...v0.4.8

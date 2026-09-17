@@ -46,7 +46,7 @@ if "$SCRIPT" --version latest --dir /tmp 2>/dev/null; then fail "latest should f
 if "$SCRIPT" --version main --dir /tmp 2>/dev/null; then fail "main should fail"; else pass "rejects main"; fi
 if "$SCRIPT" --version v0.4.11-rc1 --dir /tmp 2>/dev/null; then fail "prerelease should fail"; else pass "rejects prerelease"; fi
 if "$SCRIPT" --version v0.4.8 --dir /tmp 2>/dev/null; then fail "below min should fail"; else pass "rejects below min"; fi
-if "$SCRIPT" --version v0.4.12 --dir /tmp 2>/dev/null; then fail "above max should fail"; else pass "rejects above max"; fi
+if "$SCRIPT" --version v0.4.13 --dir /tmp 2>/dev/null; then fail "above max should fail"; else pass "rejects above max"; fi
 # F2: leading-zero components must not pass range/route selection
 if "$SCRIPT" --version v0.4.09 --dir /tmp 2>/dev/null; then fail "v0.4.09 leading zero should fail"; else pass "rejects v0.4.09 leading zero"; fi
 if "$SCRIPT" --version v0.04.11 --dir /tmp 2>/dev/null; then fail "v0.04.11 leading zero should fail"; else pass "rejects v0.04.11 leading zero"; fi
@@ -337,7 +337,7 @@ grep -Eq 'anchor=legacy' "$OUT_CURONLY" || fail "expected anchor=legacy selectio
 if grep -q '^route=' "$OUT_CURONLY"; then fail "failed run must not emit machine route="; fi
 pass "old pin ignores current anchor (no fallback)"
 
-# Post-cutover selection: fake v0.4.12 pin (MAX patched in temp copy only).
+# Post-cutover selection: v0.4.12 is in the production engine's supported range.
 # Stand-in keys prove the rule: new pins use current, previous-key sigs fail.
 NEWENG="$WORKDIR/newpin-engine.sh"
 make_fixture_engine "$NEWENG" "$BASE" "$OLD_EPHEMERAL_PUBKEY" "SFETCH_MINISIGN_PUBKEY_LEGACY"
@@ -345,9 +345,7 @@ sed -i.bak "s|${PROD_PUBKEY}|${NEW_EPHEMERAL_PUBKEY}|g" "$NEWENG"
 grep -q "$NEW_EPHEMERAL_PUBKEY" "$NEWENG" || fail "new-pin engine missing current stand-in"
 grep -q "$PROD_PUBKEY" "$NEWENG" && fail "new-pin engine still has production current key"
 grep -q "$OLD_EPHEMERAL_PUBKEY" "$NEWENG" || fail "new-pin engine lost legacy stand-in"
-sed -i.bak 's|SFETCH_BOOTSTRAP_MAX="v0.4.11"|SFETCH_BOOTSTRAP_MAX="v0.4.12"|' "$NEWENG"
-grep -q 'SFETCH_BOOTSTRAP_MAX="v0.4.12"' "$NEWENG" || fail "new-pin engine MAX patch failed"
-rm -f "${NEWENG}.bak"
+grep -q 'SFETCH_BOOTSTRAP_MAX="v0.4.12"' "$NEWENG" || fail "new-pin engine MAX drifted"
 
 # Positive: post-cutover pin verifies against the current anchor.
 minisign -S -s "$NEWKEY" -t "test-v0.4.12-new" -m "$SRV_ROOT/v0.4.12/install-sfetch.sh"
