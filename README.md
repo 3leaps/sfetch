@@ -210,6 +210,8 @@ INSTALL_BINDIR=~/bin make install  # override install location
 
 **Recommended (v0.4.11+):** verify the installer before execution.
 
+Match `-P` to the tag: tags ≤ v0.4.11 verify under the previous key; newer tags use the current key.
+
 ```bash
 # Three-step path when install-sfetch.sh.minisig is published (v0.4.11+)
 TAG=v0.4.11
@@ -270,6 +272,8 @@ The installer:
 - Optional GPG fallback with pinned fingerprint; checksum-only requires explicit `--allow-checksum-only`
 
 #### Verify via signed SHA256SUMS (pins ≤ v0.4.10)
+
+These pins predate the org key rotation and verify only under the previous key; the `-P` below is intentionally not the current key.
 
 ```bash
 # Detect OS-appropriate SHA256 command (macOS uses shasum, Linux uses sha256sum)
