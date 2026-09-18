@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.13] - 2026-09-18
+
+### Changed
+
+- **Verified self-bootstrap and CI smoke now pin published v0.4.12.** The
+  development bootstrap remains on a fully signed N-1 release and exercises
+  the current-key minisign route.
+
+### Fixed
+
+- **Release matrix uploads preserve draft state explicitly.** Every
+  release-writing action step now declares `draft: true`, with a precommit
+  regression that rejects missing or false draft settings before a tag run.
+
 ## [0.4.12] - 2026-09-17
 
 ### Changed
@@ -204,7 +218,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Maintenance note:** This file is pruned to the latest 10 releases. For older entries, see `docs/releases/`.
 
-[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.12...HEAD
+[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.13...HEAD
+[0.4.13]: https://github.com/3leaps/sfetch/compare/v0.4.12...v0.4.13
 [0.4.12]: https://github.com/3leaps/sfetch/compare/v0.4.11...v0.4.12
 [0.4.11]: https://github.com/3leaps/sfetch/compare/v0.4.10...v0.4.11
 [0.4.10]: https://github.com/3leaps/sfetch/compare/v0.4.9...v0.4.10

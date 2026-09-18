@@ -127,12 +127,13 @@ jobs:
       # Per-file .sha256 removed - signed SHA256SUMS is the authoritative source
       # Maintainer generates SHA256SUMS locally and signs with minisign/pgp
 
-      # Appends this matrix entry's archive to the release created above.
-      # action-gh-release@v3 is idempotent on the tag; parallel matrix jobs each
-      # upload a distinctly-named asset, so no upload_url plumbing is needed.
+      # Reopens the same release as a draft while appending this matrix entry's
+      # distinctly named archive. Every release-writing action must state
+      # draft: true so parallel uploads cannot publish before signing.
       - name: Upload Archive
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
         with:
+          draft: true
           files: ${{ env.ASSET_FILE }}
 
       - name: Signing handled manually

@@ -46,7 +46,7 @@ if "$SCRIPT" --version latest --dir /tmp 2>/dev/null; then fail "latest should f
 if "$SCRIPT" --version main --dir /tmp 2>/dev/null; then fail "main should fail"; else pass "rejects main"; fi
 if "$SCRIPT" --version v0.4.11-rc1 --dir /tmp 2>/dev/null; then fail "prerelease should fail"; else pass "rejects prerelease"; fi
 if "$SCRIPT" --version v0.4.8 --dir /tmp 2>/dev/null; then fail "below min should fail"; else pass "rejects below min"; fi
-if "$SCRIPT" --version v0.4.13 --dir /tmp 2>/dev/null; then fail "above max should fail"; else pass "rejects above max"; fi
+if "$SCRIPT" --version v0.4.14 --dir /tmp 2>/dev/null; then fail "above max should fail"; else pass "rejects above max"; fi
 # F2: leading-zero components must not pass range/route selection
 if "$SCRIPT" --version v0.4.09 --dir /tmp 2>/dev/null; then fail "v0.4.09 leading zero should fail"; else pass "rejects v0.4.09 leading zero"; fi
 if "$SCRIPT" --version v0.04.11 --dir /tmp 2>/dev/null; then fail "v0.04.11 leading zero should fail"; else pass "rejects v0.04.11 leading zero"; fi
@@ -212,7 +212,7 @@ NEW_EPHEMERAL_PUBKEY="$(grep -E '^RW' "$NEWPUB" | head -n1 | tr -d '\r\n')"
 [ "$OLD_EPHEMERAL_PUBKEY" != "$NEW_EPHEMERAL_PUBKEY" ] || fail "stand-in keys must differ"
 
 SRV_ROOT="$WORKDIR/www"
-mkdir -p "$SRV_ROOT/v0.4.11" "$SRV_ROOT/v0.4.10" "$SRV_ROOT/v0.4.12"
+mkdir -p "$SRV_ROOT/v0.4.11" "$SRV_ROOT/v0.4.10" "$SRV_ROOT/v0.4.13"
 
 make_stub_installer() {
     local dest="$1"
@@ -244,7 +244,7 @@ STUB
 
 make_stub_installer "$SRV_ROOT/v0.4.11/install-sfetch.sh"
 make_stub_installer "$SRV_ROOT/v0.4.10/install-sfetch.sh"
-make_stub_installer "$SRV_ROOT/v0.4.12/install-sfetch.sh"
+make_stub_installer "$SRV_ROOT/v0.4.13/install-sfetch.sh"
 
 minisign -S -s "$KEY" -t "test-v0.4.11" -m "$SRV_ROOT/v0.4.11/install-sfetch.sh"
 (
@@ -337,7 +337,7 @@ grep -Eq 'anchor=legacy' "$OUT_CURONLY" || fail "expected anchor=legacy selectio
 if grep -q '^route=' "$OUT_CURONLY"; then fail "failed run must not emit machine route="; fi
 pass "old pin ignores current anchor (no fallback)"
 
-# Post-cutover selection: v0.4.12 is in the production engine's supported range.
+# Post-cutover selection: v0.4.13 is the production engine's accepted ceiling.
 # Stand-in keys prove the rule: new pins use current, previous-key sigs fail.
 NEWENG="$WORKDIR/newpin-engine.sh"
 make_fixture_engine "$NEWENG" "$BASE" "$OLD_EPHEMERAL_PUBKEY" "SFETCH_MINISIGN_PUBKEY_LEGACY"
@@ -345,39 +345,39 @@ sed -i.bak "s|${PROD_PUBKEY}|${NEW_EPHEMERAL_PUBKEY}|g" "$NEWENG"
 grep -q "$NEW_EPHEMERAL_PUBKEY" "$NEWENG" || fail "new-pin engine missing current stand-in"
 grep -q "$PROD_PUBKEY" "$NEWENG" && fail "new-pin engine still has production current key"
 grep -q "$OLD_EPHEMERAL_PUBKEY" "$NEWENG" || fail "new-pin engine lost legacy stand-in"
-grep -q 'SFETCH_BOOTSTRAP_MAX="v0.4.12"' "$NEWENG" || fail "new-pin engine MAX drifted"
+grep -q 'SFETCH_BOOTSTRAP_MAX="v0.4.13"' "$NEWENG" || fail "new-pin engine MAX drifted"
 
 # Positive: post-cutover pin verifies against the current anchor.
-minisign -S -s "$NEWKEY" -t "test-v0.4.12-new" -m "$SRV_ROOT/v0.4.12/install-sfetch.sh"
+minisign -S -s "$NEWKEY" -t "test-v0.4.13-new" -m "$SRV_ROOT/v0.4.13/install-sfetch.sh"
 NEWGOOD_DIR="$WORKDIR/newgood"
 mkdir -p "$NEWGOOD_DIR"
 set +e
 OUT_NEWGOOD="$WORKDIR/out-newgood.txt"
-"$NEWENG" --version v0.4.12 --dir "$NEWGOOD_DIR" >"$OUT_NEWGOOD" 2>&1
+"$NEWENG" --version v0.4.13 --dir "$NEWGOOD_DIR" >"$OUT_NEWGOOD" 2>&1
 RC=$?
 set -e
-[ "$RC" -eq 0 ] || fail "positive v0.4.12 should succeed (log: $(cat "$OUT_NEWGOOD"))"
+[ "$RC" -eq 0 ] || fail "positive v0.4.13 should succeed (log: $(cat "$OUT_NEWGOOD"))"
 [ "$(awk 'BEGIN{c=0} /^route=/{c++} END{print c}' "$OUT_NEWGOOD")" -eq 1 ] || fail "expected one route= field"
-grep -q '^route=minisig$' "$OUT_NEWGOOD" || fail "positive v0.4.12 machine route missing"
-grep -Eq 'anchor=current' "$OUT_NEWGOOD" || fail "positive v0.4.12 should log anchor=current"
+grep -q '^route=minisig$' "$OUT_NEWGOOD" || fail "positive v0.4.13 machine route missing"
+grep -Eq 'anchor=current' "$OUT_NEWGOOD" || fail "positive v0.4.13 should log anchor=current"
 [ -f "$NEWGOOD_DIR/.stub-ran" ] || fail "installer should execute after successful verify"
 [ -x "$NEWGOOD_DIR/sfetch" ] || fail "sfetch binary should be installed"
-version_output_matches_pin "$("$NEWGOOD_DIR/sfetch" --version 2>&1)" "v0.4.12" || fail "stub sfetch version"
+version_output_matches_pin "$("$NEWGOOD_DIR/sfetch" --version 2>&1)" "v0.4.13" || fail "stub sfetch version"
 pass "post-cutover pin uses current anchor"
 
 # Negative: previous-key signature must fail for a post-cutover pin (no downgrade).
-minisign -S -s "$OLDKEY" -t "test-v0.4.12-old" -m "$SRV_ROOT/v0.4.12/install-sfetch.sh"
+minisign -S -s "$OLDKEY" -t "test-v0.4.13-old" -m "$SRV_ROOT/v0.4.13/install-sfetch.sh"
 NEWDOWNGRADE_DIR="$WORKDIR/newdowngrade"
 mkdir -p "$NEWDOWNGRADE_DIR"
 set +e
 OUT_DOWNGRADE="$WORKDIR/out-downgrade.txt"
-"$NEWENG" --version v0.4.12 --dir "$NEWDOWNGRADE_DIR" >"$OUT_DOWNGRADE" 2>&1
+"$NEWENG" --version v0.4.13 --dir "$NEWDOWNGRADE_DIR" >"$OUT_DOWNGRADE" 2>&1
 RC=$?
 set -e
-[ "$RC" -ne 0 ] || fail "previous-key signature for v0.4.12 must fail"
+[ "$RC" -ne 0 ] || fail "previous-key signature for v0.4.13 must fail"
 [ ! -f "$NEWDOWNGRADE_DIR/.stub-ran" ] || fail "installer must not run on downgrade attempt"
 [ ! -f "$NEWDOWNGRADE_DIR/sfetch" ] || fail "sfetch must not be installed on failed verify"
-grep -Eq 'anchor=current' "$OUT_DOWNGRADE" || fail "expected anchor=current selection for v0.4.12"
+grep -Eq 'anchor=current' "$OUT_DOWNGRADE" || fail "expected anchor=current selection for v0.4.13"
 if grep -q '^route=' "$OUT_DOWNGRADE"; then fail "failed run must not emit machine route="; fi
 pass "post-cutover pin rejects previous-key signature (no downgrade)"
 

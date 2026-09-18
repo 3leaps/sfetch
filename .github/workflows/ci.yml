@@ -66,7 +66,7 @@ jobs:
           echo "Install smoke pin: $TAG (make print-sfetch-version)"
           bash scripts/install-sfetch.sh --dry-run --tag "$TAG" --require-minisign
 
-      - name: Live verified bootstrap (N-1 SHA256SUMS route)
+      - name: Live verified bootstrap (N-1 minisig/current-key route)
         run: |
           set -euo pipefail
           TAG=$(make -s print-sfetch-version)

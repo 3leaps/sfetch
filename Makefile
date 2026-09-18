@@ -45,7 +45,7 @@ BIN_DIR := $(CURDIR)/bin
 # pin (see .github/workflows/ci.yml). Always a fully-signed published release —
 # never "latest" and never the in-flight cut — so main CI cannot 404 during the
 # tag/upload window. Advance after each release publishes + signs.
-SFETCH_VERSION := v0.4.11
+SFETCH_VERSION := v0.4.12
 GONEAT_VERSION ?= v0.6.0
 GOVULNCHECK_VERSION ?= v1.8.0
 
@@ -61,7 +61,7 @@ CORPUS_DEST ?= test-corpus
 .PHONY: release-verify-key release-verify-minisign-pubkey release-verify-keys release-verify-signatures release-verify
 .PHONY: release-clean bootstrap-script build-all gosec gosec-high update-scoop-manifest
 .PHONY: version-check version-set version-patch version-minor version-major
-.PHONY: print-sfetch-version test-release-verify-checksums test-release-verify-signatures test-bootstrap-sfetch-verified test-bootstrap-range-release test-install-anchor-select
+.PHONY: print-sfetch-version test-release-verify-checksums test-release-verify-signatures test-release-workflow-draft test-bootstrap-sfetch-verified test-bootstrap-range-release test-install-anchor-select
 
 all: build
 
@@ -211,6 +211,7 @@ precommit: ## Run pre-commit checks (goneat assess + Go tests + build)
 	# CI runs make precommit (not prepush); keep fail-closed release-verify regression on this path.
 	$(MAKE) test-release-verify-checksums
 	$(MAKE) test-release-verify-signatures
+	$(MAKE) test-release-workflow-draft
 	$(MAKE) test-bootstrap-sfetch-verified
 	$(MAKE) test-bootstrap-range-release
 	$(MAKE) test-install-anchor-select
@@ -285,6 +286,9 @@ test-release-verify-checksums: ## Regression: fail-closed checksum verify (corru
 
 test-release-verify-signatures: ## Regression: required installer minisig + sign targets
 	@./scripts/test-release-verify-signatures.sh
+
+test-release-workflow-draft: ## Regression: every release-writing action preserves draft state
+	@python3 ./scripts/test-release-workflow-draft.py
 
 test-bootstrap-sfetch-verified: ## Regression: dual-route bootstrap rejects + fail-closed
 	@./scripts/test-bootstrap-sfetch-verified.sh
