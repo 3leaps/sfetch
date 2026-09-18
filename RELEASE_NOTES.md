@@ -1,3 +1,34 @@
+## v0.4.13
+
+### Summary
+
+Maintenance release that advances development self-bootstrap and CI smoke to
+the fully signed v0.4.12 release and keeps every automated release upload in
+draft state until the attended sign, verify, upload, and publish ceremony.
+There are no CLI, dependency, or trust-anchor changes.
+
+### Highlights
+
+**Verified bootstrap**
+- The Makefile N-1 pin advances from v0.4.11 to published v0.4.12.
+- A fresh bootstrap of that pin uses the minisign route and current release
+  trust anchor. Historical v0.4.11 previous-key and v0.4.10 checksum-route
+  coverage remains in place.
+
+**Draft-preserving release uploads**
+- Every `softprops/action-gh-release` step explicitly sets `draft: true`,
+  including each matrix archive upload.
+- A focused precommit regression rejects omitted or false draft settings.
+- Publication remains an attended action after signatures and checksum
+  manifests are verified and uploaded.
+
+### Compatibility
+
+No user migration is required. CLI behavior, dependencies, supported
+platforms, and verification trust anchors are unchanged.
+
+---
+
 ## v0.4.12
 
 ### Summary

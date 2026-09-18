@@ -214,14 +214,14 @@ Match `-P` to the tag: tags ≤ v0.4.11 verify under the previous key; newer tag
 
 ```bash
 # Three-step path when install-sfetch.sh.minisig is published (v0.4.11+)
-TAG=v0.4.12
+TAG=v0.4.13
 curl -fsSL "https://github.com/3leaps/sfetch/releases/download/${TAG}/install-sfetch.sh" -o install-sfetch.sh
 curl -fsSL "https://github.com/3leaps/sfetch/releases/download/${TAG}/install-sfetch.sh.minisig" -o install-sfetch.sh.minisig
 minisign -Vm install-sfetch.sh -P RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVqjKj3ctSA1
 bash install-sfetch.sh --tag "$TAG" --yes
 
 # Or use the shared engine (CI/Makefile; refuses "latest"):
-# ./scripts/bootstrap-sfetch-verified.sh --version v0.4.12 --dir ~/.local/bin
+# ./scripts/bootstrap-sfetch-verified.sh --version v0.4.13 --dir ~/.local/bin
 ```
 
 **GitHub Actions:** pin the composite action by commit SHA — see [CI/CD Usage Guide](docs/cicd-usage-guide.md).
@@ -229,7 +229,7 @@ bash install-sfetch.sh --tag "$TAG" --yes
 ```yaml
 - uses: 3leaps/sfetch/.github/actions/setup-sfetch@<commit-sha>
   with:
-    sfetch-version: v0.4.12
+    sfetch-version: v0.4.13
 ```
 
 #### Quick install (interactive humans)
@@ -254,7 +254,7 @@ Pass arguments using `bash -s --`:
 curl -sSfL .../install-sfetch.sh | bash -s -- --dir ~/bin
 
 # Install specific version
-curl -sSfL .../install-sfetch.sh | bash -s -- --tag v0.4.12
+curl -sSfL .../install-sfetch.sh | bash -s -- --tag v0.4.13
 
 # Dry run (download and verify, don't install)
 curl -sSfL .../install-sfetch.sh | bash -s -- --dry-run
@@ -302,13 +302,13 @@ Tag CI creates a **draft** release with unsigned archives. Maintainers generate
 export SFETCH_MINISIGN_KEY=/path/to/sfetch.key
 export SFETCH_PGP_KEY_ID=security@fulmenhq.dev  # optional
 
-RELEASE_TAG=v0.4.12 make release-download
-RELEASE_TAG=v0.4.12 make release-checksums
-RELEASE_TAG=v0.4.12 make release-sign      # signs manifests + install-sfetch.sh
+RELEASE_TAG=v0.4.13 make release-download
+RELEASE_TAG=v0.4.13 make release-checksums
+RELEASE_TAG=v0.4.13 make release-sign      # signs manifests + install-sfetch.sh
 make release-verify
-RELEASE_TAG=v0.4.12 make release-notes
-RELEASE_TAG=v0.4.12 make release-upload
-gh release edit v0.4.12 --draft=false      # publish only after signatures upload
+RELEASE_TAG=v0.4.13 make release-notes
+RELEASE_TAG=v0.4.13 make release-upload
+gh release edit v0.4.13 --draft=false      # publish only after signatures upload
 ```
 
 Set `RELEASE_TAG` to the tag you're publishing. The scripts in `scripts/` can be used individually if you prefer manual control.
