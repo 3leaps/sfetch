@@ -49,6 +49,12 @@ jobs:
           goneat doctor tools --scope foundation --install --yes || true
           goneat doctor tools --scope security --install --yes || true
 
+      - name: Install pinned golangci-lint
+        run: |
+          make golangci-lint-install
+          export PATH="$PWD/bin:$PATH"
+          [ "$(command -v golangci-lint)" = "$PWD/bin/golangci-lint" ]
+
       - name: Quality
         run: |
           export PATH="$PWD/bin:$PATH"

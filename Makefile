@@ -48,6 +48,7 @@ BIN_DIR := $(CURDIR)/bin
 SFETCH_VERSION := v0.4.12
 GONEAT_VERSION ?= v0.6.6
 GOVULNCHECK_VERSION ?= v1.8.0
+GOLANGCI_LINT_VERSION ?= v2.14.0
 
 # Tool paths (sfetch bootstrap may land in bin/; goneat must be on PATH)
 SFETCH = $(shell [ -x "$(BIN_DIR)/sfetch" ] && echo "$(BIN_DIR)/sfetch" || command -v sfetch 2>/dev/null)
@@ -61,7 +62,7 @@ CORPUS_DEST ?= test-corpus
 .PHONY: release-verify-key release-verify-minisign-pubkey release-verify-keys release-verify-signatures release-verify
 .PHONY: release-clean bootstrap-script build-all gosec gosec-high update-scoop-manifest
 .PHONY: version-check version-set version-patch version-minor version-major
-.PHONY: print-sfetch-version test-release-verify-checksums test-release-verify-signatures test-release-workflow-draft test-bootstrap-sfetch-verified test-bootstrap-range-release test-install-anchor-select
+.PHONY: print-sfetch-version golangci-lint-install test-release-verify-checksums test-release-verify-signatures test-release-workflow-draft test-bootstrap-sfetch-verified test-bootstrap-range-release test-install-anchor-select
 
 all: build
 
@@ -150,6 +151,16 @@ tools: ## Verify external tools are available
 	fi
 	@goneat doctor tools --scope foundation 2>&1 || true
 	@echo ""
+
+golangci-lint-install: ## Install pinned golangci-lint into bin/ and assert its version
+	@mkdir -p $(BIN_DIR)
+	GOBIN=$(BIN_DIR) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	@ver="$$($(BIN_DIR)/golangci-lint version --short 2>/dev/null)"; \
+	if [ "v$$ver" != "$(GOLANGCI_LINT_VERSION)" ] && [ "$$ver" != "$(GOLANGCI_LINT_VERSION)" ]; then \
+		echo "[!!] golangci-lint version mismatch (have: $$ver; want: $(GOLANGCI_LINT_VERSION))" >&2; \
+		exit 1; \
+	fi; \
+	echo "[ok] golangci-lint $(GOLANGCI_LINT_VERSION) in $(BIN_DIR)"
 
 # -----------------------------------------------------------------------------
 # Format, Lint, Assess (via goneat)
