@@ -40,7 +40,8 @@ jobs:
           ./bin/sfetch --repo fulmenhq/goneat \
             --tag v0.6.6 \
             --dest-dir bin \
-            --require-minisign
+            --require-minisign \
+            --minisign-key .github/keys/fulmenhq-goneat-minisign.pub
           ./bin/goneat version
 
       - name: Install development tools via goneat
@@ -203,7 +204,8 @@ jobs:
             --tag v0.6.6 \
             --dest-dir "$BIN_DIR" \
             --cache-dir "$CACHE_DIR" \
-            --require-minisign
+            --require-minisign \
+            --minisign-key "$GITHUB_WORKSPACE/.github/keys/fulmenhq-goneat-minisign.pub"
 
           goneat version
 
@@ -238,7 +240,8 @@ jobs:
             --repo fulmenhq/goneat `
             --tag v0.6.6 `
             --dest-dir bin `
-            --require-minisign
+            --require-minisign `
+            --minisign-key .github/keys/fulmenhq-goneat-minisign.pub
           .\bin\goneat.exe version
 
   windows-dogfood-arm64:
@@ -283,5 +286,6 @@ jobs:
             --repo fulmenhq/goneat `
             --tag v0.6.6 `
             --dest-dir bin `
-            --require-minisign
+            --require-minisign `
+            --minisign-key .github/keys/fulmenhq-goneat-minisign.pub
           .\bin\goneat.exe version
