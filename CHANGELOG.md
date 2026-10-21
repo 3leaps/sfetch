@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.14] - 2026-10-21
+
+### Security
+
+- **Standard library vulnerabilities resolved by Go 1.26.10.**
+  GO-2026-6603, GO-2026-6605, GO-2026-6607, GO-2026-6608, GO-2026-6610,
+  GO-2026-6611, GO-2026-6612, GO-2026-6613, GO-2026-6617, and GO-2026-6809
+  (`net/http`, `net/textproto`, `crypto/tls`, `crypto/x509`) were reachable
+  when built with Go 1.26.8.
+
+### Changed
+
+- **Built with Go 1.26.10.** `go.mod` requires toolchain `go1.26.10`, and CI
+  and release workflows pin `actions/setup-go` to 1.26.10. The `go` directive
+  stays 1.26.0.
+- **Dependencies updated.** `golang.org/x/crypto` v0.58.0,
+  `golang.org/x/sys` v0.49.0, and `golang.org/x/text` v0.43.0.
+- **Development tooling pinned.** golangci-lint v2.14.0 (was unpinned) and
+  goneat v0.6.6 (was v0.6.0). CI installs golangci-lint at the pinned version
+  and fails on a version mismatch, and verifies goneat against a committed
+  minisign public key instead of the key published with the release.
+- **Verified self-bootstrap and CI smoke now pin published v0.4.13.**
+
 ## [0.4.13] - 2026-09-18
 
 ### Changed
@@ -218,7 +241,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Maintenance note:** This file is pruned to the latest 10 releases. For older entries, see `docs/releases/`.
 
-[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.13...HEAD
+[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.14...HEAD
+[0.4.14]: https://github.com/3leaps/sfetch/compare/v0.4.13...v0.4.14
 [0.4.13]: https://github.com/3leaps/sfetch/compare/v0.4.12...v0.4.13
 [0.4.12]: https://github.com/3leaps/sfetch/compare/v0.4.11...v0.4.12
 [0.4.11]: https://github.com/3leaps/sfetch/compare/v0.4.10...v0.4.11
