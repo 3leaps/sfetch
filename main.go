@@ -3471,6 +3471,117 @@ func extractTarGz(archivePath, extractDir string) error {
 	return extractTarGzLimited(archivePath, extractDir, maxTarEntries, maxTarExpandedBytes)
 }
 
+// tarBoundReader caps decompressed tar bytes and counts physical 512-byte
+// headers before archive/tar. Next() silently consumes local PAX ('x') and
+// GNU long-name/long-link ('L'/'K') records, so those must be counted here.
+type tarBoundReader struct {
+	r           io.Reader
+	streamCap   int64
+	maxHeaders  int
+	n           int64
+	headers     int
+	blk         [512]byte
+	blkN        int
+	payloadLeft int64
+	err         error
+}
+
+func tarBlockZero(b []byte) bool {
+	for _, c := range b {
+		if c != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func parseTarOctal(b []byte) (int64, bool) {
+	if len(b) > 0 && b[0]&0x80 != 0 {
+		return 0, false
+	}
+	var n int64
+	seen := false
+	for _, c := range b {
+		switch {
+		case c == 0 || c == ' ':
+			if seen {
+				return n, true
+			}
+		case c < '0' || c > '7':
+			return 0, false
+		default:
+			seen = true
+			n = n*8 + int64(c-'0')
+			if n < 0 {
+				return 0, false
+			}
+		}
+	}
+	return n, true
+}
+
+func (t *tarBoundReader) observe(p []byte) error {
+	for len(p) > 0 {
+		if t.payloadLeft > 0 {
+			n := t.payloadLeft
+			if int64(len(p)) < n {
+				n = int64(len(p))
+			}
+			p = p[n:]
+			t.payloadLeft -= n
+			continue
+		}
+		need := 512 - t.blkN
+		take := need
+		if len(p) < take {
+			take = len(p)
+		}
+		copy(t.blk[t.blkN:], p[:take])
+		t.blkN += take
+		p = p[take:]
+		if t.blkN < 512 {
+			return nil
+		}
+		t.blkN = 0
+		if tarBlockZero(t.blk[:]) {
+			continue
+		}
+		t.headers++
+		if t.headers > t.maxHeaders {
+			return fmt.Errorf("tar has too many entries")
+		}
+		size, ok := parseTarOctal(t.blk[124:136])
+		if !ok || size < 0 {
+			return fmt.Errorf("tar expanded size exceeds limit")
+		}
+		padded := size
+		if rem := size % 512; rem != 0 {
+			padded += 512 - rem
+		}
+		t.payloadLeft = padded
+	}
+	return nil
+}
+
+func (t *tarBoundReader) Read(p []byte) (int, error) {
+	if t.err != nil {
+		return 0, t.err
+	}
+	n, err := t.r.Read(p)
+	if n > 0 {
+		t.n += int64(n)
+		if t.n > t.streamCap {
+			t.err = fmt.Errorf("tar expanded size exceeds limit")
+			return n, t.err
+		}
+		if obsErr := t.observe(p[:n]); obsErr != nil {
+			t.err = obsErr
+			return n, t.err
+		}
+	}
+	return n, err
+}
+
 func extractTarGzLimited(archivePath, extractDir string, maxEntries int, maxBytes int64) error {
 	f, err := os.Open(archivePath) // #nosec G304,G703 -- local temp download; gosec-high excludes G304 but not G703
 	if err != nil {
@@ -3484,7 +3595,12 @@ func extractTarGzLimited(archivePath, extractDir string, maxEntries int, maxByte
 	}
 	defer gz.Close() //nolint:errcheck // read-only gzip, close error non-critical
 
-	tr := tar.NewReader(gz)
+	streamCap := maxBytes + int64(maxEntries)*512 + 1024
+	if streamCap < maxBytes {
+		streamCap = maxBytes
+	}
+	bound := &tarBoundReader{r: gz, streamCap: streamCap, maxHeaders: maxEntries}
+	tr := tar.NewReader(bound)
 	extractDirClean := filepath.Clean(extractDir)
 	entries := 0
 	var expanded int64

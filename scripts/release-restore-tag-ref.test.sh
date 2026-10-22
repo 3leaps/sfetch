@@ -52,7 +52,8 @@ export PATH="$scratch/bin:$PATH" FIXTURE_REMOTE="$scratch/remote.git"
 printf 'fixture\n' >"$scratch/source/file"
 printf '1.2.3\n' >"$scratch/source/VERSION"
 cp "$root/scripts/release-guard-tag-version.sh" "$scratch/source/guard.sh"
-git -C "$scratch/source" add file VERSION guard.sh
+cp "$root/scripts/release-origin.sh" "$scratch/source/release-origin.sh"
+git -C "$scratch/source" add file VERSION guard.sh release-origin.sh
 git -C "$scratch/source" commit -qm 'fixture commit'
 git -C "$scratch/source" tag -am 'Fixture release' v1.2.3
 commit="$(git -C "$scratch/source" rev-parse HEAD)"

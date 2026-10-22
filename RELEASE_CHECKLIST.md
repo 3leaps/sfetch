@@ -47,111 +47,121 @@ Why this matters: `make release-upload` now uploads the signed GitHub release as
   - Workflow is read-only (`contents: read`); it never creates a GitHub Release
   - CI validates VERSION file matches tag and verifies the signed tag object
   - Builds unsigned archives and uploads them as workflow artifacts
-  - Maintainer creates a **draft** (`make release-create-draft`) from those artifacts
-  - Release remains non-consumable until you sign, upload signatures, and `make release-publish`
+  - Maintainer then follows the ordered sequence below: download, checksums,
+    create draft, sign, stage tagged keys, verify, notes/upload, verified publish
+  - Release remains non-consumable until `make release-publish`
 
-## 2. Manual Signing (local machine)
+## 2. Manual Signing (local machine, maintainer-only)
 
-Set environment variables:
+Agents never sign. Bare `RELEASE_TAG` is refused.
+Do not run `gh release edit --draft=false` — that bypasses the verified publish gate.
+
+### Inputs
+
 ```bash
 export SFETCH_RELEASE_TAG=v$(cat VERSION)
 export SFETCH_MINISIGN_KEY=/path/to/sfetch.key
-export SFETCH_PGP_KEY_ID=0123456789ABCDEF0123456789ABCDEF01234567!   # exact signing subkey fingerprint with !
-export SFETCH_GPG_HOMEDIR=/path/to/isolated/gpg/homedir              # required for PGP; not the default homedir
-export SFETCH_DECERNOR_BIN=/path/to/decernor                         # absolute, non-symlink, >= 0.1.8
+export SFETCH_MINISIGN_PUB=/path/to/sfetch.pub
+export SFETCH_PGP_KEY_ID=<signing-subkey-fpr>!   # required for publish (SHA256SUMS.asc and SHA512SUMS.asc)
+export SFETCH_GPG_HOMEDIR=/path/to/isolated/gpg/homedir   # not the default homedir
+export SFETCH_GPG_SIGNING_FINGERPRINT=0CACA49B3119B6BC12B2CA11B9B485F294B9FE07
+export SFETCH_DECERNOR_BIN=/path/to/decernor              # absolute, non-symlink, >= 0.1.8
+export SFETCH_TAGGER_NAME="<name>"                        # with SFETCH_TAGGER_EMAIL, must match
+export SFETCH_TAGGER_EMAIL="<email>"                      # config/release/tagger-identity.txt
+export SFETCH_TAG_MESSAGE_DIR=/absolute/path/${SFETCH_RELEASE_TAG}
+export RELEASE_RUN_ID=<release.yml run id>
+export RELEASE_RUN_ATTEMPT=<successful attempt of that run>
 ```
 
-### Steps
+`SFETCH_GPG_SIGNING_FINGERPRINT` is the approved primary in
+`keys/expected-fingerprints.txt` (`0CACA49B3119B6BC12B2CA11B9B485F294B9FE07`).
+PGP on both checksum manifests is required for publish; PGP does not sign the
+installer.
 
-1. **Clean previous release artifacts**
+### Select the CI run and attempt
+
+Tag CI may be re-run. Artifacts belong to the **latest** attempt of a run, so
+name a completed **success** attempt of `.github/workflows/release.yml` whose
+`head_branch` is `$SFETCH_RELEASE_TAG` and `head_sha` is the tagged commit:
+
+```bash
+gh run list --repo 3leaps/sfetch --workflow release.yml --branch "$SFETCH_RELEASE_TAG"
+gh run view "$RELEASE_RUN_ID" --repo 3leaps/sfetch --json conclusion,headSha,status,runAttempt,event,path
+```
+
+If a later attempt exists, set `RELEASE_RUN_ATTEMPT` to that attempt. The fetch
+script refuses a non-success, mismatched commit, or a run that has moved on.
+
+### Ordered sequence
+
+1. **Preflight, message, tag** (after VERSION/changelog prep on `main`)
    ```bash
-   make release-clean
+   make release-preflight
+   make release-tag          # local signed annotated tag; throwaway tests never use the operator key
+   make release-push-tag     # publish the signed tag
    ```
 
-2. **Download artifacts**
+2. **Select CI run + attempt** (inputs above)
+
+3. **Clean and download**
    ```bash
+   make release-clean
    make release-download
    ```
 
-3. **Generate checksum manifests** (`SHA256SUMS`, `SHA512SUMS`)
+4. **Checksums** (then fail-closed verify)
    ```bash
    make release-checksums
-   ```
-
-4. **Verify checksums** (fail-closed: missing/empty manifests and bad hashes fail)
-   ```bash
    make release-verify-checksums
    ```
 
-5. **Sign checksum manifests + installer** with minisign (+ optional PGP on manifests)
+5. **Create draft** — after checksums, **before** signing. The directory must
+   contain only the expected archives plus `SHA256SUMS` / `SHA512SUMS`.
+   `release-create-draft` refuses `SHA256SUMS.minisig` (and any other extra file).
+   ```bash
+   make release-create-draft
+   ```
+
+6. **Sign** checksum manifests + installer (minisign) and both manifests (PGP)
    ```bash
    make release-sign
    ```
-   Produces:
-   - `SHA256SUMS.minisig`, `SHA512SUMS.minisig` (minisign)
-   - **`install-sfetch.sh.minisig` (minisign, required)** — second password prompt is expected
-   - optional `SHA256SUMS.asc` / `SHA512SUMS.asc` if `SFETCH_PGP_KEY_ID` is set
-   - PGP does **not** sign the installer
+   Produces `SHA256SUMS.minisig`, `SHA512SUMS.minisig`,
+   **`install-sfetch.sh.minisig` (required)**, `SHA256SUMS.asc`, `SHA512SUMS.asc`.
 
-6. **Verify signatures** (installer minisig required — missing fails the gate)
-   ```bash
-   make release-verify-signatures
-   ```
-
-7. **Export public keys** (auto-validates before copying)
+7. **Stage tagged public keys** (from the tagged commit, not the operator keyring)
    ```bash
    make release-export-keys
    ```
-   Exports both `sfetch-minisign.pub` and `sfetch-release-signing-key.asc`.
 
-8. **Verify exported keys are public-only**
-   ```bash
-   make release-verify-keys
-   ```
-
-   Or run the full post-signing chain in one step:
-
+8. **Verify** (checksums + signatures + keys)
    ```bash
    make release-verify
    ```
 
-9. **Copy release notes** (requires `docs/releases/$RELEASE_TAG.md`)
+9. **Notes and upload**
    ```bash
    make release-notes
+   make release-upload
    ```
+   Upload stays a draft. `install-sfetch.sh.minisig` is required.
+   If `../scoop-bucket` is present, upload also updates the Scoop manifest.
+   Provenance-only: `make release-upload-provenance`.
 
-10. **Upload release assets and update Scoop**
+10. **Verified publish**
     ```bash
-    make release-upload
+    make release-publish
     ```
-    > **Note:** This target depends on `release-verify` (checksums + signatures + keys).
-    > It uploads ALL assets with `--clobber`, including binaries CI already uploaded.
-    > `install-sfetch.sh.minisig` is required; upload refuses a missing installer signature.
-    > Tag CI never creates a GitHub Release. After `make release-create-draft` and
-    > upload, promote only via byte-verified publish:
-    > ```bash
-    > make release-publish
-    > ```
-    > Do not run `gh release edit --draft=false` directly.
-    > Until publish, the release is incomplete / non-consumable for bootstrap consumers.
-    >
-    > This is intentional for idempotency - rerun safely to fix any mistakes.
-    >
-    > If `../scoop-bucket` is present, this target also runs `make update-scoop-manifest` at the end so the bucket is ready for commit/push immediately after release upload.
-    >
-    > To upload provenance only (manifests, signatures, keys, notes) — also requires `release-verify`:
-    > ```bash
-    > make release-upload-provenance
-    > ```
+    Do not run `gh release edit --draft=false`.
 
-11. **Verify the Scoop manifest update**
+11. **Package-manager handoff** (after publish; no `verify-package-manager-handoff`
+    target yet)
     ```bash
     python3 -m json.tool ../scoop-bucket/bucket/sfetch.json >/dev/null
-    ```
-    Review the diff before committing the bucket repo:
-    ```bash
     cd ../scoop-bucket && git diff bucket/sfetch.json
     ```
+    Homebrew tap: update the sibling formula with the new version, darwin/arm64
+    archive URL, and sha256. Do not open `brew bump-formula-pr` against a draft.
 
 ## 3. Post-Release
 

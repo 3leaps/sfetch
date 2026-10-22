@@ -128,34 +128,49 @@ discoverable from the error message.
 
 ## Manual release signing
 
-Tag CI creates a **draft** release and uploads unsigned platform archives plus
-`install-sfetch.sh`. The draft is **incomplete / non-consumable** for verified
-bootstrap until the maintainer signs and publishes.
+Tag CI is read-only: unsigned platform archives are workflow artifacts only.
+The maintainer creates the draft locally after checksums and before signing
+(`release-create-draft` refuses a directory that already contains
+`SHA256SUMS.minisig`). The draft is **incomplete / non-consumable** until
+verified publish. This is maintainer-only; agents never sign.
 
-Maintainers download artifacts, generate checksums, and sign **locally** with
-minisign (primary) and optionally PGP:
+Bare `RELEASE_TAG` is refused. PGP on both checksum manifests is required for
+publish (not optional). Do not run `gh release edit --draft=false`. Canonical
+inputs and order: [RELEASE_CHECKLIST.md](../RELEASE_CHECKLIST.md).
 
 ```bash
+export SFETCH_RELEASE_TAG=v$(cat VERSION)
 export SFETCH_MINISIGN_KEY=/path/to/key.key
 export SFETCH_MINISIGN_PUB=/path/to/key.pub
-export SFETCH_PGP_KEY_ID=your-key-id  # optional
+export SFETCH_PGP_KEY_ID=<signing-subkey-fpr>!   # required for publish (SHA256SUMS.asc and SHA512SUMS.asc)
+export SFETCH_GPG_HOMEDIR=/path/to/isolated/gpg/homedir
+export SFETCH_GPG_SIGNING_FINGERPRINT=0CACA49B3119B6BC12B2CA11B9B485F294B9FE07
+export SFETCH_DECERNOR_BIN=/path/to/decernor
+export SFETCH_TAGGER_NAME SFETCH_TAGGER_EMAIL    # must match config/release/tagger-identity.txt
+export SFETCH_TAG_MESSAGE_DIR=/path/to/${SFETCH_RELEASE_TAG}
+export RELEASE_RUN_ID=<release.yml run id>
+export RELEASE_RUN_ATTEMPT=<successful attempt>
 
-RELEASE_TAG=v0.4.14 make release-download
-RELEASE_TAG=v0.4.14 make release-checksums
-RELEASE_TAG=v0.4.14 make release-sign
-make release-verify-signatures
-make release-export-keys
-make release-verify-keys
-RELEASE_TAG=v0.4.14 make release-notes
-RELEASE_TAG=v0.4.14 make release-upload
-gh release edit v0.4.14 --draft=false
+make release-preflight
+make release-tag && make release-push-tag
+# select the successful release.yml run+attempt for this tag
+make release-download
+make release-checksums
+make release-create-draft    # after checksums, before signing
+make release-sign
+make release-export-keys     # stage tagged public keys
+make release-verify
+make release-notes
+make release-upload
+make release-publish
+# package-manager handoff: Homebrew tap + Scoop sibling (no make target yet)
 ```
 
 ### What is signed (v0.4.11+)
 
 | Artifact | minisign | PGP |
 |----------|----------|-----|
-| `SHA256SUMS` / `SHA512SUMS` | yes | optional |
+| `SHA256SUMS` / `SHA512SUMS` | yes | **required for publish** |
 | `install-sfetch.sh` | **yes (required)** | no |
 | Platform archives | covered by signed manifests | covered by signed manifests |
 

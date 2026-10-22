@@ -3,6 +3,7 @@ set -euo pipefail
 # shellcheck source=scripts/release-tag-common.sh
 source "$(dirname "$0")/release-tag-common.sh"
 cd "$tag_root"
+require_sfetch_github_origin || tag_die 'origin must be 3leaps/sfetch on GitHub'
 "$tag_root/scripts/release-verify-tag.sh"
 local_object="$(git rev-parse "refs/tags/$SFETCH_RELEASE_TAG")"
 remote_object="$(git ls-remote origin "refs/tags/$SFETCH_RELEASE_TAG" | awk '{print $1}')"

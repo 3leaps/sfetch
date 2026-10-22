@@ -2,6 +2,8 @@
 # Validate the sole release tag input and, in strict mode, bind it to origin/main.
 
 set -euo pipefail
+# shellcheck source=scripts/release-origin.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/release-origin.sh"
 
 main() {
 	local root version expected tag require_tag
@@ -48,27 +50,7 @@ main() {
 			echo "error: strict release work requires a clean checkout" >&2
 			exit 1
 		fi
-		local origin_url
-		origin_url="$(git config --get remote.origin.url || true)"
-		case "$origin_url" in
-		https://github.com/3leaps/sfetch | \
-			https://github.com/3leaps/sfetch.git) ;;
-		git@*:3leaps/sfetch | git@*:3leaps/sfetch.git)
-			local ssh_host resolved_host
-			ssh_host="${origin_url#git@}"
-			ssh_host="${ssh_host%%:*}"
-			resolved_host="$(ssh -G "$ssh_host" 2>/dev/null |
-				awk '$1 == "hostname" { print $2; exit }')"
-			[[ "$resolved_host" == "github.com" ]] || {
-				echo "error: origin SSH host must resolve to github.com" >&2
-				exit 1
-			}
-			;;
-		*)
-			echo "error: origin must identify github.com/3leaps/sfetch" >&2
-			exit 1
-			;;
-		esac
+		require_sfetch_github_origin || exit 1
 		git fetch --quiet --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
 		if [[ "$(git cat-file -t "refs/tags/$tag" 2>/dev/null || true)" != "tag" ]]; then
 			echo "error: strict release tag must be annotated" >&2

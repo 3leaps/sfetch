@@ -19,11 +19,9 @@ approved="${SFETCH_GPG_SIGNING_FINGERPRINT:-}"
 [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || die 'canonical SFETCH_RELEASE_TAG required'
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$root"
-case "$(git config --get remote.origin.url)" in
-    https://github.com/3leaps/sfetch | https://github.com/3leaps/sfetch.git | \
-        git@github.com:3leaps/sfetch | git@github.com:3leaps/sfetch.git) ;;
-    *) die 'origin must be 3leaps/sfetch on GitHub' ;;
-esac
+# shellcheck source=scripts/release-origin.sh
+source "$root/scripts/release-origin.sh"
+require_sfetch_github_origin || die 'origin must be 3leaps/sfetch on GitHub'
 remote_object="$(git ls-remote --exit-code origin "refs/tags/$tag" | awk '{print $1}')" || die 'remote release tag is absent'
 [[ "$remote_object" =~ ^[0-9a-f]{40}$ ]] || die 'remote tag object is invalid'
 # When a verified anchor exists (from staging the packages), the remote object

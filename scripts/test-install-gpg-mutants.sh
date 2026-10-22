@@ -31,7 +31,38 @@ fi
 command -v python3 >/dev/null 2>&1 || fail "python3 required for mutant application"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/sft-mutants.XXXXXX")"
-trap 'rm -rf "$WORK"' EXIT
+GPG_HOMES=()
+cleanup_mutants() {
+    local h
+    for h in "${GPG_HOMES[@]+"${GPG_HOMES[@]}"}"; do
+        [ -n "$h" ] || continue
+        gpgconf --homedir "$h" --kill all >/dev/null 2>&1 || true
+        rm -rf "$h"
+    done
+    rm -rf "$WORK"
+}
+trap cleanup_mutants EXIT
+new_gpg_home() {
+    local d
+    d="$(mktemp -d /tmp/sfetch-gpg.XXXXXX)" || fail "mktemp GnuPG home"
+    chmod 700 "$d" || fail "chmod GnuPG home"
+    GPG_HOMES+=("$d")
+    printf '%s' "$d"
+}
+gpg_run() {
+    local log="$WORK/gpg-fixture.err"
+    if ! "$@" >"$log" 2>&1; then
+        echo "FAIL: gpg fixture failed: $*" >&2
+        cat "$log" >&2
+        fail "gpg fixture"
+    fi
+}
+
+# Revert-failing: installer must use a short /tmp GnuPG home, not TMPDIR.
+grep -q 'mktemp -d /tmp/sfetch-gpg.XXXXXX' "$INSTALLER" ||
+    fail "installer GnuPG home must use mktemp -d /tmp/sfetch-gpg.XXXXXX"
+grep -q 'GPG_HOME="${tmpdir}/gnupg"' "$INSTALLER" &&
+    fail "installer must not place GnuPG home under TMPDIR"
 
 # Probe helper: map verify_signature rc onto the mutant oracle.
 # 0 = accepted, 1 = expected verification-failure signal, other = tool error.
@@ -72,18 +103,17 @@ CUR_PUB="$(sed -n 2p "$WORK/cur.pub")"
 OLD_PUB="$(sed -n 2p "$WORK/old.pub")"
 printf 'abc  sfetch_linux_amd64.tar.gz\n' >"$WORK/SHA256SUMS"
 
-GH="$WORK/gnupg"
-mkdir -m 700 "$GH"
+GH="$(new_gpg_home)"
 gpg_gen() {
-    gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
-        --quick-gen-key "$1" ed25519 sign never >/dev/null 2>&1 || fail "gpg keygen $1"
+    gpg_run gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
+        --quick-gen-key "$1" ed25519 sign never
     gpg --homedir "$GH" --with-colons --fingerprint "$1" | awk -F: '/^fpr:/ {print $10; exit}'
 }
 FPR_CUR="$(gpg_gen 'cur@test.invalid')"
 FPR_OLD="$(gpg_gen 'old@test.invalid')"
 FPR_ATK="$(gpg_gen 'atk@test.invalid')"
-gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
-    --quick-add-key "$FPR_CUR" ed25519 sign never >/dev/null 2>&1 || fail "add signing subkey"
+gpg_run gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
+    --quick-add-key "$FPR_CUR" ed25519 sign never
 SUB_CUR="$(gpg --homedir "$GH" --with-colons --list-keys "$FPR_CUR" |
     awk -F: '$1 == "sub" { s = 1; next } s && $1 == "fpr" { f = $10 } END { print f }')"
 [ -n "$SUB_CUR" ] && [ "$SUB_CUR" != "$FPR_CUR" ] || fail "signing subkey"
@@ -91,13 +121,12 @@ SUB_CUR="$(gpg --homedir "$GH" --with-colons --list-keys "$FPR_CUR" |
 # Pad current secret listing so mutant 9 (pipe+grep -q) can SIGPIPE.
 pad="$(printf 'p%.0s' $(seq 1 1500))"
 for i in $(seq 1 100); do
-    gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
-        --quick-add-uid "$FPR_CUR" "${i}${pad} <pad${i}@test.invalid>" >/dev/null 2>&1 ||
-        fail "add padding uid $i"
+    gpg_run gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
+        --quick-add-uid "$FPR_CUR" "${i}${pad} <pad${i}@test.invalid>"
 done
-mkdir -m 700 "$WORK/probe"
+PROBE_HOME="$(new_gpg_home)"
 big="$(gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' --armor \
-    --export-secret-keys "$FPR_CUR" | gpg --homedir "$WORK/probe" --batch --with-colons \
+    --export-secret-keys "$FPR_CUR" | gpg --homedir "$PROBE_HOME" --batch --with-colons \
     --import-options show-only --import 2>/dev/null | wc -c)" || true
 [ "${big:-0}" -gt 131072 ] || fail "padded secret listing too small (${big:-0} bytes)"
 
@@ -199,21 +228,15 @@ elif n == 10:
         '''sig_primary="$(awk '{print $3}' <<<"$line")"''',
     )
 elif n == 11:
-    # GnuPG home outside the trapped tmpdir, cleanup function emptied.
+    # GnuPG home cleanup emptied so the private home leaks.
     sub(
         r'gpg_cleanup\(\) \{\n    if \[ -n "\$GPG_HOME" \] && \[ -d "\$GPG_HOME" \]; then\n        gpgconf --homedir "\$GPG_HOME" --kill all >/dev/null 2>&1 \|\| true\n        rm -rf "\$GPG_HOME"\n    fi\n    GPG_HOME=""\n\}',
         'gpg_cleanup() { GPG_HOME=""; }',
         flags=re.M,
     )
     sub(
-        r'GPG_HOME="\$\{tmpdir\}/gnupg"',
+        r'GPG_HOME="\$\(mktemp -d /tmp/sfetch-gpg.XXXXXX\)"',
         'GPG_HOME="$(mktemp -d)"',
-    )
-    # mktemp -d already created the directory; skip mkdir so the mutant
-    # reaches gpg --homedir (plain mkdir -m 700 would fail on an existing dir).
-    sub(
-        r'mkdir -m 700 "\$GPG_HOME" \|\| err "cannot create GnuPG home"',
-        'true',
     )
 else:
     raise SystemExit(f'unknown mutant {n}')
