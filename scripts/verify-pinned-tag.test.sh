@@ -9,6 +9,30 @@ bin="${SFETCH_DECERNOR_BIN:-$(command -v decernor || true)}"
     exit 1
 }
 export SFETCH_DECERNOR_BIN="$bin"
+# Decernor fingerprint verify must precede the listing check. Reversing them
+# in the script must fail this test even when both would succeed on a fixture.
+if ! python3 - "$root/scripts/verify-pinned-tag.sh" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+
+def decernor_first(s):
+    dec = s.find("fingerprint verify")
+    listing = s.find("validate-release-anchors.sh")
+    return dec >= 0 and listing >= 0 and dec < listing
+
+if not decernor_first(text):
+    raise SystemExit("fingerprint verify must precede validate-release-anchors.sh")
+i, j = text.find("fingerprint verify"), text.find("validate-release-anchors.sh")
+a, b = "fingerprint verify", "validate-release-anchors.sh"
+rev = text[:i] + b + text[i + len(a) : j] + a + text[j + len(b) :]
+if decernor_first(rev):
+    raise SystemExit("order checker does not fail when Decernor/listing are reversed")
+PY
+then
+    echo 'error: verify-pinned-tag.sh must call Decernor before the listing check' >&2
+    exit 1
+fi
 scratch="$(mktemp -d)"
 cleanup() {
     local home

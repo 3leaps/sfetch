@@ -259,24 +259,27 @@ tag_fresh_signing_gnupg_home() {
 		tag_die 'cannot create signing GnuPG home'
 		return 1
 	}
+	# Bind and arm TERM/INT before chmod so a signal during setup still
+	# discards this directory. EXIT is armed by the caller; TERM is not.
+	TAG_SIGN_GNUPGHOME="$dir"
+	TAG_SIGN_GNUPGHOME_LAST="$dir"
+	trap 'tag_cleanup_homes; exit 143' TERM INT
 	if [[ -L "$dir" || ! -d "$dir" ]]; then
-		rm -rf "$dir"
+		tag_discard_signing_home
 		tag_die 'signing GnuPG home must be a fresh directory, not a symlink'
 		return 1
 	fi
 	chmod 700 "$dir" || {
-		rm -rf "$dir"
+		tag_discard_signing_home
 		tag_die 'cannot chmod signing GnuPG home'
 		return 1
 	}
 	mode="$(tag_stat_mode "$dir")"
 	[[ "$mode" == "700" ]] || {
-		rm -rf "$dir"
+		tag_discard_signing_home
 		tag_die 'signing GnuPG home must be mode 0700'
 		return 1
 	}
-	TAG_SIGN_GNUPGHOME="$dir"
-	TAG_SIGN_GNUPGHOME_LAST="$dir"
 }
 
 # Import the selected secret key into a fresh temp home and bind GNUPGHOME there.

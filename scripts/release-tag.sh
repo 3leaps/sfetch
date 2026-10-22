@@ -8,6 +8,7 @@ message=""
 # Cleanup must be armed before any GnuPG home is created so a later failure
 # still removes the isolated signing and verify directories.
 trap 'tag_cleanup_homes; rm -f "$message"' EXIT
+trap 'tag_cleanup_homes; rm -f "$message"; exit 143' TERM INT
 tag_version
 tag_identity
 tag_key_selector
@@ -16,6 +17,8 @@ tag_checkout
 [[ -z "$(git show-ref --tags "refs/tags/$SFETCH_RELEASE_TAG" || true)" ]] || tag_die 'local tag already exists'
 tag_prepare_signing_home
 message="$(mktemp)"
+trap 'tag_cleanup_homes; rm -f "$message"' EXIT
+trap 'tag_cleanup_homes; rm -f "$message"; exit 143' TERM INT
 tag_expected_message >"$message"
 export GIT_COMMITTER_NAME="$SFETCH_TAGGER_NAME" GIT_COMMITTER_EMAIL="$SFETCH_TAGGER_EMAIL"
 # Host git may be configured for SSH signing (gpg.format=ssh). Force OpenPGP

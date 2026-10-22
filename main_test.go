@@ -709,6 +709,49 @@ func TestExtractTarGzRejectsTooManyEntries(t *testing.T) {
 	}
 }
 
+func TestExtractTarGzCountsDotMemberSize(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "dot.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	// 64KiB "." member: skipped as a destination, but must still charge size.
+	writeTestTarGz(t, archivePath, []testTarEntry{
+		{name: ".", body: strings.Repeat("\x00", 64<<10), mode: 0o644},
+		{name: "ok", body: "x", mode: 0o644},
+	})
+	if err := extractTarGzLimited(archivePath, extractDir, 256, 1024); err == nil {
+		t.Fatal("expected expanded-size rejection of 64KiB '.' member")
+	}
+}
+
+func TestExtractTarGzCountsPAXGlobalHeaders(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "pax.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	entries := make([]testTarEntry, 301)
+	for i := 0; i < 300; i++ {
+		entries[i] = testTarEntry{
+			name:     fmt.Sprintf("pax-%d", i),
+			typeflag: tar.TypeXGlobalHeader,
+			pax:      map[string]string{"comment": fmt.Sprintf("%d", i)},
+		}
+	}
+	entries[300] = testTarEntry{name: "ok", body: "x", mode: 0o644}
+	writeTestTarGz(t, archivePath, entries)
+	if err := extractTarGzLimited(archivePath, extractDir, 3, 512<<20); err == nil {
+		t.Fatal("expected entry-count rejection of 300 PAX global headers")
+	}
+}
+
 func TestExtractTarGzFixture(t *testing.T) {
 	t.Parallel()
 
@@ -772,9 +815,11 @@ func TestExtractTarGzRejectsZipSlip(t *testing.T) {
 }
 
 type testTarEntry struct {
-	name string
-	body string
-	mode os.FileMode
+	name     string
+	body     string
+	mode     os.FileMode
+	typeflag byte
+	pax      map[string]string
 }
 
 func writeTestTarGz(t *testing.T, path string, entries []testTarEntry) {
@@ -786,17 +831,25 @@ func writeTestTarGz(t *testing.T, path string, entries []testTarEntry) {
 	gz := gzip.NewWriter(out)
 	tw := tar.NewWriter(gz)
 	for _, e := range entries {
+		typeflag := e.typeflag
+		if typeflag == 0 {
+			typeflag = tar.TypeReg
+		}
 		hdr := &tar.Header{
-			Name:     e.name,
-			Mode:     int64(e.mode),
-			Size:     int64(len(e.body)),
-			Typeflag: tar.TypeReg,
+			Name:       e.name,
+			Mode:       int64(e.mode),
+			Size:       int64(len(e.body)),
+			Typeflag:   typeflag,
+			PAXRecords: e.pax,
 		}
 		if err := tw.WriteHeader(hdr); err != nil {
 			_ = tw.Close()
 			_ = gz.Close()
 			_ = out.Close()
 			t.Fatalf("write tar header: %v", err)
+		}
+		if typeflag == tar.TypeXGlobalHeader || typeflag == tar.TypeXHeader {
+			continue
 		}
 		if _, err := io.WriteString(tw, e.body); err != nil {
 			_ = tw.Close()

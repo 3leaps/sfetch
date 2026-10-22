@@ -43,6 +43,7 @@ eng_old="$(grep -E '^readonly GONEAT_MINISIGN_PUBKEY_LEGACY="' "$ENGINE" | head 
 pass "goneat literals equal committed public pins"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/sft-goneat-map.XXXXXX")"
+export WORK
 trap 'rm -rf "$WORK"' EXIT
 # Standalone copy: only the script, no docs/security tree beside it.
 mkdir -p "$WORK/alone"
@@ -120,6 +121,8 @@ mapfile -t two_paths < <(bash "$WORK/alone/driver.sh" --two-runs)
 [ -n "${two_paths[0]}" ] && [ -f "${two_paths[0]}" ] || fail "first goneat key file missing"
 [ -n "${two_paths[1]}" ] && [ -f "${two_paths[1]}" ] || fail "second goneat key file missing"
 [ "${two_paths[0]}" != "${two_paths[1]}" ] || fail "two consecutive mktemp runs must not reuse a fixed name"
+rm -rf "$(dirname -- "${two_paths[0]}")" "$(dirname -- "${two_paths[1]}")"
+[ ! -e "${two_paths[0]}" ] && [ ! -e "${two_paths[1]}" ] || fail "goneat pin dirs must be removed after use"
 pass "portable mktemp allows two consecutive goneat key files"
 
 echo "[ok] goneat key-by-version map"
