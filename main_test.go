@@ -661,6 +661,20 @@ func TestExtractTarGz(t *testing.T) {
 	}
 }
 
+func TestExtractTarGzOpenHasG703Nosec(t *testing.T) {
+	t.Parallel()
+
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	// gosec-high excludes G304 globally but not G703. Reverting the G703
+	// disposition on extractTarGz's archive open fails CI Quality.
+	if !strings.Contains(string(src), "os.Open(archivePath) // #nosec G304,G703") {
+		t.Fatal("extractTarGz os.Open(archivePath) must #nosec G304,G703")
+	}
+}
+
 func TestExtractTarGzFixture(t *testing.T) {
 	t.Parallel()
 

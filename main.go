@@ -3463,7 +3463,7 @@ func archiveEntryDest(extractDirClean, name, kind string) (string, bool, error) 
 }
 
 func extractTarGz(archivePath, extractDir string) error {
-	f, err := os.Open(archivePath) // #nosec G304 -- path is a local temp download
+	f, err := os.Open(archivePath) // #nosec G304,G703 -- local temp download; gosec-high excludes G304 but not G703
 	if err != nil {
 		return fmt.Errorf("open tar.gz %s: %w", archivePath, err)
 	}

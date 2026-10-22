@@ -193,10 +193,16 @@ func TestVersionIsolatedMakefileBinary(t *testing.T) {
 		t.Fatalf("mkdir build: %v", err)
 	}
 
-	build := exec.Command("make", "build", "BUILD_ARTIFACT="+artifact)
+	// GNU make treats \NNN in Windows paths as octal (t.TempDir uses \001).
+	makeArtifact := filepath.ToSlash(artifact)
+	build := exec.Command("make", "build", "BUILD_ARTIFACT="+makeArtifact)
 	build.Dir = "."
-	if out, err := build.CombinedOutput(); err != nil {
+	out, err := build.CombinedOutput()
+	if err != nil {
 		t.Fatalf("make build: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(artifact); err != nil {
+		t.Fatalf("make build wrote no binary at %s: %v\n%s", artifact, err, out)
 	}
 
 	isolated := filepath.Join(tmp, "isolated")

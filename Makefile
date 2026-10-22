@@ -192,7 +192,7 @@ build: ## Build for current platform
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build \
 		-ldflags="$(LDFLAGS)" \
 		-trimpath \
-		-o $(BUILD_ARTIFACT) $(MAIN)
+		-o "$(BUILD_ARTIFACT)" $(MAIN)
 	@echo "[ok] Built $(BUILD_ARTIFACT)"
 
 build-all: ## Build for all platforms
