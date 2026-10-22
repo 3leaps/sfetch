@@ -24,14 +24,14 @@ minisign -G -W -p "$PUB" -s "$KEY" >/dev/null 2>&1 ||
     minisign -G -n -p "$PUB" -s "$KEY" >/dev/null 2>&1 ||
     fail "minisign keygen failed"
 
-# Fixture scripts tree: ephemeral key is the temporary "canonical" anchor so
+# Fixture repo tree: ephemeral key is the temporary "canonical" anchor so
 # verify mechanics can be tested without production secrets. Production
-# scripts/sfetch-minisign-anchor.pub remains the real SSOT.
-FIX_SCRIPTS="${WORKDIR}/scripts"
-mkdir -p "$FIX_SCRIPTS"
-cp "$ROOT/scripts/verify-signatures.sh" "$FIX_SCRIPTS/"
-cp "$PUB" "$FIX_SCRIPTS/sfetch-minisign-anchor.pub"
-VERIFY="$FIX_SCRIPTS/verify-signatures.sh"
+# docs/security/sfetch-minisign.pub remains the real SSOT.
+FIX_ROOT="${WORKDIR}/repo"
+mkdir -p "$FIX_ROOT/scripts" "$FIX_ROOT/docs/security"
+cp "$ROOT/scripts/verify-signatures.sh" "$FIX_ROOT/scripts/"
+cp "$PUB" "$FIX_ROOT/docs/security/sfetch-minisign.pub"
+VERIFY="$FIX_ROOT/scripts/verify-signatures.sh"
 chmod +x "$VERIFY"
 
 # --- Fixture: signed manifests + installer ---
@@ -162,14 +162,34 @@ Expire-Date: 0
 EOF
     gpg --homedir "$GPG_HOME" --batch --gen-key "${WORKDIR}/gpg-batch" >/dev/null 2>&1 ||
         fail "ephemeral gpg keygen failed"
-    PGP_ID="$(gpg --homedir "$GPG_HOME" --list-keys --with-colons 2>/dev/null | awk -F: '/^pub/{print $5; exit}')"
-    [ -n "$PGP_ID" ] || fail "could not read ephemeral PGP key id"
+    PGP_FPR="$(gpg --homedir "$GPG_HOME" --with-colons --fingerprint 2>/dev/null | awk -F: '/^fpr/{print $10; exit}')"
+    [ -n "$PGP_FPR" ] || fail "could not read ephemeral PGP fingerprint"
+    PGP_ID="${PGP_FPR}!"
 
     PGP_DIR="${WORKDIR}/pgp"
     mkdir -p "$PGP_DIR"
     cp "$STAGE/install-sfetch.sh" "$PGP_DIR/"
     cp "$STAGE/SHA256SUMS" "$PGP_DIR/"
     cp "$STAGE/SHA512SUMS" "$PGP_DIR/"
+    # Isolated homedir is required; the default homedir must be refused.
+    if SFETCH_MINISIGN_KEY="$KEY" SFETCH_PGP_KEY_ID="$PGP_ID" \
+        ./scripts/sign-release-manifests.sh v0.0.0-pgp-nohome "$PGP_DIR" >/dev/null 2>&1; then
+        fail "PGP signing without SFETCH_GPG_HOMEDIR must be refused"
+    fi
+    pass "PGP signing refuses a missing isolated homedir"
+    if SFETCH_MINISIGN_KEY="$KEY" SFETCH_PGP_KEY_ID="$PGP_ID" \
+        SFETCH_GPG_HOMEDIR="${HOME}/.gnupg" \
+        ./scripts/sign-release-manifests.sh v0.0.0-pgp-defaulthome "$PGP_DIR" >/dev/null 2>&1; then
+        fail "PGP signing with the default homedir must be refused"
+    fi
+    pass "PGP signing refuses the default homedir"
+    if SFETCH_MINISIGN_KEY="$KEY" SFETCH_PGP_KEY_ID="$PGP_FPR" \
+        SFETCH_GPG_HOMEDIR="$GPG_HOME" \
+        ./scripts/sign-release-manifests.sh v0.0.0-pgp-nosubkey "$PGP_DIR" >/dev/null 2>&1; then
+        fail "PGP signing without a subkey ! selector must be refused"
+    fi
+    pass "PGP signing requires a subkey ! selector"
+
     SFETCH_MINISIGN_KEY="$KEY" \
         SFETCH_PGP_KEY_ID="$PGP_ID" \
         SFETCH_GPG_HOMEDIR="$GPG_HOME" \
@@ -187,7 +207,7 @@ else
 fi
 
 # Case 9: SSOT file present and matches embedded consumers
-ANCHOR="$ROOT/scripts/sfetch-minisign-anchor.pub"
+ANCHOR="$ROOT/docs/security/sfetch-minisign.pub"
 [ -f "$ANCHOR" ] || fail "canonical anchor SSOT missing"
 ANCHOR_RW="$(grep -E '^RW' "$ANCHOR" | head -n1 | tr -d '\r\n')"
 [ -n "$ANCHOR_RW" ] || fail "anchor has no RW line"

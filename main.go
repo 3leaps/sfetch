@@ -255,15 +255,15 @@ const (
 // minisignPubkeyRegex matches a valid minisign public key line (with or without comment header)
 var minisignPubkeyRegex = regexp.MustCompile(`^RW[A-Za-z0-9+/]{54}$`)
 
-// Canonical minisign trust anchor SSOT: scripts/sfetch-minisign-anchor.pub
+// Canonical minisign trust anchor SSOT: docs/security/sfetch-minisign.pub
 // EmbeddedMinisignPubkey is derived from that file (go:embed). Standalone
 // consumers (install-sfetch.sh, bootstrap-sfetch-verified.sh) embed the same
 // RW line and are checked against the SSOT in tests / release verify.
 //
-//go:embed scripts/sfetch-minisign-anchor.pub
+//go:embed docs/security/sfetch-minisign.pub
 var embeddedMinisignPubFile string
 
-// EmbeddedMinisignPubkey is the RW… line from scripts/sfetch-minisign-anchor.pub.
+// EmbeddedMinisignPubkey is the RW… line from docs/security/sfetch-minisign.pub.
 var EmbeddedMinisignPubkey = mustMinisignPubkeyLine(embeddedMinisignPubFile)
 
 // EmbeddedMinisignKeyID is a human label for the release signing key.
@@ -276,7 +276,7 @@ func mustMinisignPubkeyLine(content string) string {
 			return line
 		}
 	}
-	panic("scripts/sfetch-minisign-anchor.pub: missing RW… public key line")
+	panic("docs/security/sfetch-minisign.pub: missing RW… public key line")
 }
 
 // minisignSecretkeyPrefixes are known prefixes for secret key files

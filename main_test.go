@@ -2488,12 +2488,15 @@ func TestEmbeddedTrustAnchors(t *testing.T) {
 	})
 
 	t.Run("matches SSOT anchor file and bootstrap engine", func(t *testing.T) {
-		anchor, err := os.ReadFile("scripts/sfetch-minisign-anchor.pub")
+		anchor, err := os.ReadFile("docs/security/sfetch-minisign.pub")
 		if err != nil {
-			t.Fatalf("read scripts/sfetch-minisign-anchor.pub: %v", err)
+			t.Fatalf("read docs/security/sfetch-minisign.pub: %v", err)
 		}
 		if !strings.Contains(string(anchor), EmbeddedMinisignPubkey) {
-			t.Error("EmbeddedMinisignPubkey does not match scripts/sfetch-minisign-anchor.pub")
+			t.Error("EmbeddedMinisignPubkey does not match docs/security/sfetch-minisign.pub")
+		}
+		if _, err := os.Stat("scripts/sfetch-minisign-anchor.pub"); err == nil {
+			t.Error("scripts/sfetch-minisign-anchor.pub must not exist; embed docs/security/sfetch-minisign.pub")
 		}
 		engine, err := os.ReadFile("scripts/bootstrap-sfetch-verified.sh")
 		if err != nil {

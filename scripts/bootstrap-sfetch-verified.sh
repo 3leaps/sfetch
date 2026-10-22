@@ -49,7 +49,7 @@ readonly SFETCH_BOOTSTRAP_MAX="v0.4.14"
 # when 3-step exists. Both routes verify; neither silently falls back.
 readonly SFETCH_MINISIG_SINCE="v0.4.11"
 
-# Embedded trust anchor — must match scripts/sfetch-minisign-anchor.pub (SSOT),
+# Embedded trust anchor — must match docs/security/sfetch-minisign.pub (SSOT),
 # main.go (go:embed of that file), and scripts/install-sfetch.sh. Do NOT fetch
 # sfetch-minisign.pub from the release for authentication (circular).
 # The published .pub is for human out-of-band comparison only.
@@ -64,6 +64,12 @@ readonly SFETCH_MINISIGN_PUBKEY="RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVq
 # range-release assert fails once MIN advances past it, forcing the removal).
 readonly SFETCH_PREVKEY_MAX="v0.4.11"
 readonly SFETCH_MINISIGN_PUBKEY_LEGACY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
+
+# goneat minisign pin map. GONEAT_PREVKEY_MAX is the last tag signed with the
+# retired fulmenhq key (historical fact, never advance it). Tags at or below
+# it verify against fulmenhq-goneat-minisign-retired-1.pub; tags above verify
+# against fulmenhq-goneat-minisign.pub. Never try both keys for one tag.
+readonly GONEAT_PREVKEY_MAX="v0.6.0"
 
 readonly MINISIGN_VERSION_EXPECTED="0.12"
 readonly MINISIGN_WIN_URL="https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip"
@@ -168,6 +174,24 @@ semver_le() {
     local r
     r="$(semver_cmp "$1" "$2")" || die "semver comparison failed for $1 vs $2"
     [[ "$r" != "1" ]]
+}
+
+# Select the committed goneat minisign pin for an exact tag. Reads the file
+# from this engine's repository tree (docs/security/<org>-<tool>-minisign.pub).
+goneat_minisign_key_file() {
+    local ver="$1"
+    local root key
+    root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    if ! is_exact_semver_tag "$ver"; then
+        die "goneat-version must be exact vMAJOR.MINOR.PATCH (got: $ver)"
+    fi
+    if semver_le "$ver" "$GONEAT_PREVKEY_MAX"; then
+        key="${root}/docs/security/fulmenhq-goneat-minisign-retired-1.pub"
+    else
+        key="${root}/docs/security/fulmenhq-goneat-minisign.pub"
+    fi
+    [ -f "$key" ] && [ -s "$key" ] || die "goneat minisign pin missing: $key"
+    printf '%s\n' "$key"
 }
 
 # -----------------------------------------------------------------------------
@@ -644,8 +668,11 @@ version_output_matches_pin "$REPORT" "$VERSION" ||
 # install or version failure is non-zero (no soft skip when requested).
 if [ -n "$GONEAT_VERSION" ]; then
     log "installing goneat ${GONEAT_VERSION} via verified sfetch"
+    GONEAT_KEY="$(goneat_minisign_key_file "$GONEAT_VERSION")"
+    log "goneat trust anchor: ${GONEAT_KEY}"
     "$SFETCH_BIN" --repo fulmenhq/goneat --tag "$GONEAT_VERSION" \
-        --dest-dir "$INSTALL_DIR" --require-minisign ||
+        --dest-dir "$INSTALL_DIR" --require-minisign \
+        --minisign-key "$GONEAT_KEY" ||
         die "goneat install failed for ${GONEAT_VERSION} (requested; fail closed)"
     GONEAT_BIN="${INSTALL_DIR}/goneat"
     if [ "$OS" = "windows" ] && [ -f "${INSTALL_DIR}/goneat.exe" ]; then
