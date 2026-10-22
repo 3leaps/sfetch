@@ -22,7 +22,7 @@ jobs:
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
-          go-version: '1.26.8'
+          go-version: '1.26.10'
 
       - name: Install system tools
         run: |
@@ -38,9 +38,10 @@ jobs:
       - name: Install goneat via sfetch (dogfooding)
         run: |
           ./bin/sfetch --repo fulmenhq/goneat \
-            --tag v0.6.0 \
+            --tag v0.6.6 \
             --dest-dir bin \
-            --require-minisign
+            --require-minisign \
+            --minisign-key .github/keys/fulmenhq-goneat-minisign.pub
           ./bin/goneat version
 
       - name: Install development tools via goneat
@@ -48,6 +49,12 @@ jobs:
           export PATH="$PWD/bin:$PATH"
           goneat doctor tools --scope foundation --install --yes || true
           goneat doctor tools --scope security --install --yes || true
+
+      - name: Install pinned golangci-lint
+        run: |
+          make golangci-lint-install
+          export PATH="$PWD/bin:$PATH"
+          [ "$(command -v golangci-lint)" = "$PWD/bin/golangci-lint" ]
 
       - name: Quality
         run: |
@@ -175,7 +182,7 @@ jobs:
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
-          go-version: '1.26.8'
+          go-version: '1.26.10'
 
       - name: Build sfetch (from this commit)
         shell: bash
@@ -194,10 +201,11 @@ jobs:
           export PATH="$BIN_DIR:$PATH"
 
           sfetch --repo fulmenhq/goneat \
-            --tag v0.6.0 \
+            --tag v0.6.6 \
             --dest-dir "$BIN_DIR" \
             --cache-dir "$CACHE_DIR" \
-            --require-minisign
+            --require-minisign \
+            --minisign-key "$GITHUB_WORKSPACE/.github/keys/fulmenhq-goneat-minisign.pub"
 
           goneat version
 
@@ -209,7 +217,7 @@ jobs:
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
-          go-version: '1.26.8'
+          go-version: '1.26.10'
 
       # Pinned official minisign 0.12 archive (no Chocolatey/winget).
       - name: Install pinned minisign 0.12
@@ -230,9 +238,10 @@ jobs:
         run: |
           .\bin\sfetch.exe `
             --repo fulmenhq/goneat `
-            --tag v0.6.0 `
+            --tag v0.6.6 `
             --dest-dir bin `
-            --require-minisign
+            --require-minisign `
+            --minisign-key .github/keys/fulmenhq-goneat-minisign.pub
           .\bin\goneat.exe version
 
   windows-dogfood-arm64:
@@ -243,7 +252,7 @@ jobs:
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
-          go-version: '1.26.8'
+          go-version: '1.26.10'
 
       # Pinned official minisign 0.12 archive (no Chocolatey/winget).
       - name: Install pinned minisign 0.12
@@ -275,7 +284,8 @@ jobs:
         run: |
           .\bin\sfetch.exe `
             --repo fulmenhq/goneat `
-            --tag v0.6.0 `
+            --tag v0.6.6 `
             --dest-dir bin `
-            --require-minisign
+            --require-minisign `
+            --minisign-key .github/keys/fulmenhq-goneat-minisign.pub
           .\bin\goneat.exe version

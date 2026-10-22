@@ -1,3 +1,44 @@
+## v0.4.14
+
+### Summary
+
+Security maintenance release built with Go 1.26.10. It resolves standard
+library vulnerabilities reachable from sfetch when built with Go 1.26.8
+(`net/http`, `net/textproto`, `crypto/tls`, `crypto/x509`), refreshes the
+`golang.org/x` modules, and pins development tooling. There are no CLI or
+trust-anchor changes.
+
+### Highlights
+
+**Go 1.26.10**
+- `go.mod` requires toolchain `go1.26.10`; CI and release workflows pin
+  `actions/setup-go` to 1.26.10. The `go` directive stays 1.26.0.
+- Resolves GO-2026-6603, GO-2026-6605, GO-2026-6607, GO-2026-6608,
+  GO-2026-6610, GO-2026-6611, GO-2026-6612, GO-2026-6613, GO-2026-6617, and
+  GO-2026-6809. `govulncheck` reports no called vulnerabilities.
+
+**Dependencies**
+- `golang.org/x/crypto` v0.58.0, `golang.org/x/sys` v0.49.0, and
+  `golang.org/x/text` v0.43.0.
+
+**Development tooling**
+- golangci-lint pinned to v2.14.0 (was unpinned); goneat pinned to v0.6.6.
+- CI installs golangci-lint at the pinned version and fails on a version
+  mismatch.
+- CI verifies goneat against a committed minisign public key instead of the
+  key published with the release.
+- The Makefile N-1 self-bootstrap and CI install-smoke pin advances to the
+  fully signed v0.4.13 release. The bootstrap engine accepts v0.4.14 as its
+  committed ceiling.
+
+### Compatibility
+
+No user migration is required. CLI behavior, supported platforms, and
+verification trust anchors are unchanged. Building from source requires Go
+1.26 or later; the toolchain directive selects 1.26.10.
+
+---
+
 ## v0.4.13
 
 ### Summary

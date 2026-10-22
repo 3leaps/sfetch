@@ -76,7 +76,7 @@ jobs:
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
-          go-version: '1.26.8'
+          go-version: '1.26.10'
 
       - name: License check
         # go-licenses v1.6.0 errors on stdlib packages ("Package fmt does not

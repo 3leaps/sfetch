@@ -42,7 +42,7 @@ supported `sfetch-version` range for that SHA and fails closed outside it.
 - uses: 3leaps/sfetch/.github/actions/setup-sfetch@<commit-sha>
   with:
     sfetch-version: v0.4.11          # exact tag; never latest
-    goneat-version: v0.6.0           # optional; exact tag if set
+    goneat-version: v0.6.6           # optional; exact tag if set
   env:
     GITHUB_TOKEN: ${{ github.token }}
     GH_TOKEN: ${{ github.token }}
