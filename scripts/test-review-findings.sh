@@ -187,7 +187,45 @@ for doc in "$root/RELEASE_CHECKLIST.md" "$root/README.md" "$root/docs/security.m
 	grep -q 'release-create-draft' "$doc" || fail "M8: $doc must create the draft after checksums"
 done
 grep -qi 'Homebrew' "$root/RELEASE_CHECKLIST.md" || fail "M8: checklist must include the Homebrew handoff"
+python3 - "$root/RELEASE_CHECKLIST.md" <<'PY' || fail "M8: Homebrew handoff must pin all three tap platforms from published SHA256SUMS"
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+idx = text.lower().find("homebrew")
+if idx < 0:
+    raise SystemExit("Homebrew section missing")
+chunk = text[idx:]
+for plat in ("darwin_arm64", "linux_amd64", "linux_arm64"):
+    archive = f"sfetch_{plat}.tar.gz"
+    if plat not in chunk or archive not in chunk:
+        raise SystemExit(f"Homebrew handoff missing {plat} / {archive}")
+    url = f"https://github.com/3leaps/sfetch/releases/download/$SFETCH_RELEASE_TAG/{archive}"
+    if url not in chunk:
+        raise SystemExit(f"Homebrew handoff missing URL for {plat}")
+if "SHA256SUMS" not in chunk:
+    raise SystemExit("Homebrew handoff must take sha256 from SHA256SUMS")
+if "minisign-verified" not in chunk:
+    raise SystemExit("Homebrew handoff must take sha256 from minisign-verified SHA256SUMS")
+if "darwin/arm64 archive URL, and sha256" in text:
+    raise SystemExit("Homebrew handoff still names only darwin/arm64")
+PY
 grep -q 'verify-package-manager-handoff' "$mk" && fail "M8: do not add verify-package-manager-handoff yet"
+python3 - "$mk" <<'PY' || fail "M8: release-upload must not invoke update-scoop-manifest"
+import pathlib, re, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+m = re.search(r'^release-upload:.*?(?=\n[a-z].*:|\Z)', text, re.M | re.S)
+if not m:
+    raise SystemExit('release-upload missing')
+if 'update-scoop-manifest' in m.group(0):
+    raise SystemExit('release-upload still calls update-scoop-manifest')
+um = re.search(r'^update-scoop-manifest:.*?(?=\n[a-z].*:|\Z)', text, re.M | re.S)
+if not um:
+    raise SystemExit('update-scoop-manifest missing')
+if 'Skipping Scoop' in um.group(0):
+    raise SystemExit('update-scoop-manifest still fails open')
+if 'exit 1' not in um.group(0):
+    raise SystemExit('update-scoop-manifest must fail closed')
+PY
 
 # M9: install-release-anchors refuses existing dest files.
 grep -q 'refusing to overwrite' "$root/scripts/install-release-anchors.sh" ||
