@@ -160,51 +160,50 @@ print_verifier_help() {
 # Platform detection
 # -----------------------------------------------------------------------------
 
+windows_arch_from_hint() {
+    case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+        amd64 | x64 | x86_64)
+            echo "amd64"
+            return 0
+            ;;
+        arm64 | aarch64)
+            echo "arm64"
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 detect_windows_arch() {
     local arch_hint
 
     # GitHub-hosted runners expose the native runner architecture via RUNNER_ARCH,
     # which stays accurate even when Git Bash and spawned processes are emulated.
-    arch_hint=$(printf '%s' "${RUNNER_ARCH:-}" | tr '[:upper:]' '[:lower:]')
-    case "$arch_hint" in
-        amd64 | x64 | x86_64)
-            echo "amd64"
-            return 0
-            ;;
-        arm64 | aarch64)
-            echo "arm64"
-            return 0
-            ;;
-    esac
-
-    # GitHub's Windows ARM64 runners invoke Git Bash under x64 emulation, and
-    # both uname -m and PROCESSOR_ARCHITECTURE can still report amd64 there.
-    # Ask native PowerShell for the host OS architecture next.
-    if command -v powershell.exe >/dev/null 2>&1; then
-        arch_hint=$(powershell.exe -NoProfile -NonInteractive -Command "[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture" 2>/dev/null | tr -d '\r' | tr '[:upper:]' '[:lower:]' | head -n1)
-        case "$arch_hint" in
-            amd64 | x64 | x86_64)
-                echo "amd64"
-                return 0
-                ;;
-            arm64 | aarch64)
-                echo "arm64"
-                return 0
-                ;;
-        esac
+    if arch_hint=$(windows_arch_from_hint "${RUNNER_ARCH:-}"); then
+        echo "$arch_hint"
+        return 0
     fi
 
-    arch_hint=$(printf '%s' "${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE:-}}" | tr '[:upper:]' '[:lower:]')
-    case "$arch_hint" in
-        amd64 | x64 | x86_64)
-            echo "amd64"
+    # WOW64 publishes the host arch in PROCESSOR_ARCHITEW6432. Prefer that
+    # before PowerShell: GitHub Windows ARM64 runners invoke Git Bash and
+    # powershell.exe under x64 emulation, and OSArchitecture then reports X64.
+    if arch_hint=$(windows_arch_from_hint "${PROCESSOR_ARCHITEW6432:-}"); then
+        echo "$arch_hint"
+        return 0
+    fi
+
+    if command -v powershell.exe >/dev/null 2>&1; then
+        arch_hint=$(powershell.exe -NoProfile -NonInteractive -Command "[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture" 2>/dev/null | tr -d '\r' | tr '[:upper:]' '[:lower:]' | head -n1 || true)
+        if arch_hint=$(windows_arch_from_hint "$arch_hint"); then
+            echo "$arch_hint"
             return 0
-            ;;
-        arm64 | aarch64)
-            echo "arm64"
-            return 0
-            ;;
-    esac
+        fi
+    fi
+
+    if arch_hint=$(windows_arch_from_hint "${PROCESSOR_ARCHITECTURE:-}"); then
+        echo "$arch_hint"
+        return 0
+    fi
 
     return 1
 }
