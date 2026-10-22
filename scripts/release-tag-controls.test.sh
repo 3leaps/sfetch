@@ -283,13 +283,26 @@ op_primary="$(gpg --homedir "$op_home" --with-colons --fingerprint sign@test.inv
 gpgconf --homedir "$op_home" --kill all >/dev/null 2>&1 || true
 if ! python3 - "$root/scripts/release-tag.sh" <<'PY'
 from pathlib import Path
+import re
 import sys
 text = Path(sys.argv[1]).read_text()
-trap = text.find("trap 'tag_cleanup_homes")
-selector = text.find("tag_key_selector")
-signing = text.find("tag_prepare_signing_home")
+lines = text.splitlines()
+def stmt(pat):
+    for i, ln in enumerate(lines):
+        if re.match(pat, ln):
+            return i
+    return -1
+trap = stmt(r"^trap 'tag_cleanup_homes")
+selector = stmt(r"^tag_key_selector$")
+signing = stmt(r"^tag_prepare_signing_home$")
 if trap < 0 or selector < 0 or signing < 0 or not (trap < selector < signing):
     raise SystemExit(f'order trap={trap} selector={selector} signing={signing}')
+if not any('TERM' in ln and 'tag_cleanup_homes' in ln for ln in lines):
+    raise SystemExit('cleanup trap must include TERM')
+# Commented-out or disabled setup must not count as a call.
+disabled = text.replace("tag_prepare_signing_home\n", "# tag_prepare_signing_home\n", 1)
+if re.search(r'(?m)^tag_prepare_signing_home$', disabled):
+    raise SystemExit('signing-home checker does not fail when the setup call is disabled')
 PY
 then
 	echo 'error: release-tag.sh must arm cleanup before creating GnuPG homes' >&2
@@ -297,6 +310,38 @@ then
 fi
 grep -q 'tag_cleanup_homes' "$root/scripts/release-tag.sh" || {
 	echo 'error: signed-tag EXIT trap must discard signing and verify homes' >&2
+	exit 1
+}
+# TERM during signing-home setup must discard the temp dir.
+term_path="$scratch/term-sign-path"
+term_pid_file="$scratch/term-sign-pid"
+rm -f "$term_path" "$term_pid_file"
+bash -c '
+set -euo pipefail
+# shellcheck source=scripts/release-tag-common.sh
+source "$1"
+tag_fresh_signing_gnupg_home
+printf "%s\n" "$TAG_SIGN_GNUPGHOME" >"$2"
+printf "%s\n" "$$" >"$3"
+sleep 60
+' _ "$root/scripts/release-tag-common.sh" "$term_path" "$term_pid_file" &
+term_child=$!
+for _ in $(seq 1 50); do
+	[[ -s "$term_path" ]] && break
+	sleep 0.1
+done
+[[ -s "$term_path" ]] || {
+	kill "$term_child" >/dev/null 2>&1 || true
+	echo 'error: signing home was not created for TERM test' >&2
+	exit 1
+}
+term_home="$(cat "$term_path")"
+[[ -d "$term_home" ]]
+kill -s TERM "$term_child" >/dev/null 2>&1 || true
+wait "$term_child" >/dev/null 2>&1 || true
+[[ ! -e "$term_home" ]] || {
+	echo 'error: signing home leaked on TERM during setup' >&2
+	rm -rf "$term_home"
 	exit 1
 }
 echo '[ok] signed-tag negative controls passed'

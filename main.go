@@ -3497,21 +3497,44 @@ func extractTarGzLimited(archivePath, extractDir string, maxEntries int, maxByte
 		if err != nil {
 			return fmt.Errorf("read tar %s: %w", archivePath, err)
 		}
-		switch hdr.Typeflag {
-		case tar.TypeXHeader, tar.TypeXGlobalHeader, tar.TypeGNULongName, tar.TypeGNULongLink:
-			continue
-		}
 
+		// Count every header and declared payload before skipping meta
+		// members (PAX/GNU long names) or "." destinations. Skipping first
+		// let a 64KiB "." entry and hundreds of PAX globals bypass the limits.
 		entries++
 		if entries > maxEntries {
 			return fmt.Errorf("tar has too many entries")
 		}
-
-		destPathClean, skip, err := archiveEntryDest(extractDirClean, hdr.Name, "tar")
-		if err != nil {
-			return err
+		if hdr.Size < 0 {
+			return fmt.Errorf("tar entry %q has negative size", hdr.Name)
 		}
-		if skip {
+		if hdr.Size > maxBytes || expanded > maxBytes-hdr.Size {
+			return fmt.Errorf("tar expanded size exceeds limit")
+		}
+
+		skipMeta := false
+		switch hdr.Typeflag {
+		case tar.TypeXHeader, tar.TypeXGlobalHeader, tar.TypeGNULongName, tar.TypeGNULongLink:
+			skipMeta = true
+		}
+
+		var destPathClean string
+		skipDest := false
+		if !skipMeta {
+			destPathClean, skipDest, err = archiveEntryDest(extractDirClean, hdr.Name, "tar")
+			if err != nil {
+				return err
+			}
+		}
+		if skipMeta || skipDest {
+			if hdr.Size > 0 {
+				// #nosec G110 -- already charged against maxBytes above
+				n, copyErr := io.CopyN(io.Discard, tr, hdr.Size)
+				expanded += n
+				if copyErr != nil && copyErr != io.EOF {
+					return fmt.Errorf("read tar %s: %w", archivePath, copyErr)
+				}
+			}
 			continue
 		}
 
@@ -3522,12 +3545,7 @@ func extractTarGzLimited(archivePath, extractDir string, maxEntries int, maxByte
 				return fmt.Errorf("mkdir %s: %w", destPathClean, err)
 			}
 		case tar.TypeReg, tar.TypeRegA:
-			if hdr.Size < 0 {
-				return fmt.Errorf("tar entry %q has negative size", hdr.Name)
-			}
-			if hdr.Size > maxBytes || expanded > maxBytes-hdr.Size {
-				return fmt.Errorf("tar expanded size exceeds limit")
-			}
+			// Size already charged against maxBytes above, before any skip.
 			// #nosec G301,G703 -- SDR-002: tar extraction dir; SDR-006: prefix-contained path
 			if err := os.MkdirAll(filepath.Dir(destPathClean), 0o755); err != nil {
 				return fmt.Errorf("mkdir %s: %w", filepath.Dir(destPathClean), err)

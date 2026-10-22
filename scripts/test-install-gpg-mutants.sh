@@ -33,6 +33,38 @@ command -v python3 >/dev/null 2>&1 || fail "python3 required for mutant applicat
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/sft-mutants.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
+# Probe helper: map verify_signature rc onto the mutant oracle.
+# 0 = accepted, 1 = expected verification-failure signal, other = tool error.
+PROBE_VERIFY="$WORK/probe-verify.sh"
+export PROBE_VERIFY
+cat >"$PROBE_VERIFY" <<'EOS'
+probe_run_verify() {
+    set +e
+    (verify_signature "$1" "$2") >/dev/null 2>&1
+    _vrc=$?
+    set -e
+    return 0
+}
+# Property: input must be rejected. Accept → KILL; verify-fail → SURVIVE; else ERROR.
+probe_expect_reject() {
+    probe_run_verify "$1" "$2"
+    case "$_vrc" in
+        0) exit 1 ;;
+        1) exit 0 ;;
+        *) exit "$_vrc" ;;
+    esac
+}
+# Property: input must be accepted. Accept → SURVIVE; verify-fail → KILL; else ERROR.
+probe_expect_accept() {
+    probe_run_verify "$1" "$2"
+    case "$_vrc" in
+        0) exit 0 ;;
+        1) exit 1 ;;
+        *) exit "$_vrc" ;;
+    esac
+}
+EOS
+
 # --- throwaway keys (never the operator keyring) ---
 minisign -G -W -p "$WORK/cur.pub" -s "$WORK/cur.key" >/dev/null 2>&1 || fail "keygen current"
 minisign -G -W -p "$WORK/old.pub" -s "$WORK/old.key" >/dev/null 2>&1 || fail "keygen legacy"
@@ -236,6 +268,7 @@ probe_minisign_cross() {
     bash -c '
 set -euo pipefail
 . "$1"
+. "$PROBE_VERIFY"
 SFETCH_MINISIGN_PUBKEY="$2"
 SFETCH_MINISIGN_PUBKEY_LEGACY="$3"
 d="$(mktemp -d "$4/m.XXXXXX")"
@@ -243,12 +276,8 @@ cp "$4/SHA256SUMS" "$d/SHA256SUMS"
 minisign -S -s "$4/cur.key" -m "$d/SHA256SUMS" -x "$d/SHA256SUMS.minisig" >/dev/null
 VERIFY_MINISIGN=true VERIFY_GPG=false REQUIRE_MINISIGN=true REQUIRE_SIGNATURE=true
 # Property: a current-key signature must be rejected for a legacy tag.
-# Run verify in a subshell: err() uses exit, which would otherwise kill this
-# probe and look like a KILL even on unmutated code.
-if select_trust_anchor v0.4.11 >/dev/null && (verify_signature "$d/SHA256SUMS" "$d") >/dev/null 2>&1; then
-    exit 1
-fi
-exit 0
+select_trust_anchor v0.4.11 >/dev/null
+probe_expect_reject "$d/SHA256SUMS" "$d"
 ' _ "$src" "$CUR_PUB" "$OLD_PUB" "$WORK"
 }
 
@@ -257,6 +286,7 @@ probe_gpg_default_pin() {
     bash -c '
 set -euo pipefail
 . "$1"
+. "$PROBE_VERIFY"
 SFETCH_PGP_FPR="$2"
 SFETCH_PGP_FPR_LEGACY="$3"
 d="$(mktemp -d "$4/g.XXXXXX")"
@@ -266,10 +296,8 @@ gpg --homedir "$5" --batch --yes --pinentry-mode loopback --passphrase "" \
     -u cur@test.invalid --armor --detach-sign -o "$d/SHA256SUMS.asc" "$d/SHA256SUMS"
 VERIFY_MINISIGN=false VERIFY_GPG=true REQUIRE_MINISIGN=false REQUIRE_SIGNATURE=true
 # Property: the current GPG key must be rejected for a legacy tag.
-if select_trust_anchor v0.4.11 >/dev/null && (verify_signature "$d/SHA256SUMS" "$d") >/dev/null 2>&1; then
-    exit 1
-fi
-exit 0
+select_trust_anchor v0.4.11 >/dev/null
+probe_expect_reject "$d/SHA256SUMS" "$d"
 ' _ "$src" "$FPR_CUR" "$FPR_OLD" "$WORK" "$GH"
 }
 
@@ -278,6 +306,7 @@ probe_minisign_fallback() {
     bash -c '
 set -euo pipefail
 . "$1"
+. "$PROBE_VERIFY"
 SFETCH_MINISIGN_PUBKEY="$2"
 SFETCH_MINISIGN_PUBKEY_LEGACY="$3"
 SFETCH_PGP_FPR="$4"
@@ -289,10 +318,8 @@ gpg --homedir "$6" --batch --yes --pinentry-mode loopback --passphrase "" \
     -u cur@test.invalid --armor --detach-sign -o "$d/SHA256SUMS.asc" "$d/SHA256SUMS"
 VERIFY_MINISIGN=true VERIFY_GPG=true REQUIRE_MINISIGN=false REQUIRE_SIGNATURE=true
 # Property: a minisign reject must not fall through to a valid GPG signature.
-if select_trust_anchor v0.4.12 >/dev/null && (verify_signature "$d/SHA256SUMS" "$d") >/dev/null 2>&1; then
-    exit 1
-fi
-exit 0
+select_trust_anchor v0.4.12 >/dev/null
+probe_expect_reject "$d/SHA256SUMS" "$d"
 ' _ "$src" "$CUR_PUB" "$OLD_PUB" "$FPR_CUR" "$WORK" "$GH"
 }
 
@@ -301,6 +328,7 @@ probe_bundle() {
     bash -c '
 set -euo pipefail
 . "$1"
+. "$PROBE_VERIFY"
 SFETCH_PGP_FPR="$2"
 d="$(mktemp -d "$3/b.XXXXXX")"
 cp "$3/SHA256SUMS" "$d/SHA256SUMS"
@@ -310,10 +338,8 @@ gpg --homedir "$4" --batch --yes --pinentry-mode loopback --passphrase "" \
     -u atk@test.invalid --armor --detach-sign -o "$d/SHA256SUMS.asc" "$d/SHA256SUMS"
 VERIFY_MINISIGN=false VERIFY_GPG=true REQUIRE_MINISIGN=false REQUIRE_SIGNATURE=true
 # Property: a bundled extra primary must be refused even when the pin is present.
-if select_trust_anchor v0.4.12 >/dev/null && (verify_signature "$d/SHA256SUMS" "$d") >/dev/null 2>&1; then
-    exit 1
-fi
-exit 0
+select_trust_anchor v0.4.12 >/dev/null
+probe_expect_reject "$d/SHA256SUMS" "$d"
 ' _ "$src" "$FPR_CUR" "$WORK" "$GH"
 }
 
@@ -322,6 +348,7 @@ probe_secret_large() {
     bash -c '
 set -euo pipefail
 . "$1"
+. "$PROBE_VERIFY"
 SFETCH_PGP_FPR="$2"
 d="$(mktemp -d "$3/x.XXXXXX")"
 cp "$3/SHA256SUMS" "$d/SHA256SUMS"
@@ -332,10 +359,8 @@ gpg --homedir "$4" --batch --yes --pinentry-mode loopback --passphrase "" \
 VERIFY_MINISIGN=false VERIFY_GPG=true REQUIRE_MINISIGN=false REQUIRE_SIGNATURE=true
 # Property: a secret-key listing (including >128KB) must be refused. Mutant 9
 # can SIGPIPE and skip the reject.
-if select_trust_anchor v0.4.12 >/dev/null && (verify_signature "$d/SHA256SUMS" "$d") >/dev/null 2>&1; then
-    exit 1
-fi
-exit 0
+select_trust_anchor v0.4.12 >/dev/null
+probe_expect_reject "$d/SHA256SUMS" "$d"
 ' _ "$src" "$FPR_CUR" "$WORK" "$GH"
 }
 
@@ -344,6 +369,7 @@ probe_subkey() {
     bash -c '
 set -euo pipefail
 . "$1"
+. "$PROBE_VERIFY"
 # Committed subkey-signature specimen: CONTROL must pass without depending on
 # live keygen, and field 12 must be used (GnuPG 2.5.x puts flags in $NF).
 spec="$2"
@@ -356,10 +382,8 @@ cp "$spec/public.asc" "$d/sfetch-release-signing-key.asc"
 VERIFY_MINISIGN=false VERIFY_GPG=true REQUIRE_MINISIGN=false REQUIRE_SIGNATURE=true
 # Property: a subkey signature whose VALIDSIG primary field (12) matches the
 # pin must verify. Mutant 10 compares field 3 (subkey) and rejects.
-if select_trust_anchor v0.4.12 >/dev/null && (verify_signature "$d/SHA256SUMS" "$d") >/dev/null 2>&1; then
-    exit 0
-fi
-exit 1
+select_trust_anchor v0.4.12 >/dev/null
+probe_expect_accept "$d/SHA256SUMS" "$d"
 ' _ "$src" "$ROOT/testdata/gpg-mutants" "$WORK"
 }
 
@@ -388,12 +412,14 @@ chmod +x "$shim/gpg"
 set +e
 PATH="$shim:$PATH" bash -c "set -euo pipefail
     . \"\$1\"
+    . \"\$4\"
     tmpdir=\"\$2\"
     trap '\''gpg_cleanup; rm -rf \"\$tmpdir\"'\'' EXIT
     VERIFY_MINISIGN=false VERIFY_GPG=true REQUIRE_MINISIGN=false REQUIRE_SIGNATURE=true
     SFETCH_PGP_FPR=\"\$3\"
     select_trust_anchor v0.4.12
-    verify_signature \"\$tmpdir/SHA256SUMS\" \"\$tmpdir\"" _ "$1" "$d" "$3" >/dev/null 2>&1
+    probe_run_verify \"\$tmpdir/SHA256SUMS\" \"\$tmpdir\"
+    exit \"\$_vrc\"" _ "$1" "$d" "$3" "$PROBE_VERIFY" >/dev/null 2>&1
 rc=$?
 set -e
 # Mutant 11 is killed if a GnuPG home remains after the trap.
@@ -405,8 +431,12 @@ done <"$homes_log"
 if [ "$leaked" -eq 1 ]; then
     exit 1
 fi
-# Also kill if the empty key file was accepted.
-[ "$rc" -ne 0 ] || exit 1
+# Empty key must fail verification (1). Tool errors are not kills.
+case "$rc" in
+    0) exit 1 ;;
+    1) ;;
+    *) exit "$rc" ;;
+esac
 exit 0
 ' _ "$src" "$WORK" "$FPR_CUR"
 }
@@ -466,6 +496,21 @@ run_mutant() {
 [ "$(classify_probe_rc 127)" = ERROR ] || fail "classify 127 must be ERROR, not KILL"
 [ "$(classify_probe_rc 2)" = ERROR ] || fail "classify 2 must be ERROR, not KILL"
 pass "harness errors are not kills"
+
+# Identity "mutant" (unchanged installer) + broken gpg must be ERROR, not KILL.
+# Replacing this probe with the old `exit 1` collapse reports a kill.
+iddir="$WORK/identity"
+mkdir -p "$iddir" "$WORK/broken-gpg"
+strip_installer "$INSTALLER" "$iddir/src"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 127' >"$WORK/broken-gpg/gpg"
+chmod +x "$WORK/broken-gpg/gpg"
+set +e
+PATH="$WORK/broken-gpg:$PATH" probe_subkey "$iddir/src"
+idrc=$?
+set -e
+idkind="$(classify_probe_rc "$idrc")"
+[ "$idkind" = ERROR ] || fail "unchanged code + gpg 127 must be ERROR not $idkind (rc=$idrc)"
+pass "broken gpg is never a kill"
 
 # Field-12 parser: $NF is the primary on 2.2/2.4 and flags on 2.5.x.
 eval "$(sed -n '/^gpg_validsig_primary()/,/^}/p' "$INSTALLER")"

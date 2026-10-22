@@ -17,6 +17,25 @@ grep -q 'release-verify-committed-anchors.sh' "$wf" || fail "H1: tag CI must run
 grep -q 'ci-install-decernor.sh' "$wf" || fail "H1: tag CI must install Decernor via ci-install-decernor.sh"
 grep -q 'config/release/decernor-ci-sha256.txt' "$root/scripts/ci-install-decernor.sh" ||
 	fail "H1: Decernor install must pin config/release/decernor-ci-sha256.txt"
+# Decernor must be installed before verify-pinned-tag.sh (needs SFETCH_DECERNOR_BIN).
+python3 - "$wf" <<'PY' || fail "H1: Decernor install must precede verify-pinned-tag.sh"
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+
+def install_before_verify(s):
+    install = s.find("ci-install-decernor.sh")
+    verify = s.find("verify-pinned-tag.sh")
+    return install >= 0 and verify >= 0 and install < verify
+
+if not install_before_verify(text):
+    raise SystemExit("ci-install-decernor.sh must appear before verify-pinned-tag.sh")
+rev = text.replace("ci-install-decernor.sh", "VERIFY_PLACEHOLDER", 1)
+rev = rev.replace("verify-pinned-tag.sh", "ci-install-decernor.sh", 1)
+rev = rev.replace("VERIFY_PLACEHOLDER", "verify-pinned-tag.sh", 1)
+if install_before_verify(rev):
+    raise SystemExit("order checker does not fail when install/verify are reversed")
+PY
 
 # H2: every restore-tag-ref step in release.yml carries GH_TOKEN.
 python3 - "$wf" <<'PY' || fail "H2: restore-tag-ref step missing GH_TOKEN"
@@ -43,7 +62,7 @@ grep -qE 'sha256sum --check --quiet' "$root/scripts/ci-install-decernor.sh" ||
 	fail "H3: sha256sum --check must be --quiet (stdout is the binary path only)"
 grep -q 'printed extra stdout' "$ci" || fail "H3: ci.yml must refuse multiline Decernor stdout"
 
-# H4: behavioural check lives in test-makefile-release-tag.sh (make -n).
+# H4: behavioural check lives in test-makefile-release-tag.sh (stubbed fetch, not make -n).
 
 # H6: public-key staging is from the tagged commit, not the operator keyring/env.
 for target in release-export-minisign-key release-export-key release-export-keys; do
@@ -135,8 +154,21 @@ if got != required:
     raise SystemExit(f"matrix rows {sorted(got)} != {sorted(required)}")
 if "GOHOSTOS" not in native or "Assert runner matches matrix target" not in native:
     raise SystemExit("native job must assert GOHOSTOS against the matrix target")
-if "needs: native" not in ci or 'needs.native.result' not in ci:
-    raise SystemExit("platforms aggregate must require native success")
+# Exact equality: inverting to != "success" or = "failure" must fail.
+agg = re.search(
+    r'(?m)^\s+run:\s+test\s+"\$\{\{\s*needs\.native\.result\s*\}\}"\s+=\s+"success"\s*$',
+    ci,
+)
+if not agg:
+    raise SystemExit("platforms aggregate must run: test needs.native.result = success")
+if re.search(r'needs\.native\.result[^.\n]*!=', ci):
+    raise SystemExit("platforms aggregate check is inverted")
+inverted = ci[: agg.start()] + '            run: test "${{ needs.native.result }}" != "success"\n' + ci[agg.end() :]
+if re.search(
+    r'(?m)^\s+run:\s+test\s+"\$\{\{\s*needs\.native\.result\s*\}\}"\s+=\s+"success"\s*$',
+    inverted,
+):
+    raise SystemExit("aggregate checker does not fail when the test is inverted")
 for label in ("ubuntu-latest-arm64-s", "windows-latest-arm64-s"):
     if label not in lint:
         raise SystemExit(f"actionlint.yaml must allow {label}")

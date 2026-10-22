@@ -40,6 +40,16 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Install pinned Decernor
+        run: |
+          set -euo pipefail
+          tool_dir="$(mktemp -d "$RUNNER_TEMP/decernor.XXXXXX")"
+          SFETCH_DECERNOR_BIN="$(./scripts/ci-install-decernor.sh "$tool_dir")"
+          case "$SFETCH_DECERNOR_BIN" in
+            *$'\n'*) echo "error: Decernor install printed extra stdout" >&2; exit 1 ;;
+          esac
+          echo "SFETCH_DECERNOR_BIN=$SFETCH_DECERNOR_BIN" >>"$GITHUB_ENV"
+
       - name: Verify committed pin and GitHub signature
         id: verify
         env:
@@ -47,6 +57,7 @@ jobs:
           SFETCH_RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          test -x "${SFETCH_DECERNOR_BIN:?SFETCH_DECERNOR_BIN required}"
           ./scripts/release-restore-tag-ref.sh
           SFETCH_REQUIRE_TAG=1 ./scripts/release-guard-tag-version.sh
           ./scripts/verify-pinned-tag.sh
@@ -64,12 +75,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tool_dir="$(mktemp -d "$RUNNER_TEMP/decernor.XXXXXX")"
-          export SFETCH_DECERNOR_BIN
-          SFETCH_DECERNOR_BIN="$(./scripts/ci-install-decernor.sh "$tool_dir")"
-          case "$SFETCH_DECERNOR_BIN" in
-            *$'\n'*) echo "error: Decernor install printed extra stdout" >&2; exit 1 ;;
-          esac
+          test -x "${SFETCH_DECERNOR_BIN:?SFETCH_DECERNOR_BIN required}"
           ./scripts/release-verify-committed-anchors.sh
 
   build:

@@ -57,16 +57,35 @@ grep -qi 'RELEASE_TAG is not accepted' /tmp/sft-make-empty-rt.out ||
     fail "empty RELEASE_TAG= refusal (log: $(cat /tmp/sft-make-empty-rt.out))"
 pass "empty RELEASE_TAG= is refused"
 
-# H4: make -n release-download must use the CI-artifact provenance path.
-dry="$(make -n release-download "SFETCH_RELEASE_TAG=v${file_version}" 2>/tmp/sft-make-dl.err)" || {
-    fail "make -n release-download failed: $(cat /tmp/sft-make-dl.err)"
-}
-printf '%s\n' "$dry" | grep -q 'release-fetch-ci-artifacts.sh' ||
-    fail "make -n release-download must call release-fetch-ci-artifacts.sh (got: $dry)"
-if printf '%s\n' "$dry" | grep -q 'download-release-assets.sh'; then
-    fail "make -n release-download still calls download-release-assets.sh"
+# H4: actually run release-download with a stubbed fetch script. make -n
+# alone does not prove the recipe runs.
+scratch_dl="$(mktemp -d "${TMPDIR:-/tmp}/sft-make-dl.XXXXXX")"
+trap 'rm -rf "$scratch_dl" /tmp/sft-make-rt.out /tmp/sft-make-missing.out /tmp/sft-make-ver.out /tmp/sft-make-empty-rt.out' EXIT
+mkdir -p "$scratch_dl/scripts"
+cp "$ROOT/VERSION" "$scratch_dl/VERSION"
+stub_log="$scratch_dl/called.log"
+cat >"$scratch_dl/scripts/release-fetch-ci-artifacts.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" >"${STUB_LOG:?}"
+mkdir -p "$2"
+touch "$2/.fetched"
+SH
+chmod +x "$scratch_dl/scripts/release-fetch-ci-artifacts.sh"
+if ! STUB_LOG="$stub_log" make -C "$scratch_dl" -f "$ROOT/Makefile" release-download \
+    "SFETCH_RELEASE_TAG=v${file_version}" \
+    >/tmp/sft-make-dl.out 2>/tmp/sft-make-dl.err; then
+    fail "make release-download with stub fetch failed: $(cat /tmp/sft-make-dl.err)"
 fi
-pass "make -n release-download uses CI-artifact provenance"
+[ -s "$stub_log" ] || fail "release-download must invoke release-fetch-ci-artifacts.sh (make -n is not enough)"
+grep -q "v${file_version}" "$stub_log" ||
+    fail "stub fetch must receive the release tag (got: $(cat "$stub_log"))"
+grep -q 'dist/release' "$stub_log" ||
+    fail "stub fetch must receive dist/release (got: $(cat "$stub_log"))"
+if grep -q 'download-release-assets.sh' /tmp/sft-make-dl.out /tmp/sft-make-dl.err "$stub_log"; then
+    fail "release-download still calls download-release-assets.sh"
+fi
+pass "release-download invokes CI-artifact fetch"
 
 if grep -E '^release-sign:.*release-checksums' Makefile; then
     fail "release-sign must not run release-checksums before the tag guard"

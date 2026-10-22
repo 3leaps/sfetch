@@ -431,13 +431,22 @@ verify_signature() {
             # 3. VALIDSIG primary (field 12) — the signer may be a subkey; the
             #    pin is the primary fingerprint. Removing only one of these
             #    leaves a hole the other two do not cover.
-            local listing fprs _f
-            if ! listing=$(gpg --homedir "$GPG_HOME" --batch --no-tty --with-colons \
-                --import-options show-only --import "$gpg_key" 2>/dev/null); then
+            local listing fprs _f gpg_rc=0
+            set +e
+            listing=$(gpg --homedir "$GPG_HOME" --batch --no-tty --with-colons \
+                --import-options show-only --import "$gpg_key" 2>/dev/null)
+            gpg_rc=$?
+            set -e
+            if [ "$gpg_rc" -eq 127 ]; then
+                gpg_cleanup
+                echo "error: gpg tool failure (rc=$gpg_rc)" >&2
+                exit 127
+            fi
+            if [ "$gpg_rc" -ne 0 ]; then
                 gpg_cleanup
                 err "GPG key file could not be read"
             fi
-            # Parse the whole listing in the shell (no pipes: an early-exiting
+            # Parse the whole listing in the shell (no pipes: an early-exiting)
             # reader under pipefail could otherwise skip a check).
             local line rec want=false has_sec=false nprimary=0
             fprs=""
@@ -477,7 +486,16 @@ verify_signature() {
             # --trust-model always still emits EXPKEYSIG/EXPSIG/REVKEYSIG and
             # KEYEXPIRED with rc=0 plus VALIDSIG; those are not a valid pin.
             local status sig_primary gpg_bad=false gpg_rc=0 gpg_tok nvalid=0
-            if ! gpg --batch --no-tty --homedir "$GPG_HOME" --import "$gpg_key" 2>/dev/null; then
+            set +e
+            gpg --batch --no-tty --homedir "$GPG_HOME" --import "$gpg_key" 2>/dev/null
+            gpg_rc=$?
+            set -e
+            if [ "$gpg_rc" -eq 127 ]; then
+                gpg_cleanup
+                echo "error: gpg tool failure (rc=$gpg_rc)" >&2
+                exit 127
+            fi
+            if [ "$gpg_rc" -ne 0 ]; then
                 gpg_cleanup
                 err "GPG signature verification failed"
             fi
@@ -486,6 +504,11 @@ verify_signature() {
                 --status-fd 1 --verify "${sums_file}.asc" "$sums_file" 2>/dev/null)
             gpg_rc=$?
             set -e
+            if [ "$gpg_rc" -eq 127 ]; then
+                gpg_cleanup
+                echo "error: gpg tool failure (rc=$gpg_rc)" >&2
+                exit 127
+            fi
             sig_primary=""
             while IFS= read -r line; do
                 case "$line" in
