@@ -1691,7 +1691,81 @@ func normalizeArgs(args []string) []string {
 	return args
 }
 
+type versionInfoJSON struct {
+	Version   string `json:"version"`
+	GitCommit string `json:"gitCommit"`
+	BuildTime string `json:"buildTime"`
+	GoVersion string `json:"goVersion"`
+	OS        string `json:"os"`
+	Arch      string `json:"arch"`
+}
+
+func currentVersionInfo() versionInfoJSON {
+	return versionInfoJSON{
+		Version:   version,
+		GitCommit: gitCommit,
+		BuildTime: buildTime,
+		GoVersion: runtime.Version(),
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+	}
+}
+
+func printVersionInfo(w io.Writer, extended, jsonOut bool) int {
+	info := currentVersionInfo()
+	if jsonOut {
+		data, err := json.MarshalIndent(info, "", "  ")
+		if err != nil {
+			return 1
+		}
+		_, _ = fmt.Fprintln(w, string(data)) //nolint:errcheck // best-effort version output
+		return 0
+	}
+	_, _ = fmt.Fprintf(w, "sfetch %s\n", info.Version) //nolint:errcheck
+	if !extended {
+		return 0
+	}
+	_, _ = fmt.Fprintf(w, "  git commit: %s\n", info.GitCommit)        //nolint:errcheck
+	_, _ = fmt.Fprintf(w, "  build time: %s\n", info.BuildTime)        //nolint:errcheck
+	_, _ = fmt.Fprintf(w, "  go version: %s\n", info.GoVersion)        //nolint:errcheck
+	_, _ = fmt.Fprintf(w, "  os/arch:    %s/%s\n", info.OS, info.Arch) //nolint:errcheck
+	return 0
+}
+
+func runVersionCommand(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("sfetch version", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	extended := fs.Bool("extended", false, "print extended version/build info")
+	fs.BoolVar(extended, "e", false, "print extended version/build info")
+	jsonOut := fs.Bool("json", false, "JSON output")
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(stdout, "Usage: sfetch version [--extended] [--json]")                       //nolint:errcheck
+		_, _ = fmt.Fprintln(stdout, "")                                                                  //nolint:errcheck
+		_, _ = fmt.Fprintln(stdout, "Print version information. Use --extended for full build details.") //nolint:errcheck
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.Usage()
+			return 0
+		}
+		_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
+		fs.Usage()
+		return 2
+	}
+	if len(fs.Args()) > 0 {
+		_, _ = fmt.Fprintln(stderr, "error: version does not take positional arguments") //nolint:errcheck
+		return 2
+	}
+	return printVersionInfo(stdout, *extended, *jsonOut)
+}
+
 func run(args []string, stdout, stderr io.Writer) int {
+	// Subcommand must be argv[1] so it cannot collide with --url values or
+	// positional URLs (including normalizeArgs moving a leading https:// URL).
+	if len(args) > 0 && args[0] == "version" {
+		return runVersionCommand(args[1:], stdout, stderr)
+	}
+
 	args = normalizeArgs(args)
 	fs := flag.NewFlagSet("sfetch", flag.ContinueOnError)
 
@@ -1766,7 +1840,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	fs.Usage = func() {
-		_, _ = fmt.Fprintf(out, "Usage: sfetch [flags]\n\n") //nolint:errcheck // help output best-effort
+		_, _ = fmt.Fprintf(out, "Usage: sfetch [flags]\n")                         //nolint:errcheck // help output best-effort
+		_, _ = fmt.Fprintf(out, "       sfetch version [--extended] [--json]\n\n") //nolint:errcheck
 
 		_, _ = fmt.Fprintln(out, "Selection:") //nolint:errcheck
 		for _, name := range []string{"repo", "github-raw", "url", "tag", "latest", "asset-match", "asset-regex", "asset-type", "binary-name", "output", "dest-dir", "install", "cache-dir"} {
@@ -1849,19 +1924,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if *versionFlag {
-		_, _ = fmt.Fprintln(stderr, "sfetch", version) //nolint:errcheck // best-effort version output
-		return 0
+	if *versionFlag || *versionExtended {
+		return printVersionInfo(stdout, *versionExtended, *jsonOut)
 	}
-
-	if *versionExtended {
-		// Version info is best-effort output; errors ignored
-		_, _ = fmt.Fprintf(stderr, "sfetch %s\n", version)                                //nolint:errcheck
-		_, _ = fmt.Fprintf(stderr, "  build time: %s\n", buildTime)                       //nolint:errcheck
-		_, _ = fmt.Fprintf(stderr, "  git commit: %s\n", gitCommit)                       //nolint:errcheck
-		_, _ = fmt.Fprintf(stderr, "  go version: %s\n", runtime.Version())               //nolint:errcheck
-		_, _ = fmt.Fprintf(stderr, "  platform:   %s/%s\n", runtime.GOOS, runtime.GOARCH) //nolint:errcheck
-		return 0
+	if len(fs.Args()) == 1 && fs.Arg(0) == "version" && *repo == "" && *githubRaw == "" && strings.TrimSpace(*urlFlag) == "" {
+		return printVersionInfo(stdout, *versionExtended, *jsonOut)
 	}
 
 	if *extendedHelp {

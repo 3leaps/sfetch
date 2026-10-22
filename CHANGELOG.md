@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `sfetch version` and `sfetch --version` print `sfetch <version>` to stdout.
+  `version --extended` and `--version-extended` include git commit, build time,
+  Go version, and OS/arch. Optional `--json` emits the same fields.
+
 ## [0.4.14] - 2026-10-21
 
 ### Security

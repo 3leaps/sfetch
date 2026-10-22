@@ -67,7 +67,7 @@ CORPUS_DEST ?= test-corpus
 .PHONY: release-prepare-tag-message release-tag release-push-tag release-verify-tag release-verify-remote-tag
 .PHONY: release-create-draft release-publish release-insert-anchors release-export-pin release-validate-pin
 .PHONY: version-check version-set version-patch version-minor version-major
-.PHONY: print-sfetch-version golangci-lint-install test-release-verify-checksums test-release-verify-signatures test-release-workflow-draft test-bootstrap-sfetch-verified test-bootstrap-range-release test-install-anchor-select test-install-gpg-mutants test-goneat-key-map test-makefile-release-tag test-upload-release-draft
+.PHONY: print-sfetch-version golangci-lint-install test-release-verify-checksums test-release-verify-signatures test-release-workflow-draft test-bootstrap-sfetch-verified test-bootstrap-range-release test-install-anchor-select test-install-gpg-mutants test-goneat-key-map test-makefile-release-tag test-upload-release-draft test-version-ldflags
 
 all: build
 
@@ -235,6 +235,7 @@ precommit: ## Run pre-commit checks (goneat assess + Go tests + build)
 	$(MAKE) test-goneat-key-map
 	$(MAKE) test-makefile-release-tag
 	$(MAKE) test-upload-release-draft
+	$(MAKE) test-version-ldflags
 	$(MAKE) release-tag-tests
 	@echo "[ok] Pre-commit checks passed"
 
@@ -332,6 +333,9 @@ test-makefile-release-tag: ## Regression: Makefile refuses bare RELEASE_TAG (not
 
 test-upload-release-draft: ## Regression: release-upload stays a draft
 	@./scripts/test-upload-release-draft.sh
+
+test-version-ldflags: ## Regression: LDFLAGS-injected version outside the repo
+	@./scripts/test-version-ldflags.sh
 
 # Tag-consuming recipes refuse a bare RELEASE_TAG (not accepted) and require
 # SFETCH_RELEASE_TAG. Expanding $(RELEASE_TAG) here is only to detect it.
