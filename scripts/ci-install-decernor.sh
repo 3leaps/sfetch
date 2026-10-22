@@ -29,7 +29,9 @@ mkdir -p "$dest"
 }
 url="https://github.com/3leaps/decernor/releases/download/v${version}/${filename}"
 curl -fsSL "$url" --output "$dest/$filename"
-(cd "$dest" && sha256sum --check "$pin")
+# sha256sum --check prints "file: OK" to stdout; that extra line makes
+# GITHUB_ENV assignment invalid. Keep stdout as the binary path only.
+(cd "$dest" && sha256sum --check --quiet "$pin") >&2
 tar -xzf "$dest/$filename" -C "$dest" decernor
 chmod 0755 "$dest/decernor"
 [[ -f "$dest/decernor" && ! -L "$dest/decernor" && -x "$dest/decernor" ]] || {

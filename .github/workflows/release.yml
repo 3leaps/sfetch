@@ -67,6 +67,9 @@ jobs:
           tool_dir="$(mktemp -d "$RUNNER_TEMP/decernor.XXXXXX")"
           export SFETCH_DECERNOR_BIN
           SFETCH_DECERNOR_BIN="$(./scripts/ci-install-decernor.sh "$tool_dir")"
+          case "$SFETCH_DECERNOR_BIN" in
+            *$'\n'*) echo "error: Decernor install printed extra stdout" >&2; exit 1 ;;
+          esac
           ./scripts/release-verify-committed-anchors.sh
 
   build:
