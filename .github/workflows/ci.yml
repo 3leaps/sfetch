@@ -58,9 +58,19 @@ jobs:
           export PATH="$PWD/bin:$PATH"
           [ "$(command -v golangci-lint)" = "$PWD/bin/golangci-lint" ]
 
+      - name: Install pinned Decernor
+        run: |
+          set -euo pipefail
+          tool_dir="$RUNNER_TEMP/decernor-ci"
+          mkdir -p "$tool_dir"
+          SFETCH_DECERNOR_BIN="$(./scripts/ci-install-decernor.sh "$tool_dir")"
+          echo "SFETCH_DECERNOR_BIN=$SFETCH_DECERNOR_BIN" >>"$GITHUB_ENV"
+          echo "Installed Decernor at $SFETCH_DECERNOR_BIN"
+
       - name: Quality
         run: |
           export PATH="$PWD/bin:$PATH"
+          test -x "${SFETCH_DECERNOR_BIN:?SFETCH_DECERNOR_BIN required}"
           make precommit
 
       - name: Assert version on packaged artifact
@@ -116,6 +126,21 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
           go-version: '1.26.10'
+
+      - name: Assert runner matches matrix target
+        shell: bash
+        run: |
+          set -euo pipefail
+          host="$(go env GOHOSTOS)/$(go env GOHOSTARCH)"
+          case "${{ matrix.target }}" in
+            linux-amd64) test "$host" = "linux/amd64" ;;
+            linux-arm64) test "$host" = "linux/arm64" ;;
+            darwin-arm64) test "$host" = "darwin/arm64" ;;
+            windows-amd64) test "$host" = "windows/amd64" ;;
+            windows-arm64) test "$host" = "windows/arm64" ;;
+            *) echo "::error::unknown matrix target ${{ matrix.target }}"; exit 1 ;;
+          esac
+          echo "runner host $host matches ${{ matrix.target }}"
 
       - name: Native go test
         shell: bash

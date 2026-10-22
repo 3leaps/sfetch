@@ -67,9 +67,14 @@ readonly SFETCH_MINISIGN_PUBKEY_LEGACY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LT
 
 # goneat minisign pin map. GONEAT_PREVKEY_MAX is the last tag signed with the
 # retired fulmenhq key (historical fact, never advance it). Tags at or below
-# it verify against fulmenhq-goneat-minisign-retired-1.pub; tags above verify
-# against fulmenhq-goneat-minisign.pub. Never try both keys for one tag.
+# it verify against the retired literal; tags above verify against the current
+# literal. Never try both keys for one tag.
+# Standalone copies of this script have no docs/security tree beside them
+# (PDR-0008 §2.6): literals only, with a committed equality test against
+# docs/security/fulmenhq-goneat-minisign.pub and -retired-1.pub.
 readonly GONEAT_PREVKEY_MAX="v0.6.0"
+readonly GONEAT_MINISIGN_PUBKEY="RWSw6HZljWd3fZtcpUuPQPiJ1WoBKP+AyJ2Tvm4HsFWtRd3aHxA4jNRM"
+readonly GONEAT_MINISIGN_PUBKEY_LEGACY="RWTdae+P+E9KI1OJ6lCiuydYLbciBRyGsAgtnTSf/su2zmGdBPN9DN3J"
 
 readonly MINISIGN_VERSION_EXPECTED="0.12"
 readonly MINISIGN_WIN_URL="https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip"
@@ -176,22 +181,23 @@ semver_le() {
     [[ "$r" != "1" ]]
 }
 
-# Select the committed goneat minisign pin for an exact tag. Reads the file
-# from this engine's repository tree (docs/security/<org>-<tool>-minisign.pub).
+# Select the goneat minisign pin for an exact tag. Writes a temp public-key
+# file from the embedded literal so a standalone copy of this script does not
+# need a docs/security tree beside it.
 goneat_minisign_key_file() {
     local ver="$1"
-    local root key
-    root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    local blob tmp
     if ! is_exact_semver_tag "$ver"; then
         die "goneat-version must be exact vMAJOR.MINOR.PATCH (got: $ver)"
     fi
     if semver_le "$ver" "$GONEAT_PREVKEY_MAX"; then
-        key="${root}/docs/security/fulmenhq-goneat-minisign-retired-1.pub"
+        blob="$GONEAT_MINISIGN_PUBKEY_LEGACY"
     else
-        key="${root}/docs/security/fulmenhq-goneat-minisign.pub"
+        blob="$GONEAT_MINISIGN_PUBKEY"
     fi
-    [ -f "$key" ] && [ -s "$key" ] || die "goneat minisign pin missing: $key"
-    printf '%s\n' "$key"
+    tmp="$(mktemp "${TMPDIR:-/tmp}/goneat-minisign.XXXXXX.pub")"
+    printf 'untrusted comment: fulmenhq goneat release signing\n%s\n' "$blob" >"$tmp"
+    printf '%s\n' "$tmp"
 }
 
 # -----------------------------------------------------------------------------

@@ -25,6 +25,9 @@ src="${2:-dist/release}"
 [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || die 'usage: release-publish.sh vX.Y.Z [source_dir]'
 version="${tag#v}"
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
+# shellcheck source=scripts/release-decernor.sh
+source "$root/scripts/release-decernor.sh"
+resolve_release_decernor ceremony || die 'trusted Decernor identity/version check failed'
 repo="${SFETCH_RELEASE_REPO:-3leaps/sfetch}"
 for tool in gh jq minisign gpg gpgconf cmp git; do
     command -v "$tool" > /dev/null 2>&1 || die "$tool not found in PATH"
@@ -102,25 +105,23 @@ tagged_blob() {
     [[ -s "$out" ]] || die "committed $path is empty in the tagged commit"
 }
 tagged_blob keys/expected-fingerprints.txt "$pinned/anchors"
+tagged_blob keys/expected-fingerprints.ndjson "$pinned/anchors.ndjson"
 tagged_blob docs/security/release-signing-keys.asc "$pinned/pgp.asc"
+tagged_blob docs/security/sfetch-minisign.pub "$pinned/minisign.pub"
 pin_gpg="$(awk '$1=="gpg" {print $2}' "$pinned/anchors")"
 pin_minisign="$(awk '$1=="minisign" {print $2}' "$pinned/anchors")"
 [[ "$pin_gpg" =~ ^[0-9A-F]{40}$ && "$pin_minisign" =~ ^[0-9a-f]{64}$ ]] || die 'committed pins are malformed'
-# The minisign pin is the sha256 of the decoded key line. The staged key file
-# must be exactly a comment line plus that key line, and verification uses a key
-# file rebuilt from the pinned line, never the staged file as given.
+"$RELEASE_DECERNOR_BIN" fingerprint verify \
+    --anchors "$pinned/anchors" \
+    --anchors-ndjson "$pinned/anchors.ndjson" \
+    --gpg "$pinned/pgp.asc" --minisign "$pinned/minisign.pub" >/dev/null ||
+    die 'tagged public exports do not match the fingerprint anchors'
+# The staged minisign public key must be the tagged commit blob, byte-exact.
+# A comment-line-only change still produces the same decoded-blob hash and is
+# not accepted.
 staged_minisign_pub="$src/${binary}-minisign.pub"
-minisign_comment="$(sed -n 1p "$staged_minisign_pub")"
-minisign_line="$(sed -n 2p "$staged_minisign_pub")"
-# Byte-compare the whole file with the two lines it must be: wc -l would miss a
-# third line that has no trailing newline.
-cmp -s "$staged_minisign_pub" <(printf '%s\n%s\n' "$minisign_comment" "$minisign_line") &&
-    [[ "$minisign_comment" == 'untrusted comment: '* ]] ||
-    die 'staged minisign key is not a two-line minisign public key'
-[[ "$minisign_line" =~ ^[A-Za-z0-9+/]+=*$ ]] || die 'staged minisign key is not a two-line minisign public key'
-staged_minisign="$(printf '%s' "$minisign_line" | base64 -d | shasum -a 256 | awk '{print $1}')"
-[[ "$staged_minisign" == "$pin_minisign" ]] || die 'staged minisign key does not match the pin in the tagged commit'
-printf 'untrusted comment: pinned release key\n%s\n' "$minisign_line" > "$pinned/minisign.pub"
+cmp -s "$staged_minisign_pub" "$pinned/minisign.pub" ||
+    die 'staged minisign public key is not byte-identical to the tagged commit'
 gpg --homedir "$gpg_home" --batch --quiet --import "$pinned/pgp.asc" 2> /dev/null || die 'committed PGP key failed to import'
 listing="$(gpg --homedir "$gpg_home" --batch --with-colons --with-subkey-fingerprint --list-keys)"
 [[ "$(awk -F: '$1=="pub" {n++} END {print n+0}' <<< "$listing")" == 1 ]] || die 'committed PGP key must hold exactly one primary'
@@ -156,9 +157,11 @@ case "$staged_rc" in
     3) die 'staged PGP key asset is not the committed primary with its pinned signing subkey' ;;
     *) die 'staged PGP key asset is not a readable OpenPGP public key' ;;
 esac
-for manifest in SHA256SUMS SHA512SUMS; do
+for manifest in SHA256SUMS SHA512SUMS "install-${binary}.sh"; do
     minisign -Vq -p "$pinned/minisign.pub" -m "$src/$manifest" -x "$src/$manifest.minisig" ||
         die "minisign verification failed for $manifest"
+done
+for manifest in SHA256SUMS SHA512SUMS; do
     gpg --homedir "$gpg_home" --batch --status-fd 1 --verify "$src/$manifest.asc" "$src/$manifest" 2> /dev/null |
         awk -v primary="$pin_gpg" -v subkey="$pin_subkey" '
           $2=="VALIDSIG" {valid++; signer=$3; signer_primary=$NF}
@@ -174,8 +177,24 @@ for want in "${expected[@]}"; do
     cmp -s "$fresh/$want" "$src/$want" || die "draft asset differs from the verified local file: $want"
 done
 
-# Residual: GitHub has no atomic compare-and-publish, so a writer with release
-# access could still swap an asset in the seconds between the comparison above
-# and this call. Re-download and verify after publishing if that matters.
+# GitHub has no atomic compare-and-publish. Narrow the window: re-read draft
+# state (read-only), download and compare again immediately before promotion,
+# then detect a post-promote swap. A remaining TOCTOU window is accepted
+# residual risk for any writer who already has release-asset write access.
+pre_promote="$(gh release view "$tag" --repo "$repo" --json isDraft,assets)" || die "no release for $tag"
+[[ "$(jq -r '.isDraft' <<< "$pre_promote")" == true ]] ||
+    die "$tag is not a draft immediately before promote"
+rm -rf "$fresh"
+mkdir -p "$fresh"
+gh release download "$tag" --repo "$repo" --dir "$fresh" > /dev/null || die 'could not re-download the draft assets'
+for want in "${expected[@]}"; do
+    cmp -s "$fresh/$want" "$src/$want" || die "draft asset differs from the verified local file: $want"
+done
 gh release edit "$tag" --repo "$repo" --draft=false > /dev/null
+rm -rf "$fresh"
+mkdir -p "$fresh"
+gh release download "$tag" --repo "$repo" --dir "$fresh" > /dev/null || die 'could not download the published assets'
+for want in "${expected[@]}"; do
+    cmp -s "$fresh/$want" "$src/$want" || die "published asset differs from the verified local file: $want (accepted residual race realized)"
+done
 echo "[ok] $tag published from ${#expected[@]} byte-verified asset(s)"

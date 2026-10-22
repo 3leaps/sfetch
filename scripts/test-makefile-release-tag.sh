@@ -39,4 +39,20 @@ grep -q 'SFETCH_RELEASE_TAG required' /tmp/sft-make-missing.out ||
     fail "missing-tag refusal (log: $(cat /tmp/sft-make-missing.out))"
 pass "missing SFETCH_RELEASE_TAG is refused"
 
+# Tag must equal v$(VERSION) and the check runs before other prerequisites.
+file_version="$(tr -d ' \n' <VERSION)"
+if make -s release-notes SFETCH_RELEASE_TAG=v0.0.0 RELEASE_TAG= >/tmp/sft-make-ver.out 2>&1; then
+    fail "make release-notes with a tag that is not v$(VERSION) must be refused"
+fi
+grep -q "must equal v${file_version}" /tmp/sft-make-ver.out ||
+    fail "VERSION mismatch refusal (log: $(cat /tmp/sft-make-ver.out))"
+pass "SFETCH_RELEASE_TAG must equal v\$(VERSION)"
+
+if grep -E '^release-sign:.*release-checksums' Makefile; then
+    fail "release-sign must not run release-checksums before the tag guard"
+fi
+grep -E '^release-sign: require-release-tag' Makefile >/dev/null ||
+    fail "release-sign must depend on require-release-tag first"
+pass "tag guard runs before release-sign prerequisites"
+
 echo "[ok] Makefile SFETCH_RELEASE_TAG-only"

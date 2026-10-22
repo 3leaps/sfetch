@@ -371,4 +371,13 @@ create="$(grep '^release create' "$FIXTURE_LOG")"
 [[ "$(grep -n '' "$FIXTURE_LOG" | grep -E 'reverify|release create' | cut -d: -f2 | head -1)" == reverify* ]]
 # The pre-API re-verification is bound to exactly the staged anchor.
 grep -q "^reverify v1.2.3 expect=$object/$commit\$" "$FIXTURE_LOG"
+# H4: make release-download must use this provenance path (not gh release download).
+grep -A6 '^release-download:' "$root/Makefile" | grep -q 'release-fetch-ci-artifacts.sh' || {
+	echo 'error: make release-download does not call release-fetch-ci-artifacts.sh' >&2
+	exit 1
+}
+if grep -A6 '^release-download:' "$root/Makefile" | grep -q 'download-release-assets.sh'; then
+	echo 'error: make release-download still calls download-release-assets.sh' >&2
+	exit 1
+fi
 echo '[ok] CI-artifact fetch and local draft controls passed'

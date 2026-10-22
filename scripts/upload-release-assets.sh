@@ -47,6 +47,14 @@ if [ ${#ARTIFACTS[@]} -eq 0 ]; then
     echo "no artifacts to upload" >&2
     exit 1
 fi
+# Read-only draft check first. Upload and edit must not run against a
+# published release, and must not themselves flip the draft flag so a later
+# check would pass.
+is_draft="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
+if [ "$is_draft" != true ]; then
+    echo "error: release ${TAG} is not a draft; refusing to upload" >&2
+    exit 1
+fi
 echo "📤 Uploading binaries/checksums for ${TAG}"
 gh release upload "$TAG" "${ARTIFACTS[@]}" --clobber
 echo "📤 Uploading signatures and keys"

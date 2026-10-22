@@ -56,9 +56,9 @@ Set environment variables:
 ```bash
 export SFETCH_RELEASE_TAG=v$(cat VERSION)
 export SFETCH_MINISIGN_KEY=/path/to/sfetch.key
-export SFETCH_MINISIGN_PUB=/path/to/sfetch.pub
 export SFETCH_PGP_KEY_ID=0123456789ABCDEF0123456789ABCDEF01234567!   # exact signing subkey fingerprint with !
 export SFETCH_GPG_HOMEDIR=/path/to/isolated/gpg/homedir              # required for PGP; not the default homedir
+export SFETCH_DECERNOR_BIN=/path/to/decernor                         # absolute, non-symlink, >= 0.1.8
 ```
 
 ### Steps
@@ -127,10 +127,12 @@ export SFETCH_GPG_HOMEDIR=/path/to/isolated/gpg/homedir              # required 
     > **Note:** This target depends on `release-verify` (checksums + signatures + keys).
     > It uploads ALL assets with `--clobber`, including binaries CI already uploaded.
     > `install-sfetch.sh.minisig` is required; upload refuses a missing installer signature.
-    > Tag CI creates a **draft** release — after upload, publish:
+    > Tag CI never creates a GitHub Release. After `make release-create-draft` and
+    > upload, promote only via byte-verified publish:
     > ```bash
-    > gh release edit v$(cat VERSION) --draft=false
+    > make release-publish
     > ```
+    > Do not run `gh release edit --draft=false` directly.
     > Until publish, the release is incomplete / non-consumable for bootstrap consumers.
     >
     > This is intentional for idempotency - rerun safely to fix any mistakes.
@@ -153,7 +155,8 @@ export SFETCH_GPG_HOMEDIR=/path/to/isolated/gpg/homedir              # required 
 
 ## 3. Post-Release
 
-- [ ] Verify release: `gh release view v$(cat VERSION)`
+- [ ] Verify release: `gh release view v$(cat VERSION)` (must not be a draft)
+- [ ] Homebrew tap handoff: after `make release-publish`, update the sibling `homebrew-tap` formula (or `3leaps/homebrew-tap`) with the new version, darwin/arm64 archive URL, and sha256. Do not open `brew bump-formula-pr` against a draft.
 - [ ] Smoke-test install via the **verified engine** (not pipe-to-bash), against the just-published tag:
   ```bash
   TAG=v$(cat VERSION)

@@ -18,7 +18,20 @@ done
 repo="$scratch/repo"
 mkdir -p "$repo/scripts" "$repo/keys" "$repo/docs/security" "$scratch/bin" "$scratch/gpg"
 chmod 700 "$scratch/gpg"
-cp "$root/scripts/release-publish.sh" "$repo/scripts/"
+cp "$root/scripts/release-publish.sh" "$root/scripts/release-decernor.sh" "$repo/scripts/"
+cat >"$scratch/bin/decernor" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-} ${2:-}" in
+  'version ' | 'version') echo 'decernor 0.1.8' ;;
+  'version -e')
+    printf 'Version:         0.1.8\nCommit:          fake\nBuild Date:      fake\nGo Version:      fake\nGofulmen:        fake\nCrucible:        fake\n'
+    ;;
+  'fingerprint verify') exit 0 ;;
+  *) exit 0 ;;
+esac
+EOF
+chmod +x "$scratch/bin/decernor"
+export SFETCH_DECERNOR_BIN="$scratch/bin/decernor"
 cat > "$repo/scripts/release-verify-published-tag.sh" << 'SH'
 #!/usr/bin/env bash
 [[ "${FIXTURE_TAG_REPLACED:-0}" == 0 ]] || { echo 'error: tag replaced' >&2; exit 1; }
@@ -36,13 +49,16 @@ gpg --homedir "$home" --batch --armor --export "$primary" > "$repo/docs/security
 minisign -G -W -p "$scratch/minisign.pub" -s "$scratch/minisign.key" > /dev/null
 pin_minisign="$(sed -n 2p "$scratch/minisign.pub" | base64 -d | shasum -a 256 | awk '{print $1}')"
 printf 'gpg %s\nminisign %s\n' "$primary" "$pin_minisign" > "$repo/keys/expected-fingerprints.txt"
+printf '{"kind":"gpg"}\n{"kind":"minisign"}\n' > "$repo/keys/expected-fingerprints.ndjson"
+cp "$scratch/minisign.pub" "$repo/docs/security/sfetch-minisign.pub"
 
 mkdir -p "$repo/docs/releases"
 printf '# notes\n' > "$repo/docs/releases/v1.2.3.md"
 git -C "$repo" init -q -b main
 git -C "$repo" config commit.gpgsign false
 git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid add docs/releases/v1.2.3.md \
-    keys/expected-fingerprints.txt docs/security/release-signing-keys.asc
+    keys/expected-fingerprints.txt keys/expected-fingerprints.ndjson \
+    docs/security/release-signing-keys.asc docs/security/sfetch-minisign.pub
 git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false commit -qm fixture
 tagged_commit="$(git -C "$repo" rev-parse HEAD)"
 
@@ -139,18 +155,43 @@ refuse 'SHA256SUMS does not list exactly the expected packages'
 stage
 minisign -G -W -f -p "$scratch/other.pub" -s "$scratch/other.key" > /dev/null
 cp "$scratch/other.pub" "$d/sfetch-minisign.pub"
-refuse 'does not match the pin in the tagged commit'
+refuse 'byte-identical to the tagged commit'
 # The staged minisign key must be exactly comment + key line: extra lines refuse.
 stage
 printf 'trailing line\n' >> "$d/sfetch-minisign.pub"
 cp "$d/sfetch-minisign.pub" "$scratch/draft/"
-refuse 'is not a two-line minisign public key'
+refuse 'byte-identical to the tagged commit'
 # A third line with no trailing newline is still a third line.
 stage
 printf 'extra-junk' >> "$d/sfetch-minisign.pub"
 cp "$d/sfetch-minisign.pub" "$scratch/draft/"
-refuse 'is not a two-line minisign public key'
+refuse 'byte-identical to the tagged commit'
 stage
+# A comment-line-only change of the staged minisign pubkey must be refused.
+stage
+python3 - "$d/sfetch-minisign.pub" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+lines = p.read_text().splitlines()
+lines[0] = 'untrusted comment: attacker'
+p.write_text('\n'.join(lines) + '\n')
+PY
+cp "$d/sfetch-minisign.pub" "$scratch/draft/"
+refuse 'byte-identical to the tagged commit'
+# An installer minisig that is not a valid signature of the installer must be refused.
+stage
+python3 - "$d/install-sfetch.sh.minisig" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+lines = p.read_text().splitlines()
+if len(lines) > 1:
+    lines[1] = lines[1][:-1] + ('A' if lines[1][-1] != 'A' else 'B')
+p.write_text('\n'.join(lines) + '\n')
+PY
+cp "$d/install-sfetch.sh.minisig" "$scratch/draft/"
+refuse 'minisign verification failed for install-sfetch.sh'
 # Flip one signature byte (minisign ignores appended lines), then mirror the
 # tampered file into the draft so only the signature gate can catch it.
 python3 - "$d/SHA256SUMS.minisig" << 'PY'
@@ -184,7 +225,7 @@ gpg --homedir "$home" --batch --pinentry-mode loopback --passphrase '' --quick-a
 rot_subkey="$(gpg --homedir "$home" --batch --with-colons --with-subkey-fingerprint --list-keys rotated@example.invalid | awk -F: '$1=="sub" {s=1;next} s && $1=="fpr" {print $10;exit}')"
 minisign -G -W -f -p "$scratch/rot.pub" -s "$scratch/rot.key" > /dev/null
 rot_pin="$(sed -n 2p "$scratch/rot.pub" | base64 -d | shasum -a 256 | awk '{print $1}')"
-pins=(keys/expected-fingerprints.txt docs/security/release-signing-keys.asc)
+pins=(keys/expected-fingerprints.txt keys/expected-fingerprints.ndjson docs/security/release-signing-keys.asc docs/security/sfetch-minisign.pub)
 mkdir -p "$scratch/saved"
 save_pins() { for p in "${pins[@]}"; do cp "$repo/$p" "$scratch/saved/${p//\//_}"; done; }
 restore_pins() { for p in "${pins[@]}"; do cp "$scratch/saved/${p//\//_}" "$repo/$p"; done; }
@@ -193,6 +234,7 @@ hide_pins() { for p in "${pins[@]}"; do mv "$repo/$p" "$scratch/saved/hidden-${p
 write_rotated_pins() {
     gpg --homedir "$home" --batch --armor --export "$rot_primary" > "$repo/docs/security/release-signing-keys.asc"
     printf 'gpg %s\nminisign %s\n' "$rot_primary" "$rot_pin" > "$repo/keys/expected-fingerprints.txt"
+    cp "$scratch/rot.pub" "$repo/docs/security/sfetch-minisign.pub"
 }
 # Stage a release signed by B, with B's public keys staged beside it.
 stage_signed_by_rotated() {
@@ -210,7 +252,7 @@ save_pins
 # Working-tree pins replaced with B (uncommitted): a B-signed set is refused.
 write_rotated_pins
 stage_signed_by_rotated
-refuse 'staged minisign key does not match the pin in the tagged commit'
+refuse 'byte-identical to the tagged commit'
 # Same, but minisign re-signed with the pinned key, so only the PGP gates can
 # catch the B signatures and the B key asset.
 stage_signed_by_rotated
@@ -233,7 +275,7 @@ write_rotated_pins
 git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid add "${pins[@]}"
 git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm 'rotate keys'
 stage_signed_by_rotated
-refuse 'staged minisign key does not match the pin in the tagged commit'
+refuse 'byte-identical to the tagged commit'
 # ... and the original signer is still accepted against the tagged pins.
 stage
 : > "$FIXTURE_LOG"
