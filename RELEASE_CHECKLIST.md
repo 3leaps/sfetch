@@ -36,27 +36,29 @@ Why this matters: `make release-upload` now uploads the signed GitHub release as
 - [ ] Update `RELEASE_NOTES.md`
 - [ ] Create `docs/releases/vX.Y.Z.md`
 - [ ] Commit: `git add -A && git commit -m "release: prepare vX.Y.Z"`
-- [ ] Push and tag:
+- [ ] Push `main`. The maintainer (not an agent) then signs and pushes the tag:
   ```bash
-  git push origin main
-  git tag v$(cat VERSION)
-  git push origin v$(cat VERSION)
+  export SFETCH_RELEASE_TAG=v$(cat VERSION)
+  make release-preflight
+  make release-tag          # local signed annotated tag; throwaway tests never use the operator key
+  make release-push-tag     # publish the signed tag
   ```
-- [ ] Wait for GitHub Actions release workflow to complete
-  - CI validates VERSION file matches tag
-  - Builds unsigned archives
-  - Creates a **draft** release and uploads install-sfetch.sh
-  - Release remains non-consumable until you sign, upload signatures, and publish
+- [ ] Wait for GitHub Actions tag workflow to complete
+  - Workflow is read-only (`contents: read`); it never creates a GitHub Release
+  - CI validates VERSION file matches tag and verifies the signed tag object
+  - Builds unsigned archives and uploads them as workflow artifacts
+  - Maintainer creates a **draft** (`make release-create-draft`) from those artifacts
+  - Release remains non-consumable until you sign, upload signatures, and `make release-publish`
 
 ## 2. Manual Signing (local machine)
 
 Set environment variables:
 ```bash
-export RELEASE_TAG=v$(cat VERSION)
+export SFETCH_RELEASE_TAG=v$(cat VERSION)
 export SFETCH_MINISIGN_KEY=/path/to/sfetch.key
 export SFETCH_MINISIGN_PUB=/path/to/sfetch.pub
-export SFETCH_PGP_KEY_ID="security@fulmenhq.dev"        # or your-subkey-id!
-export SFETCH_GPG_HOMEDIR=/path/to/custom/gpg/homedir   # optional, defaults to ~/.gnupg
+export SFETCH_PGP_KEY_ID=0123456789ABCDEF0123456789ABCDEF01234567!   # exact signing subkey fingerprint with !
+export SFETCH_GPG_HOMEDIR=/path/to/isolated/gpg/homedir              # required for PGP; not the default homedir
 ```
 
 ### Steps

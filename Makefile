@@ -27,7 +27,9 @@ endif
 INSTALL_TARGET ?= $(INSTALL_BINDIR)/$(NAME)$(EXT)
 BUILD_ARTIFACT := bin/$(NAME)_$(GOOS)_$(GOARCH)$(EXT)
 DIST_RELEASE := dist/release
-RELEASE_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo v$(VERSION))
+# PDR-0008: the release tag is an explicit input (SFETCH_RELEASE_TAG only).
+# A Makefile ?= that lets an inherited bare variable win is a derived input
+# and is not accepted (bare RELEASE_TAG is not accepted).
 PUBLIC_KEY_NAME ?= sfetch-release-signing-key.asc
 SFETCH_MINISIGN_KEY ?=
 SFETCH_MINISIGN_PUB ?=
@@ -62,8 +64,11 @@ CORPUS_DEST ?= test-corpus
 .PHONY: release-notes release-upload release-upload-provenance release-export-key release-export-minisign-key release-export-keys
 .PHONY: release-verify-key release-verify-minisign-pubkey release-verify-keys release-verify-signatures release-verify
 .PHONY: release-clean bootstrap-script build-all gosec gosec-high update-scoop-manifest
+.PHONY: package release-preflight release-tag-tests release-guard-tag-version
+.PHONY: release-prepare-tag-message release-tag release-push-tag release-verify-tag release-verify-remote-tag
+.PHONY: release-create-draft release-publish release-insert-anchors release-export-pin release-validate-pin
 .PHONY: version-check version-set version-patch version-minor version-major
-.PHONY: print-sfetch-version golangci-lint-install gosec-install test-gosec-pin test-release-verify-checksums test-release-verify-signatures test-release-workflow-draft test-bootstrap-sfetch-verified test-bootstrap-range-release test-install-anchor-select
+.PHONY: print-sfetch-version golangci-lint-install gosec-install test-gosec-pin test-release-verify-checksums test-release-verify-signatures test-release-workflow-draft test-bootstrap-sfetch-verified test-bootstrap-range-release test-install-anchor-select test-install-gpg-mutants test-goneat-key-map test-makefile-release-tag test-upload-release-draft
 
 all: build
 
@@ -245,6 +250,11 @@ precommit: ## Run pre-commit checks (goneat assess + Go tests + build)
 	$(MAKE) test-bootstrap-sfetch-verified
 	$(MAKE) test-bootstrap-range-release
 	$(MAKE) test-install-anchor-select
+	$(MAKE) test-install-gpg-mutants
+	$(MAKE) test-goneat-key-map
+	$(MAKE) test-makefile-release-tag
+	$(MAKE) test-upload-release-draft
+	$(MAKE) release-tag-tests
 	@echo "[ok] Pre-commit checks passed"
 
 prepush: precommit ## Run pre-push checks (same as precommit + security)
@@ -279,8 +289,9 @@ release: build-all ## Prepare release (build all platforms)
 	@echo "Build all platforms and prepare assets"
 
 release-download: ## Download release assets for signing
+	$(call require_sfetch_release_tag)
 	@mkdir -p $(DIST_RELEASE)
-	./scripts/download-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+	./scripts/download-release-assets.sh $(SFETCH_RELEASE_TAG) $(DIST_RELEASE)
 
 bootstrap-script: ## Copy install script into release directory
 	@mkdir -p $(DIST_RELEASE)
@@ -332,19 +343,115 @@ test-bootstrap-range-release: ## Assert MAX==v(VERSION) and MINISIG_SINCE in ran
 test-install-anchor-select: ## Regression: installer pin-map anchor selection (unit + coherence)
 	@./scripts/test-install-anchor-select.sh
 
+test-install-gpg-mutants: ## Mutation tests: all 11 installer GPG-route mutants must die
+	@./scripts/test-install-gpg-mutants.sh
+
+test-goneat-key-map: ## Regression: engine goneat pin map (rotation at v0.6.1)
+	@./scripts/test-goneat-key-map.sh
+
+test-makefile-release-tag: ## Regression: Makefile refuses bare RELEASE_TAG (not accepted)
+	@./scripts/test-makefile-release-tag.sh
+
+test-upload-release-draft: ## Regression: release-upload stays a draft
+	@./scripts/test-upload-release-draft.sh
+
+# Tag-consuming recipes refuse a bare RELEASE_TAG (not accepted) and require
+# SFETCH_RELEASE_TAG. Expanding $(RELEASE_TAG) here is only to detect it.
+define require_sfetch_release_tag
+	@if [ -n "$(RELEASE_TAG)" ]; then echo "error: RELEASE_TAG is not accepted; set SFETCH_RELEASE_TAG only" >&2; exit 1; fi
+	@if [ -z "$(SFETCH_RELEASE_TAG)" ]; then echo "error: SFETCH_RELEASE_TAG required" >&2; exit 1; fi
+	@printf '%s\n' "$(SFETCH_RELEASE_TAG)" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$$' || { echo "error: SFETCH_RELEASE_TAG must be canonical vX.Y.Z" >&2; exit 1; }
+endef
+
+package: ## Cross-compile and package unversioned platform archives
+	$(MAKE) build GOOS=linux GOARCH=amd64
+	$(MAKE) build GOOS=linux GOARCH=arm64
+	$(MAKE) build GOOS=darwin GOARCH=arm64
+	$(MAKE) build GOOS=windows GOARCH=amd64
+	$(MAKE) build GOOS=windows GOARCH=arm64
+	./scripts/package-artifacts.sh
+
+release-tag-tests: ## Signed-tag tooling tests (throwaway keys only; never the default homedir)
+	@./scripts/release-ci-artifact-draft.test.sh
+	@./scripts/release-workflow-permissions.test.sh
+	@./scripts/release-guard-tag-version.test.sh
+	@./scripts/release-tag-controls.test.sh
+	@./scripts/release-tag-operator.test.sh
+	@./scripts/release-prepare-tag-message.test.sh
+	@./scripts/release-pin-precursors.test.sh
+	@./scripts/release-decernor.test.sh
+	@./scripts/release-restore-tag-ref.test.sh
+	@./scripts/verify-pinned-tag.test.sh
+	@./scripts/release-verify-published-tag.test.sh
+	@./scripts/release-publish.test.sh
+	@echo "[ok] Release tag tooling tests passed"
+
+release-preflight: ## Verify clean-tree pre-tag requirements (does not tag)
+	@./scripts/validate-release-anchors.sh
+	@./scripts/release-inspect-tag-ruleset.sh "v$(VERSION)"
+	@if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then \
+		echo "[!!] Working tree not clean - commit or stash changes first"; \
+		git status --short; \
+		exit 1; \
+	fi
+	@$(MAKE) test-makefile-release-tag
+	@echo "[ok] Release preflight (tooling) passed"
+
+release-guard-tag-version: ## Validate the canonical SFETCH_RELEASE_TAG
+	$(call require_sfetch_release_tag)
+	@./scripts/release-guard-tag-version.sh
+
+release-prepare-tag-message: ## Prepare the external per-cut tag message (maintainer)
+	$(call require_sfetch_release_tag)
+	@./scripts/release-tag-operator.sh prepare-message
+
+release-tag: ## Maintainer-only: create and verify a local signed version tag (no push)
+	$(call require_sfetch_release_tag)
+	@./scripts/release-tag-operator.sh local-tag
+
+release-push-tag: ## Maintainer-only: publish and verify the signed version tag
+	$(call require_sfetch_release_tag)
+	@./scripts/release-tag-operator.sh remote-push
+
+release-verify-tag: ## Verify the tag using only the committed public pin
+	$(call require_sfetch_release_tag)
+	@./scripts/release-verify-tag.sh
+
+release-verify-remote-tag: ## Compare local and remote tag objects and GitHub verification
+	$(call require_sfetch_release_tag)
+	@./scripts/release-verify-remote-tag.sh
+
+release-create-draft: ## Maintainer-only: open a draft GitHub release from staged packages
+	$(call require_sfetch_release_tag)
+	@./scripts/release-create-draft.sh "$(SFETCH_RELEASE_TAG)" "$(DIST_RELEASE)"
+
+release-publish: ## Maintainer-only: byte-verify draft assets, then promote
+	$(call require_sfetch_release_tag)
+	@./scripts/release-publish.sh "$(SFETCH_RELEASE_TAG)" "$(DIST_RELEASE)"
+
+release-export-pin: ## Maintainer-only: export approved public key when no pin exists
+	@./scripts/release-export-pin.sh
+
+release-validate-pin: ## Maintainer-only: read-only validation of existing public pin
+	@./scripts/release-validate-pin.sh
+
+release-insert-anchors: release-validate-pin ## Maintainer-only: validate pin, then generate public anchors
+	@./scripts/release-insert-anchors.sh
+
 release-notes: ## Copy release notes into dist/release
-	@if [ -z "$(RELEASE_TAG)" ]; then echo "error: RELEASE_TAG not set" >&2; exit 1; fi
+	$(call require_sfetch_release_tag)
 	@mkdir -p $(DIST_RELEASE)
-	@src="docs/releases/$(RELEASE_TAG).md"; \
+	@src="docs/releases/$(SFETCH_RELEASE_TAG).md"; \
 	if [ ! -f "$$src" ]; then \
-		echo "error: release notes file $$src not found (did you set RELEASE_TAG?)" >&2; \
+		echo "error: release notes file $$src not found (did you set SFETCH_RELEASE_TAG?)" >&2; \
 		exit 1; \
 	fi; \
-	cp "$$src" "$(DIST_RELEASE)/release-notes-$(RELEASE_TAG).md"
+	cp "$$src" "$(DIST_RELEASE)/release-notes-$(SFETCH_RELEASE_TAG).md"
 	@echo "[ok] Release notes copied to $(DIST_RELEASE)"
 
 release-sign: release-checksums ## Sign manifests + installer (minisign); PGP manifests-only
-	SFETCH_MINISIGN_KEY=$(SFETCH_MINISIGN_KEY) SFETCH_PGP_KEY_ID=$(SFETCH_PGP_KEY_ID) SFETCH_GPG_HOMEDIR=$(SFETCH_GPG_HOMEDIR) ./scripts/sign-release-manifests.sh $(RELEASE_TAG) $(DIST_RELEASE)
+	$(call require_sfetch_release_tag)
+	SFETCH_MINISIGN_KEY=$(SFETCH_MINISIGN_KEY) SFETCH_PGP_KEY_ID=$(SFETCH_PGP_KEY_ID) SFETCH_GPG_HOMEDIR=$(SFETCH_GPG_HOMEDIR) ./scripts/sign-release-manifests.sh $(SFETCH_RELEASE_TAG) $(DIST_RELEASE)
 
 release-export-key: ## Export PGP public key to dist/release
 	SFETCH_GPG_HOMEDIR=$(SFETCH_GPG_HOMEDIR) ./scripts/export-release-key.sh $(SFETCH_PGP_KEY_ID) $(DIST_RELEASE)
@@ -390,13 +497,15 @@ release-verify-signatures: ## Verify signatures (installer minisig required; PGP
 release-verify: release-verify-checksums release-verify-signatures release-verify-keys ## Full post-signing release verification
 
 release-upload: release-notes release-verify ## Upload all assets (requires full verification chain)
-	./scripts/upload-release-assets.sh $(RELEASE_TAG) $(DIST_RELEASE)
+	$(call require_sfetch_release_tag)
+	./scripts/upload-release-assets.sh $(SFETCH_RELEASE_TAG) $(DIST_RELEASE)
 	@echo ""
 	@echo "📝 Updating Scoop manifest..."
 	@$(MAKE) update-scoop-manifest
 
 release-upload-provenance: release-notes release-verify ## Upload provenance only (requires full verification chain)
-	./scripts/release-upload-provenance.sh $(RELEASE_TAG) $(DIST_RELEASE)
+	$(call require_sfetch_release_tag)
+	./scripts/release-upload-provenance.sh $(SFETCH_RELEASE_TAG) $(DIST_RELEASE)
 
 update-scoop-manifest: ## Update Scoop bucket manifest with the current release version (requires sibling ../scoop-bucket)
 	@echo "Updating Scoop manifest for $(NAME) $(VERSION)..."

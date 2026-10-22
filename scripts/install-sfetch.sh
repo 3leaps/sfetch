@@ -37,7 +37,7 @@ SFETCH_API="https://api.github.com/repos/${SFETCH_REPO}/releases"
 # This key is pinned here to prevent TOCTOU attacks where an attacker
 # could replace both the release artifacts and the verification key.
 #
-# IMPORTANT: This key must match scripts/sfetch-minisign-anchor.pub (SSOT)
+# IMPORTANT: This key must match docs/security/sfetch-minisign.pub (SSOT)
 # and EmbeddedMinisignPubkey in main.go (go:embed of that file).
 # Update both when rotating keys (see docs/security/signing-runbook.md)
 SFETCH_MINISIGN_PUBKEY="RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVqjKj3ctSA1"
@@ -93,6 +93,26 @@ semver_le_tag() {
         if [[ "$x" > "$y" ]]; then return 1; fi
     done
     return 0
+}
+
+# select_trust_anchor TAG: set ACTIVE_MINISIGN_PUBKEY, ACTIVE_PGP_FPR and
+# ANCHOR_GEN for the resolved tag. The tag selects exactly one key generation:
+# tags at or below SFETCH_PREVKEY_MAX are previous-key-signed; tags above
+# are current-key-signed. Refuse non-semver tags rather than guess a key.
+select_trust_anchor() {
+    local version="$1"
+    if ! is_exact_semver_tag "$version"; then
+        err "cannot select trust anchor for non-semver tag: ${version:-<empty>}"
+    fi
+    ACTIVE_MINISIGN_PUBKEY="$SFETCH_MINISIGN_PUBKEY"
+    ACTIVE_PGP_FPR="$SFETCH_PGP_FPR"
+    ANCHOR_GEN="current"
+    if semver_le_tag "$version" "$SFETCH_PREVKEY_MAX"; then
+        ANCHOR_GEN="legacy"
+        ACTIVE_MINISIGN_PUBKEY="$SFETCH_MINISIGN_PUBKEY_LEGACY"
+        ACTIVE_PGP_FPR="$SFETCH_PGP_FPR_LEGACY"
+    fi
+    log "trust anchor: ${ANCHOR_GEN} (pin ${version})"
 }
 
 read_release_tag_name() {
@@ -345,6 +365,17 @@ verify_checksum() {
 # Signature verification
 # -----------------------------------------------------------------------------
 
+# gpg_cleanup: stop any agent started for the isolated GnuPG home, then
+# remove it. Safe to call more than once.
+GPG_HOME=""
+gpg_cleanup() {
+    if [ -n "$GPG_HOME" ] && [ -d "$GPG_HOME" ]; then
+        gpgconf --homedir "$GPG_HOME" --kill all >/dev/null 2>&1 || true
+        rm -rf "$GPG_HOME"
+    fi
+    GPG_HOME=""
+}
+
 verify_signature() {
     local sums_file="$1"
     local tmpdir="$2"
@@ -380,24 +411,82 @@ verify_signature() {
     if [ "$verified" = false ] && [ "$REQUIRE_MINISIGN" = false ] && [ "$VERIFY_GPG" = true ] && [ -f "${sums_file}.asc" ]; then
         local gpg_key="${tmpdir}/sfetch-release-signing-key.asc"
         if [ -f "$gpg_key" ]; then
-            local fpr
-            fpr=$(gpg --with-colons --import-options show-only --fingerprint "$gpg_key" 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')
-            if [ "$fpr" != "$ACTIVE_PGP_FPR" ]; then
-                err "GPG key fingerprint mismatch (expected ${ACTIVE_PGP_FPR}, got ${fpr:-unknown})"
+            # Isolated home inside tmpdir, so the EXIT trap removes it on every
+            # path; gpg_cleanup also stops the agent gpg may start for it.
+            GPG_HOME="${tmpdir}/gnupg"
+            mkdir -m 700 "$GPG_HOME" || err "cannot create GnuPG home"
+            # Three overlapping checks, kept together on purpose (mutant 8):
+            # 1. secret-key reject (has_sec) — a bundled secret packet must not
+            #    ride along even when the public pin matches.
+            # 2. pub/sec primary count (nprimary==1) — a second public primary
+            #    in the same file must not ride along (the narrow --import
+            #    show-only first-fpr check was fail-open on a bundled extra key).
+            # 3. VALIDSIG last-field primary — the signer may be a subkey; the
+            #    pin is the primary fingerprint. Removing only one of these
+            #    leaves a hole the other two do not cover.
+            local listing fprs _f
+            if ! listing=$(gpg --homedir "$GPG_HOME" --batch --no-tty --with-colons \
+                --import-options show-only --import "$gpg_key" 2>/dev/null); then
+                gpg_cleanup
+                err "GPG key file could not be read"
+            fi
+            # Parse the whole listing in the shell (no pipes: an early-exiting
+            # reader under pipefail could otherwise skip a check).
+            local line rec want=false has_sec=false nprimary=0
+            fprs=""
+            while IFS= read -r line; do
+                rec="${line%%:*}"
+                case "$rec" in
+                    sec) has_sec=true want=true nprimary=$((nprimary + 1)) ;;
+                    pub) want=true nprimary=$((nprimary + 1)) ;;
+                    fpr)
+                        if [ "$want" = true ]; then
+                            IFS=: read -r -a _f <<<"$line"
+                            fprs="${fprs}${fprs:+ }${_f[9]:-}"
+                            want=false
+                        fi
+                        ;;
+                esac
+            done <<<"$listing"
+            if [ "$has_sec" = true ]; then
+                gpg_cleanup
+                err "GPG key file must not contain secret keys"
+            fi
+            if [ "$nprimary" -ne 1 ]; then
+                gpg_cleanup
+                err "GPG key file must contain exactly one primary key"
+            fi
+            if [ "$fprs" != "$ACTIVE_PGP_FPR" ]; then
+                gpg_cleanup
+                err "GPG key fingerprint mismatch (expected ${ACTIVE_PGP_FPR}, got ${fprs:-unknown})"
             fi
             log "Verifying signature with gpg (pinned fingerprint)..."
-            local gpg_home
-            gpg_home=$(mktemp -d)
-            if gpg --batch --no-tty --homedir "$gpg_home" --import "$gpg_key" 2>/dev/null &&
-                gpg --batch --no-tty --homedir "$gpg_home" --trust-model always \
-                    --verify "${sums_file}.asc" "$sums_file" 2>/dev/null; then
+            # Accept only a VALIDSIG whose primary-key fingerprint is the pin.
+            local status sig_primary
+            if gpg --batch --no-tty --homedir "$GPG_HOME" --import "$gpg_key" 2>/dev/null &&
+                status=$(gpg --batch --no-tty --homedir "$GPG_HOME" --trust-model always \
+                    --status-fd 1 --verify "${sums_file}.asc" "$sums_file" 2>/dev/null); then
+                sig_primary=""
+                while IFS= read -r line; do
+                    case "$line" in
+                        "[GNUPG:] VALIDSIG "*)
+                            sig_primary="${line##* }"
+                            break
+                            ;;
+                    esac
+                done <<<"$status"
+                if [ "$sig_primary" != "$ACTIVE_PGP_FPR" ]; then
+                    gpg_cleanup
+                    err "GPG signature is not from the pinned key (got ${sig_primary:-none})"
+                fi
                 log "GPG signature verified"
                 verified=true
                 TRUST_LEVEL="medium (gpg, pinned key)"
             else
+                gpg_cleanup
                 err "GPG signature verification failed"
             fi
-            rm -rf "$gpg_home"
+            gpg_cleanup
         else
             warn "GPG public key not found in release"
         fi
@@ -554,9 +643,10 @@ main() {
         err "signature verification required; install minisign (recommended) or gpg, or pass --allow-checksum-only to bypass (NOT recommended)"
     fi
 
-    # Create temp directory (not local - needed for EXIT trap)
+    # Create temp directory (not local - needed for EXIT trap). gpg_cleanup
+    # stops any agent started for the isolated GnuPG home inside tmpdir.
     tmpdir=$(mktemp -d)
-    trap 'rm -rf "$tmpdir"' EXIT
+    trap 'gpg_cleanup; rm -rf "$tmpdir"' EXIT
 
     # Fetch release info
     local release_url
@@ -574,21 +664,7 @@ main() {
     version=$(read_release_tag_name "$release_json")
     log "Installing sfetch ${version}"
 
-    # Pin map: the resolved tag selects exactly one key generation. Tags at or
-    # below SFETCH_PREVKEY_MAX are previous-key-signed; tags above are
-    # current-key-signed. Refuse non-semver tags rather than guess a key.
-    if ! is_exact_semver_tag "$version"; then
-        err "cannot select trust anchor for non-semver tag: ${version:-<empty>}"
-    fi
-    ACTIVE_MINISIGN_PUBKEY="$SFETCH_MINISIGN_PUBKEY"
-    ACTIVE_PGP_FPR="$SFETCH_PGP_FPR"
-    local anchor_gen="current"
-    if semver_le_tag "$version" "$SFETCH_PREVKEY_MAX"; then
-        anchor_gen="legacy"
-        ACTIVE_MINISIGN_PUBKEY="$SFETCH_MINISIGN_PUBKEY_LEGACY"
-        ACTIVE_PGP_FPR="$SFETCH_PGP_FPR_LEGACY"
-    fi
-    log "trust anchor: ${anchor_gen} (pin ${version})"
+    select_trust_anchor "$version"
 
     # Determine archive name
     local archive_name="sfetch_${platform}"
