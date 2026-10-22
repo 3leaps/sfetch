@@ -39,6 +39,9 @@ grep -q 'ci-install-decernor.sh' "$ci" || fail "H3: ci.yml must install Decernor
 grep -q 'SFETCH_DECERNOR_BIN' "$ci" || fail "H3: ci.yml must export SFETCH_DECERNOR_BIN"
 grep -q 'SFETCH_DECERNOR_BIN required' "$root/scripts/release-pin-precursors.test.sh" ||
 	fail "H3: pin-precursors must name SFETCH_DECERNOR_BIN as required"
+grep -qE 'sha256sum --check --quiet' "$root/scripts/ci-install-decernor.sh" ||
+	fail "H3: sha256sum --check must be --quiet (stdout is the binary path only)"
+grep -q 'printed extra stdout' "$ci" || fail "H3: ci.yml must refuse multiline Decernor stdout"
 
 # H4: release-download is the CI-artifact provenance path and writes .anchor.
 python3 - "$mk" <<'PY' || fail "H4: release-download must call release-fetch-ci-artifacts.sh"

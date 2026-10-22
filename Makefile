@@ -395,6 +395,7 @@ release-tag-tests: ## Signed-tag tooling tests (throwaway keys only; never the d
 	@./scripts/release-publish.test.sh
 	@./scripts/release-verify-committed-anchors.test.sh
 	@./scripts/release-stage-tagged-pubkeys.test.sh
+	@./scripts/ci-install-decernor.test.sh
 	@./scripts/test-review-findings.sh
 	@echo "[ok] Release tag tooling tests passed"
 

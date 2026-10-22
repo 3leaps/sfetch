@@ -64,6 +64,9 @@ jobs:
           tool_dir="$RUNNER_TEMP/decernor-ci"
           mkdir -p "$tool_dir"
           SFETCH_DECERNOR_BIN="$(./scripts/ci-install-decernor.sh "$tool_dir")"
+          case "$SFETCH_DECERNOR_BIN" in
+            *$'\n'*) echo "error: Decernor install printed extra stdout" >&2; exit 1 ;;
+          esac
           echo "SFETCH_DECERNOR_BIN=$SFETCH_DECERNOR_BIN" >>"$GITHUB_ENV"
           echo "Installed Decernor at $SFETCH_DECERNOR_BIN"
 
