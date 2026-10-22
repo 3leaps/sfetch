@@ -60,7 +60,7 @@ pass "empty RELEASE_TAG= is refused"
 # H4: actually run release-download with a stubbed fetch script. make -n
 # alone does not prove the recipe runs.
 scratch_dl="$(mktemp -d "${TMPDIR:-/tmp}/sft-make-dl.XXXXXX")"
-trap 'rm -rf "$scratch_dl" /tmp/sft-make-rt.out /tmp/sft-make-missing.out /tmp/sft-make-ver.out /tmp/sft-make-empty-rt.out' EXIT
+trap 'rm -rf "$scratch_dl" /tmp/sft-make-rt.out /tmp/sft-make-missing.out /tmp/sft-make-ver.out /tmp/sft-make-empty-rt.out /tmp/sft-make-scoop.out /tmp/sft-make-scoop.err' EXIT
 mkdir -p "$scratch_dl/scripts"
 cp "$ROOT/VERSION" "$scratch_dl/VERSION"
 stub_log="$scratch_dl/called.log"
@@ -93,5 +93,63 @@ fi
 grep -E '^release-sign: require-release-tag' Makefile >/dev/null ||
     fail "release-sign must depend on require-release-tag first"
 pass "tag guard runs before release-sign prerequisites"
+
+# Scoop handoff is an explicit fail-closed step, not a side effect of upload.
+python3 - "$ROOT/Makefile" <<'PY' || fail "release-upload must not call update-scoop-manifest"
+import pathlib, re, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+m = re.search(r'^release-upload:.*?(?=\n[a-z].*:|\Z)', text, re.M | re.S)
+if not m:
+    raise SystemExit('release-upload missing')
+body = m.group(0)
+if 'update-scoop-manifest' in body:
+    raise SystemExit('release-upload still invokes update-scoop-manifest')
+if 'Skipping Scoop' in body:
+    raise SystemExit('release-upload still carries the fail-open Scoop skip')
+# Mutation: splicing the old call back in must fail this checker.
+mut = body.rstrip() + '\n\t@$(MAKE) update-scoop-manifest\n'
+if 'update-scoop-manifest' not in mut or mut == body:
+    raise SystemExit('mutation assertion did not insert the Scoop call')
+if 'update-scoop-manifest' not in mut.split('release-upload', 1)[-1]:
+    raise SystemExit('mutated recipe lost the Scoop call')
+# Re-run the same predicate on the mutated recipe.
+if 'update-scoop-manifest' not in mut:
+    raise SystemExit('mutated recipe should contain update-scoop-manifest')
+# The live recipe must still refuse it.
+if 'update-scoop-manifest' in body:
+    raise SystemExit('live recipe still contains update-scoop-manifest')
+PY
+python3 - "$ROOT/Makefile" <<'PY' || fail "update-scoop-manifest must fail closed when the sibling is missing"
+import pathlib, re, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+m = re.search(r'^update-scoop-manifest:.*?(?=\n[a-z].*:|\Z)', text, re.M | re.S)
+if not m:
+    raise SystemExit('update-scoop-manifest missing')
+body = m.group(0)
+if 'Skipping Scoop' in body:
+    raise SystemExit('update-scoop-manifest still skips when the sibling is missing')
+if 'exit 1' not in body:
+    raise SystemExit('update-scoop-manifest must exit 1 when the sibling is missing')
+missing = 'if [ ! -d "$(SCOOP_BUCKET_DIR)" ]'
+if missing not in body:
+    raise SystemExit('update-scoop-manifest must test SCOOP_BUCKET_DIR')
+# Mutation: restore warn-and-skip; the checker must reject it.
+open_copy = body.replace('exit 1;', 'echo "Skipping Scoop manifest update.";')
+if 'Skipping Scoop' not in open_copy:
+    raise SystemExit('mutation assertion did not restore the skip')
+if 'Skipping Scoop' in body:
+    raise SystemExit('live recipe still skips')
+PY
+missing_bucket="$scratch_dl/missing-scoop"
+if make -s update-scoop-manifest SCOOP_BUCKET_DIR="$missing_bucket" \
+	>/tmp/sft-make-scoop.out 2>/tmp/sft-make-scoop.err; then
+	fail "make update-scoop-manifest must fail closed when the sibling is missing"
+fi
+grep -qi 'not found' /tmp/sft-make-scoop.err ||
+	fail "missing scoop-bucket refusal (log: $(cat /tmp/sft-make-scoop.err /tmp/sft-make-scoop.out))"
+if grep -qi 'Skipping Scoop' /tmp/sft-make-scoop.out /tmp/sft-make-scoop.err; then
+	fail "update-scoop-manifest must not skip a missing sibling"
+fi
+pass "update-scoop-manifest is fail-closed and not part of release-upload"
 
 echo "[ok] Makefile SFETCH_RELEASE_TAG-only"

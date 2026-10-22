@@ -325,7 +325,8 @@ make release-verify
 make release-notes
 make release-upload
 make release-publish         # verified publish; never gh release edit --draft=false
-# package-manager handoff: Homebrew tap + Scoop sibling (no make target yet)
+make update-scoop-manifest   # fail-closed; sibling ../scoop-bucket required
+# Homebrew tap: pin darwin_arm64, linux_amd64, linux_arm64 from published SHA256SUMS
 ```
 
 ### Quick examples

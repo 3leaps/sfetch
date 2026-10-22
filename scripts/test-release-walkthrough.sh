@@ -43,6 +43,7 @@ order=(
 	release-notes
 	release-upload
 	release-publish
+	update-scoop-manifest
 )
 fingerprint=0CACA49B3119B6BC12B2CA11B9B485F294B9FE07
 

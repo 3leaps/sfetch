@@ -495,50 +495,26 @@ release-upload: require-release-tag ## Upload all assets (requires full verifica
 	@$(MAKE) release-notes
 	@$(MAKE) release-verify
 	./scripts/upload-release-assets.sh $(SFETCH_RELEASE_TAG) $(DIST_RELEASE)
-	@echo ""
-	@echo "📝 Updating Scoop manifest..."
-	@$(MAKE) update-scoop-manifest
 
 release-upload-provenance: require-release-tag ## Upload provenance only (requires full verification chain)
 	@$(MAKE) release-notes
 	@$(MAKE) release-verify
 	./scripts/release-upload-provenance.sh $(SFETCH_RELEASE_TAG) $(DIST_RELEASE)
 
-update-scoop-manifest: ## Update Scoop bucket manifest with the current release version (requires sibling ../scoop-bucket)
+update-scoop-manifest: ## Update Scoop bucket manifest (sibling ../scoop-bucket required; fails closed)
 	@echo "Updating Scoop manifest for $(NAME) $(VERSION)..."
-	@echo ""
-	@echo "ℹ️  Note: This target expects the scoop-bucket repository as a sibling directory"
-	@echo "   Repository: $(SCOOP_BUCKET_REPO)"
-	@echo "   Expected path: $(SCOOP_BUCKET_DIR)"
-	@echo ""
 	@if [ ! -d "$(SCOOP_BUCKET_DIR)" ]; then \
-		echo "⚠️  Warning: $(SCOOP_BUCKET_DIR) directory not found"; \
-		echo ""; \
-		echo "Please clone or initialize the scoop-bucket repository:"; \
-		echo "  cd .. && git clone $(SCOOP_BUCKET_REPO)"; \
-		echo ""; \
-		echo "Directory structure should be:"; \
-		echo "  parent/"; \
-		echo "    ├── sfetch/           (this repository)"; \
-		echo "    └── scoop-bucket/     (sibling repository)"; \
-		echo ""; \
-		echo "Skipping Scoop manifest update."; \
-	elif [ ! -f "$(SCOOP_BUCKET_DIR)/bucket/$(NAME).json" ]; then \
-		echo "❌ Error: Manifest file not found: $(SCOOP_BUCKET_DIR)/bucket/$(NAME).json"; \
+		echo "error: $(SCOOP_BUCKET_DIR) directory not found" >&2; \
+		echo "clone the sibling bucket: cd .. && git clone $(SCOOP_BUCKET_REPO)" >&2; \
 		exit 1; \
-	else \
-		echo "✅ Sibling repository found: $(SCOOP_BUCKET_DIR)"; \
-		echo "   Calling scoop-bucket update target..."; \
-		$(MAKE) -C "$(SCOOP_BUCKET_DIR)" update-sfetch VERSION=$(VERSION); \
-		echo ""; \
-		echo "✅ Scoop manifest updated successfully!"; \
-		echo ""; \
-		echo "📋 Next steps:"; \
-		echo "   1. Review changes:  cd $(SCOOP_BUCKET_DIR) && git diff bucket/$(NAME).json"; \
-		echo "   2. Validate JSON:   python3 -m json.tool $(SCOOP_BUCKET_DIR)/bucket/$(NAME).json >/dev/null"; \
-		echo "   3. Commit bucket:   cd $(SCOOP_BUCKET_DIR) && git add bucket/$(NAME).json && git commit"; \
-		echo "   4. Push bucket:     cd $(SCOOP_BUCKET_DIR) && git push"; \
 	fi
+	@if [ ! -f "$(SCOOP_BUCKET_DIR)/bucket/$(NAME).json" ]; then \
+		echo "error: manifest not found: $(SCOOP_BUCKET_DIR)/bucket/$(NAME).json" >&2; \
+		exit 1; \
+	fi
+	$(MAKE) -C "$(SCOOP_BUCKET_DIR)" update-sfetch VERSION=$(VERSION)
+	@echo "[ok] Scoop manifest updated"
+	@echo "review: cd $(SCOOP_BUCKET_DIR) && git diff bucket/$(NAME).json"
 
 release-clean: ## Remove dist/release contents
 	rm -rf $(DIST_RELEASE)

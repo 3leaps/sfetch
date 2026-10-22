@@ -20,7 +20,7 @@ git clone https://github.com/3leaps/scoop-bucket.git
 cd sfetch
 ```
 
-Why this matters: `make release-upload` now uploads the signed GitHub release assets and then updates the sibling Scoop manifest automatically. If `../scoop-bucket` is missing, the upload still succeeds but Scoop publication is skipped with a warning and requires manual follow-up.
+Why this matters: after verified publish, `make update-scoop-manifest` writes the sibling Scoop manifest. That target is a separate, fail-closed step (not part of `make release-upload`). A missing `../scoop-bucket` refuses.
 
 ## 1. Prepare & Tag
 
@@ -145,8 +145,7 @@ script refuses a non-success, mismatched commit, or a run that has moved on.
    make release-upload
    ```
    Upload stays a draft. `install-sfetch.sh.minisig` is required.
-   If `../scoop-bucket` is present, upload also updates the Scoop manifest.
-   Provenance-only: `make release-upload-provenance`.
+   Scoop is not updated here. Provenance-only: `make release-upload-provenance`.
 
 10. **Verified publish**
     ```bash
@@ -157,16 +156,27 @@ script refuses a non-success, mismatched commit, or a run that has moved on.
 11. **Package-manager handoff** (after publish; no `verify-package-manager-handoff`
     target yet)
     ```bash
+    make update-scoop-manifest
     python3 -m json.tool ../scoop-bucket/bucket/sfetch.json >/dev/null
     cd ../scoop-bucket && git diff bucket/sfetch.json
     ```
-    Homebrew tap: update the sibling formula with the new version, darwin/arm64
-    archive URL, and sha256. Do not open `brew bump-formula-pr` against a draft.
+    Homebrew tap: after `make release-publish`, minisign-verify the published
+    `SHA256SUMS`, then pin **all three** formula platforms from that verified
+    manifest (URL + sha256). Do not copy hashes from a draft or an unsigned
+    local file. Do not open `brew bump-formula-pr` against a draft.
+
+    | Platform | Archive | URL |
+    |----------|---------|-----|
+    | `darwin_arm64` | `sfetch_darwin_arm64.tar.gz` | `https://github.com/3leaps/sfetch/releases/download/$SFETCH_RELEASE_TAG/sfetch_darwin_arm64.tar.gz` |
+    | `linux_amd64` | `sfetch_linux_amd64.tar.gz` | `https://github.com/3leaps/sfetch/releases/download/$SFETCH_RELEASE_TAG/sfetch_linux_amd64.tar.gz` |
+    | `linux_arm64` | `sfetch_linux_arm64.tar.gz` | `https://github.com/3leaps/sfetch/releases/download/$SFETCH_RELEASE_TAG/sfetch_linux_arm64.tar.gz` |
+
+    sha256: the matching digest from the published, minisign-verified `SHA256SUMS`.
 
 ## 3. Post-Release
 
 - [ ] Verify release: `gh release view v$(cat VERSION)` (must not be a draft)
-- [ ] Homebrew tap handoff: after `make release-publish`, update the sibling `homebrew-tap` formula (or `3leaps/homebrew-tap`) with the new version, darwin/arm64 archive URL, and sha256. Do not open `brew bump-formula-pr` against a draft.
+- [ ] Homebrew tap handoff: after `make release-publish`, update the sibling `homebrew-tap` formula (or `3leaps/homebrew-tap`) with the new version and all three pinned platforms (`darwin_arm64`, `linux_amd64`, `linux_arm64`). Each URL and sha256 comes from the published, minisign-verified `SHA256SUMS`. Do not open `brew bump-formula-pr` against a draft.
 - [ ] Smoke-test install via the **verified engine** (not pipe-to-bash), against the just-published tag:
   ```bash
   TAG=v$(cat VERSION)
