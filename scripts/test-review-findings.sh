@@ -43,19 +43,7 @@ grep -qE 'sha256sum --check --quiet' "$root/scripts/ci-install-decernor.sh" ||
 	fail "H3: sha256sum --check must be --quiet (stdout is the binary path only)"
 grep -q 'printed extra stdout' "$ci" || fail "H3: ci.yml must refuse multiline Decernor stdout"
 
-# H4: release-download is the CI-artifact provenance path and writes .anchor.
-python3 - "$mk" <<'PY' || fail "H4: release-download must call release-fetch-ci-artifacts.sh"
-import pathlib, re, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-m = re.search(r'^release-download:.*?(?=\n[a-z].*:|\Z)', text, re.M | re.S)
-if not m:
-    raise SystemExit('release-download target missing')
-body = m.group(0)
-if 'release-fetch-ci-artifacts.sh' not in body:
-    raise SystemExit('does not call release-fetch-ci-artifacts.sh')
-if 'download-release-assets.sh' in body:
-    raise SystemExit('still calls download-release-assets.sh')
-PY
+# H4: behavioural check lives in test-makefile-release-tag.sh (make -n).
 
 # H6: public-key staging is from the tagged commit, not the operator keyring/env.
 for target in release-export-minisign-key release-export-key release-export-keys; do
@@ -99,6 +87,18 @@ grep -E '^release-sign: require-release-tag' "$mk" || fail "M4: release-sign mus
 grep -E '^release-sign:.*release-checksums' "$mk" && fail "M4: release-sign must not list release-checksums as a make prerequisite"
 
 # M6: upload checks draft state read-only before any mutation.
+python3 - "$root/scripts/release-upload-provenance.sh" <<'PY' || fail "M6-round2: provenance --clobber must follow a draft view"
+import pathlib, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+view = text.find("gh release view")
+upload = text.find("gh release upload")
+if view < 0 or upload < 0 or not (view < upload):
+    raise SystemExit(f'order view={view} upload={upload}')
+if "--json isDraft" not in text:
+    raise SystemExit('draft check is not a read-only isDraft view')
+if 'is not a draft' not in text:
+    raise SystemExit('must refuse a published release')
+PY
 python3 - "$root/scripts/upload-release-assets.sh" <<'PY' || fail "M6: draft view must precede upload/edit"
 import pathlib, sys
 text = pathlib.Path(sys.argv[1]).read_text()
@@ -113,13 +113,34 @@ if "--json isDraft" not in text:
     raise SystemExit('draft check is not a read-only isDraft view')
 PY
 
-# M7: actionlint knows both org runner labels; native jobs assert GOHOST*.
-grep -q 'ubuntu-latest-arm64-s' "$root/.github/actionlint.yaml" ||
-	fail "M7: actionlint.yaml must allow ubuntu-latest-arm64-s"
-grep -q 'windows-latest-arm64-s' "$root/.github/actionlint.yaml" ||
-	fail "M7: actionlint.yaml must allow windows-latest-arm64-s"
-grep -q 'GOHOSTOS' "$ci" || fail "M7: native job must assert GOHOSTOS/GOHOSTARCH"
-grep -q 'Assert runner matches matrix target' "$ci" || fail "M7: native job must assert the matrix target"
+# M7: native matrix must be exactly the five platforms. Dropping a row fails.
+python3 - "$ci" "$root/.github/actionlint.yaml" <<'PY' || fail "M7: native matrix rows"
+import pathlib, re, sys
+ci = pathlib.Path(sys.argv[1]).read_text()
+lint = pathlib.Path(sys.argv[2]).read_text()
+block = re.search(r"^  native:.*?(?=^  [a-z])", ci, re.M | re.S)
+if not block:
+    raise SystemExit("native job missing")
+native = block.group(0)
+required = {
+    ("ubuntu-24.04", "linux-amd64"),
+    ("ubuntu-latest-arm64-s", "linux-arm64"),
+    ("macos-15", "darwin-arm64"),
+    ("windows-2022", "windows-amd64"),
+    ("windows-latest-arm64-s", "windows-arm64"),
+}
+rows = re.findall(r"runner:\s+(\S+)\n\s+target:\s+(\S+)", native)
+got = set(tuple(r) for r in rows)
+if got != required:
+    raise SystemExit(f"matrix rows {sorted(got)} != {sorted(required)}")
+if "GOHOSTOS" not in native or "Assert runner matches matrix target" not in native:
+    raise SystemExit("native job must assert GOHOSTOS against the matrix target")
+if "needs: native" not in ci or 'needs.native.result' not in ci:
+    raise SystemExit("platforms aggregate must require native success")
+for label in ("ubuntu-latest-arm64-s", "windows-latest-arm64-s"):
+    if label not in lint:
+        raise SystemExit(f"actionlint.yaml must allow {label}")
+PY
 
 # M8: checklist promotes via make release-publish and includes Homebrew.
 if grep -nE 'gh release edit.*draft=false' "$root/RELEASE_CHECKLIST.md" | grep -v 'Do not run'; then
@@ -134,12 +155,24 @@ grep -q 'refusing to overwrite' "$root/scripts/install-release-anchors.sh" ||
 grep -q 'mv -f' "$root/scripts/install-release-anchors.sh" &&
 	fail "M9: install-release-anchors must not force-overwrite with mv -f"
 
-# SEC-H1: fresh home is mktemp, refuses symlinks, chmod 700, gpgconf --kill all.
-grep -q 'mktemp -d' "$root/scripts/release-tag-common.sh" || fail "SEC-H1: tag operator must mktemp -d"
-grep -q 'must not be a symlink' "$root/scripts/release-tag-common.sh" || fail "SEC-H1: tag operator must refuse symlinks"
+# SEC-H1: signing uses a fresh mktemp home; cleanup is armed before it is created.
+grep -q 'tag_fresh_signing_gnupg_home' "$root/scripts/release-tag-common.sh" ||
+	fail "SEC-H1: tag operator must create a fresh signing home"
+grep -q 'tag_cleanup_homes' "$root/scripts/release-tag.sh" || fail "SEC-H1: release-tag.sh must clean signing and verify homes"
+grep -q 'must not be the default homedir' "$root/scripts/release-tag-common.sh" ||
+	fail "SEC-H1: tag operator must refuse the default homedir"
 grep -q 'mode 0700' "$root/scripts/release-tag-common.sh" || fail "SEC-H1: tag operator must require mode 0700"
-grep -q 'gpgconf --homedir' "$root/scripts/release-tag-common.sh" || fail "SEC-H1: tag operator must kill gpg-agent"
-grep -q 'gpgconf --homedir' "$root/scripts/release-tag.sh" || fail "SEC-H1: release-tag.sh must gpgconf --kill all in its EXIT trap"
+python3 - "$root/scripts/verify-pinned-tag.sh" <<'PY' || fail "M6-round2: tag verify must call Decernor before the listing check"
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+dec = text.find("fingerprint verify")
+listing = text.find("validate-release-anchors.sh")
+if dec < 0 or listing < 0 or not (dec < listing):
+    raise SystemExit(f"order decernor={dec} listing={listing}")
+if "resolve_release_decernor ceremony" not in text:
+    raise SystemExit("verify-pinned-tag must bind Decernor in ceremony mode")
+PY
 
 # SEC-M: installer rejects expired/revoked status.
 grep -q 'EXPKEYSIG' "$root/scripts/install-sfetch.sh" || fail "SEC-M: installer must reject EXPKEYSIG"

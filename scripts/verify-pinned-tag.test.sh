@@ -3,6 +3,12 @@
 # Trust material is committed: verification reads it from the tagged commit.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
+bin="${SFETCH_DECERNOR_BIN:-$(command -v decernor || true)}"
+[[ -n "$bin" && -x "$bin" && "$bin" == /* && ! -L "$bin" ]] || {
+    echo 'error: SFETCH_DECERNOR_BIN required (CI installs Decernor from config/release/decernor-ci-sha256.txt)' >&2
+    exit 1
+}
+export SFETCH_DECERNOR_BIN="$bin"
 scratch="$(mktemp -d)"
 cleanup() {
     local home
@@ -26,16 +32,34 @@ git -C "$fixture" config gpg.format openpgp
 git -C "$fixture" config gpg.program gpg
 git -C "$fixture" config commit.gpgsign false
 mkdir -p "$fixture/docs/security" "$fixture/keys" "$fixture/scripts" "$fixture/config/release"
-cp "$root/scripts/verify-pinned-tag.sh" "$root/scripts/validate-release-anchors.sh" "$fixture/scripts/"
+cp "$root/scripts/verify-pinned-tag.sh" "$root/scripts/validate-release-anchors.sh" "$root/scripts/release-decernor.sh" "$fixture/scripts/"
 cp "$root/config/release/tagger-identity.txt" "$fixture/config/release/"
 gpg --batch --armor --export "$primary" >"$fixture/docs/security/release-signing-keys.asc"
-printf 'gpg %s\nminisign %064d\n' "$primary" 0 >"$fixture/keys/expected-fingerprints.txt"
-python3 - "$primary" "$fixture/keys/expected-fingerprints.ndjson" <<'PY'
+python3 - "$fixture/docs/security/sfetch-minisign.pub" <<'PY'
+import base64
+import pathlib
+import sys
+blob = b'Ed' + b'\x01' * 8 + b'\x01' * 32
+pathlib.Path(sys.argv[1]).write_text(
+    'untrusted comment: synthetic public key\n' + base64.b64encode(blob).decode() + '\n'
+)
+PY
+"$bin" fingerprint "$fixture/docs/security/release-signing-keys.asc" --class public --kind gpg \
+    --format ndjson --path-mode none --gpg-role primary >"$scratch/gpg.ndjson"
+"$bin" fingerprint "$fixture/docs/security/sfetch-minisign.pub" --class public --kind minisign \
+    --format ndjson --path-mode none >"$scratch/minisign.ndjson"
+python3 - "$scratch" "$fixture/keys" <<'PY'
 import json
 import pathlib
 import sys
-out = pathlib.Path(sys.argv[2])
-out.write_text(json.dumps({'fingerprint_scheme':'openpgp-fingerprint-v1','key_role':'primary','fingerprint':sys.argv[1]})+'\n'+json.dumps({'fingerprint_scheme':'minisign-public-blob-sha256-v1','fingerprint':'0'*64})+'\n')
+base = pathlib.Path(sys.argv[1])
+keys = pathlib.Path(sys.argv[2])
+g = [json.loads(line) for line in (base / 'gpg.ndjson').read_text().splitlines() if line]
+m = [json.loads(line) for line in (base / 'minisign.ndjson').read_text().splitlines() if line and json.loads(line).get('fingerprint_scheme') == 'minisign-public-blob-sha256-v1']
+if len(g) != 1 or len(m) != 1:
+    raise SystemExit('error: expected one GPG primary and one minisign fingerprint')
+(keys / 'expected-fingerprints.ndjson').write_text(''.join(json.dumps(r, separators=(',', ':')) + '\n' for r in (g[0], m[0])))
+(keys / 'expected-fingerprints.txt').write_text('gpg ' + g[0]['fingerprint'] + '\nminisign ' + m[0]['fingerprint'] + '\n')
 PY
 printf 'fixture\n' >"$fixture/file"
 printf 'Fixture release\n' >"$scratch/message.txt"

@@ -35,9 +35,21 @@ committed() {
 }
 pin="$keyring/release-signing-keys.asc"
 anchors="$keyring/expected-fingerprints.txt"
+minisign_pin="$keyring/sfetch-minisign.pub"
+anchors_ndjson="$keyring/expected-fingerprints.ndjson"
 committed docs/security/release-signing-keys.asc "$pin"
 committed keys/expected-fingerprints.txt "$anchors"
+committed keys/expected-fingerprints.ndjson "$anchors_ndjson"
+committed docs/security/sfetch-minisign.pub "$minisign_pin"
 committed config/release/tagger-identity.txt "$keyring/tagger-identity.txt"
+# PDR-0008: Decernor is the designated checker. The listing script is secondary.
+# shellcheck source=scripts/release-decernor.sh
+source "$(dirname "$0")/release-decernor.sh"
+resolve_release_decernor ceremony || die 'trusted Decernor identity/version check failed'
+"$RELEASE_DECERNOR_BIN" fingerprint verify \
+    --anchors "$anchors" \
+    --anchors-ndjson "$anchors_ndjson" \
+    --gpg "$pin" --minisign "$minisign_pin" >/dev/null || die 'Decernor rejected committed pin and anchors'
 "$(dirname "$0")/validate-release-anchors.sh" "$anchors" "$pin" > /dev/null || die 'committed pin and anchors disagree'
 tagger="$(git cat-file tag "$object" | sed -n 's/^tagger \(.*\) [0-9][0-9]* [+-][0-9][0-9][0-9][0-9]$/\1/p' | head -1)"
 [[ "$tagger" == "$(cat "$keyring/tagger-identity.txt")" ]] || die 'infosec tagger required'

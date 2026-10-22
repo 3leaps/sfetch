@@ -17,7 +17,7 @@ if grep -nE '^[[:space:]]*RELEASE_TAG[[:space:]]*(\?=|:=|\+=|=)' Makefile; then
     fail "Makefile must not assign RELEASE_TAG"
 fi
 # Mentions of RELEASE_TAG in the Makefile may exist only as a refusal.
-if grep -nE 'RELEASE_TAG' Makefile | grep -vE 'SFETCH_RELEASE_TAG|not accepted|RELEASE_TAG is not'; then
+if grep -nE 'RELEASE_TAG' Makefile | grep -vE 'SFETCH_RELEASE_TAG|not accepted|RELEASE_TAG is not|origin RELEASE_TAG'; then
     fail "Makefile mentions RELEASE_TAG outside a refusal"
 fi
 grep -q 'SFETCH_RELEASE_TAG' Makefile || fail "Makefile must consume SFETCH_RELEASE_TAG"
@@ -41,12 +41,32 @@ pass "missing SFETCH_RELEASE_TAG is refused"
 
 # Tag must equal v$(VERSION) and the check runs before other prerequisites.
 file_version="$(tr -d ' \n' <VERSION)"
-if make -s release-notes SFETCH_RELEASE_TAG=v0.0.0 RELEASE_TAG= >/tmp/sft-make-ver.out 2>&1; then
+unset RELEASE_TAG || true
+if make -s release-notes SFETCH_RELEASE_TAG=v0.0.0 >/tmp/sft-make-ver.out 2>&1; then
     fail "make release-notes with a tag that is not v$(VERSION) must be refused"
 fi
 grep -q "must equal v${file_version}" /tmp/sft-make-ver.out ||
     fail "VERSION mismatch refusal (log: $(cat /tmp/sft-make-ver.out))"
 pass "SFETCH_RELEASE_TAG must equal v\$(VERSION)"
+
+# Empty RELEASE_TAG= is still a defined input (make origin=command line).
+if make -s release-notes RELEASE_TAG= "SFETCH_RELEASE_TAG=v${file_version}" >/tmp/sft-make-empty-rt.out 2>&1; then
+    fail "make RELEASE_TAG= must be refused"
+fi
+grep -qi 'RELEASE_TAG is not accepted' /tmp/sft-make-empty-rt.out ||
+    fail "empty RELEASE_TAG= refusal (log: $(cat /tmp/sft-make-empty-rt.out))"
+pass "empty RELEASE_TAG= is refused"
+
+# H4: make -n release-download must use the CI-artifact provenance path.
+dry="$(make -n release-download "SFETCH_RELEASE_TAG=v${file_version}" 2>/tmp/sft-make-dl.err)" || {
+    fail "make -n release-download failed: $(cat /tmp/sft-make-dl.err)"
+}
+printf '%s\n' "$dry" | grep -q 'release-fetch-ci-artifacts.sh' ||
+    fail "make -n release-download must call release-fetch-ci-artifacts.sh (got: $dry)"
+if printf '%s\n' "$dry" | grep -q 'download-release-assets.sh'; then
+    fail "make -n release-download still calls download-release-assets.sh"
+fi
+pass "make -n release-download uses CI-artifact provenance"
 
 if grep -E '^release-sign:.*release-checksums' Makefile; then
     fail "release-sign must not run release-checksums before the tag guard"

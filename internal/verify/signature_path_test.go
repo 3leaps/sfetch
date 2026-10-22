@@ -1,6 +1,8 @@
 package verify
 
 import (
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -78,5 +80,35 @@ func TestGpgPathArg(t *testing.T) {
 	gpg4win := gpgPathArg(`C:\Program Files (x86)\GnuPG\bin\gpg.exe`, winHome)
 	if gpg4win != winHome {
 		t.Fatalf("gpg4win homedir: got %q want %q", gpg4win, winHome)
+	}
+}
+
+func TestGpgPathArgDefaultBareName(t *testing.T) {
+	t.Parallel()
+
+	if _, err := exec.LookPath("gpg"); err != nil {
+		t.Skip("gpg not on PATH")
+	}
+
+	resolved := resolveGPGBin("gpg")
+	if resolved == "gpg" || resolved == "gpg.exe" {
+		t.Fatalf("bare gpg was not resolved via LookPath: %q", resolved)
+	}
+	base := strings.ToLower(filepath.Base(resolved))
+	if base != "gpg" && base != "gpg.exe" {
+		t.Fatalf("resolved gpg unexpected base: %q", resolved)
+	}
+
+	winHome := `C:\Users\RUNNER~\AppData\Local\Temp\sfetch-gpg-1`
+	got := gpgPathArg("gpg", winHome)
+	if needsMSYSPathConversion(resolved) {
+		want := toMSYSPath(winHome)
+		if got != want {
+			t.Fatalf("bare gpg resolved to MSYS binary %q: homedir got %q want %q", resolved, got, want)
+		}
+		return
+	}
+	if got != winHome {
+		t.Fatalf("bare gpg resolved to native binary %q: homedir got %q want %q", resolved, got, winHome)
 	}
 }

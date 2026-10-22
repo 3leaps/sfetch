@@ -195,9 +195,15 @@ goneat_minisign_key_file() {
     else
         blob="$GONEAT_MINISIGN_PUBKEY"
     fi
-    tmp="$(mktemp "${TMPDIR:-/tmp}/goneat-minisign.XXXXXX.pub")"
-    printf 'untrusted comment: fulmenhq goneat release signing\n%s\n' "$blob" >"$tmp"
-    printf '%s\n' "$tmp"
+    # BSD/macOS mktemp requires the XXXXXX suffix at the end of the template.
+    # A ".pub" suffix makes the name fixed and the second run fails.
+    if [ -n "${WORK:-}" ] && [ -d "$WORK" ]; then
+        tmp="$(mktemp -d "${WORK}/goneat-minisign.XXXXXX")"
+    else
+        tmp="$(mktemp -d "${TMPDIR:-/tmp}/goneat-minisign.XXXXXX")"
+    fi
+    printf 'untrusted comment: fulmenhq goneat release signing\n%s\n' "$blob" >"$tmp/key.pub"
+    printf '%s\n' "$tmp/key.pub"
 }
 
 # -----------------------------------------------------------------------------
@@ -343,6 +349,7 @@ cleanup() {
     rm -rf "${WORK}"
 }
 trap cleanup EXIT
+# goneat_minisign_key_file writes under WORK when it is set (this trap).
 
 # Resolve install dir path without creating it yet (validate before side effects).
 # acquire-minisign-only / install mode create the directory after validation.

@@ -255,6 +255,19 @@ if command -v minisign >/dev/null 2>&1; then
             select_trust_anchor v0.4.12
             verify_signature "$d_sub/SHA256SUMS" "$d_sub"
         ) >/dev/null 2>&1 || fail "v0.4.12: subkey signature under the pinned primary must verify"
+        # Two concatenated valid signatures must be refused (exactly one VALIDSIG).
+        d_two="$(mktemp -d "$WORK/two.XXXXXX")"
+        cp "$d_sub/SHA256SUMS" "$d_two/SHA256SUMS"
+        cp "$d_sub/sfetch-release-signing-key.asc" "$d_two/sfetch-release-signing-key.asc"
+        cat "$d_sub/SHA256SUMS.asc" "$d_sub/SHA256SUMS.asc" >"$d_two/SHA256SUMS.asc"
+        if (
+            VERIFY_GPG=true REQUIRE_MINISIGN=false
+            select_trust_anchor v0.4.12
+            verify_signature "$d_two/SHA256SUMS" "$d_two"
+        ) >/dev/null 2>&1; then
+            fail "v0.4.12: concatenated valid signatures must be refused"
+        fi
+        pass "exactly one VALIDSIG required"
         # A single-key file whose signature comes from another key is refused.
         if gpg_bundle_as v0.4.12 atk cur; then fail "v0.4.12: signature from an unlisted key must be refused"; fi
         # Secret-key packets: a bundle carrying any secret primary is refused,

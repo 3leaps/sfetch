@@ -14,6 +14,45 @@ tag_discard_verify_home() {
 	fi
 }
 
+tag_discard_signing_home() {
+	local home="${TAG_SIGN_GNUPGHOME:-${TAG_SIGN_GNUPGHOME_LAST:-}}"
+	if [[ -n "$home" ]]; then
+		gpgconf --homedir "$home" --kill all >/dev/null 2>&1 || true
+		rm -rf "$home"
+	fi
+	if [[ -n "${GNUPGHOME:-}" && -n "$home" && "$GNUPGHOME" == "$home" ]]; then
+		unset GNUPGHOME
+	fi
+	TAG_SIGN_GNUPGHOME=""
+	TAG_SIGN_GNUPGHOME_LAST=""
+}
+
+tag_cleanup_homes() {
+	tag_discard_verify_home
+	tag_discard_signing_home
+}
+
+# Expand ~ and collapse . / .. without following symlinks. Relative paths fail.
+tag_canon_path() {
+	python3 -c '
+import os, sys
+raw = sys.argv[1]
+p = os.path.expanduser(raw)
+if not p.startswith("/"):
+    raise SystemExit("relative")
+parts = []
+for part in p.split("/"):
+    if part in ("", "."):
+        continue
+    if part == "..":
+        if parts:
+            parts.pop()
+        continue
+    parts.append(part)
+print("/" + "/".join(parts) if parts else "/")
+' "$1"
+}
+
 tag_die() {
 	echo "error: $*" >&2
 	return 1
@@ -158,27 +197,32 @@ tag_fresh_verify_gnupg_home() {
 	TAG_VERIFY_GNUPGHOME="$dir"
 }
 
-# Signing home: absolute, not a symlink, not an inherited default, mode 0700.
-# Relative paths and symlink-to-existing-dir probes are refused before any
-# gpg invocation. Do not follow symlinks (no pwd -P).
+# Operator source keyring: used only as an import origin. Signing never
+# binds GNUPGHOME to this directory. Canonicalize (~, trailing slash, ., ..)
+# before comparing to the default homedir; refuse non-0700 (do not chmod).
 tag_bind_operator_gnupg_home() {
 	[[ -n "${SFETCH_GPG_HOMEDIR:-}" ]] || {
 		tag_die 'external GPG home required'
 		return 1
 	}
-	[[ "$SFETCH_GPG_HOMEDIR" == /* ]] || {
+	local canon default_home default_env
+	canon="$(tag_canon_path "$SFETCH_GPG_HOMEDIR")" || {
 		tag_die 'GPG home must be an absolute path'
 		return 1
 	}
-	[[ ! -L "$SFETCH_GPG_HOMEDIR" ]] || {
+	[[ "$canon" == /* ]] || {
+		tag_die 'GPG home must be an absolute path'
+		return 1
+	}
+	[[ ! -L "$SFETCH_GPG_HOMEDIR" && ! -L "$canon" ]] || {
 		tag_die 'GPG home must not be a symlink'
 		return 1
 	}
-	[[ -d "$SFETCH_GPG_HOMEDIR" ]] || {
+	[[ -d "$canon" ]] || {
 		tag_die 'external GPG home required'
 		return 1
 	}
-	local component="$SFETCH_GPG_HOMEDIR"
+	local component="$canon"
 	while [[ "$component" != / ]]; do
 		[[ ! -L "$component" ]] || {
 			tag_die 'GPG home may not contain symlink ancestors'
@@ -187,31 +231,65 @@ tag_bind_operator_gnupg_home() {
 		component="${component%/*}"
 		[[ -n "$component" ]] || component=/
 	done
-	case "$SFETCH_GPG_HOMEDIR" in "$tag_root" | "$tag_root"/*)
+	case "$canon" in "$tag_root" | "$tag_root"/*)
 		tag_die 'GPG home must be outside repository'
 		return 1
 		;;
 	esac
-	chmod 700 "$SFETCH_GPG_HOMEDIR" || {
-		tag_die 'cannot chmod GPG home'
-		return 1
-	}
 	local mode
-	mode="$(tag_stat_mode "$SFETCH_GPG_HOMEDIR")"
+	mode="$(tag_stat_mode "$canon")"
 	[[ "$mode" == "700" ]] || {
 		tag_die 'GPG home must be mode 0700'
 		return 1
 	}
-	# Refuse the default GnuPG homedir so tests and the ceremony cannot
-	# sign with a real operator key by accident. Tests always set a
-	# throwaway GNUPGHOME via SFETCH_GPG_HOMEDIR. Compare the given path
-	# itself, never a symlink-resolved target.
-	local default_home="${GNUPGHOME:-$HOME/.gnupg}"
-	if [[ "$SFETCH_GPG_HOMEDIR" == "$default_home" || "$SFETCH_GPG_HOMEDIR" == "$HOME/.gnupg" ]]; then
+	default_home="$(tag_canon_path "$HOME/.gnupg")" || default_home=""
+	default_env="$(tag_canon_path "${GNUPGHOME:-$HOME/.gnupg}")" || default_env=""
+	if [[ -n "$default_home" && "$canon" == "$default_home" ]] ||
+		[[ -n "$default_env" && "$canon" == "$default_env" ]]; then
 		tag_die 'GPG home must not be the default homedir'
 		return 1
 	fi
-	export GNUPGHOME="$SFETCH_GPG_HOMEDIR"
+	SFETCH_GPG_HOMEDIR="$canon"
+}
+
+# Fresh isolated signing home. Never an existing operator directory.
+tag_fresh_signing_gnupg_home() {
+	local dir mode
+	dir="$(mktemp -d "${TMPDIR:-/tmp}/sfetch-tag-sign-gnupg.XXXXXX")" || {
+		tag_die 'cannot create signing GnuPG home'
+		return 1
+	}
+	if [[ -L "$dir" || ! -d "$dir" ]]; then
+		rm -rf "$dir"
+		tag_die 'signing GnuPG home must be a fresh directory, not a symlink'
+		return 1
+	fi
+	chmod 700 "$dir" || {
+		rm -rf "$dir"
+		tag_die 'cannot chmod signing GnuPG home'
+		return 1
+	}
+	mode="$(tag_stat_mode "$dir")"
+	[[ "$mode" == "700" ]] || {
+		rm -rf "$dir"
+		tag_die 'signing GnuPG home must be mode 0700'
+		return 1
+	}
+	TAG_SIGN_GNUPGHOME="$dir"
+	TAG_SIGN_GNUPGHOME_LAST="$dir"
+}
+
+# Import the selected secret key into a fresh temp home and bind GNUPGHOME there.
+tag_prepare_signing_home() {
+	tag_bind_operator_gnupg_home || return 1
+	tag_fresh_signing_gnupg_home || return 1
+	if ! gpg --homedir "$SFETCH_GPG_HOMEDIR" --batch --export-secret-keys "${SFETCH_PGP_KEY_ID%!}" 2>/dev/null |
+		gpg --homedir "$TAG_SIGN_GNUPGHOME" --batch --import >/dev/null 2>&1; then
+		tag_discard_signing_home
+		tag_die 'cannot import signing material into isolated home'
+		return 1
+	fi
+	export GNUPGHOME="$TAG_SIGN_GNUPGHOME"
 }
 
 tag_key_selector() {

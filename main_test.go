@@ -661,17 +661,51 @@ func TestExtractTarGz(t *testing.T) {
 	}
 }
 
-func TestExtractTarGzOpenHasG703Nosec(t *testing.T) {
+func TestExtractTarGzRejectsOversize(t *testing.T) {
 	t.Parallel()
 
-	src, err := os.ReadFile("main.go")
-	if err != nil {
-		t.Fatalf("read main.go: %v", err)
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "bomb.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
 	}
-	// gosec-high excludes G304 globally but not G703. Reverting the G703
-	// disposition on extractTarGz's archive open fails CI Quality.
-	if !strings.Contains(string(src), "os.Open(archivePath) // #nosec G304,G703") {
-		t.Fatal("extractTarGz os.Open(archivePath) must #nosec G304,G703")
+	// High-ratio: 64KiB of zeros compresses to a tiny gzip, but the tar Size
+	// exceeds the test limit. Reverting the expanded-size check accepts it.
+	writeTestTarGz(t, archivePath, []testTarEntry{
+		{name: "zeros", body: strings.Repeat("\x00", 64<<10), mode: 0o644},
+	})
+	info, err := os.Stat(archivePath)
+	if err != nil {
+		t.Fatalf("stat archive: %v", err)
+	}
+	if info.Size() >= 64<<10 {
+		t.Fatalf("expected high-ratio archive, got %d bytes on disk", info.Size())
+	}
+	if err := extractTarGzLimited(archivePath, extractDir, 256, 1024); err == nil {
+		t.Fatal("expected expanded-size rejection")
+	}
+	if _, err := os.Stat(filepath.Join(extractDir, "zeros")); err == nil {
+		t.Fatal("oversize entry was written")
+	}
+}
+
+func TestExtractTarGzRejectsTooManyEntries(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "many.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	entries := make([]testTarEntry, 5)
+	for i := range entries {
+		entries[i] = testTarEntry{name: fmt.Sprintf("f%d", i), body: "x", mode: 0o644}
+	}
+	writeTestTarGz(t, archivePath, entries)
+	if err := extractTarGzLimited(archivePath, extractDir, 3, 512<<20); err == nil {
+		t.Fatal("expected entry-count rejection")
 	}
 }
 

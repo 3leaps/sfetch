@@ -375,6 +375,14 @@ gpg_cleanup() {
     GPG_HOME=""
 }
 
+# Primary fingerprint from a VALIDSIG status line. Field 12 is the primary
+# (GnuPG DETAILS). GnuPG 2.5.x appends flags after that, so $NF is not portable.
+gpg_validsig_primary() {
+    local -a _vs
+    read -r -a _vs <<<"$1"
+    printf '%s' "${_vs[11]:-}"
+}
+
 verify_signature() {
     local sums_file="$1"
     local tmpdir="$2"
@@ -420,7 +428,7 @@ verify_signature() {
             # 2. pub/sec primary count (nprimary==1) — a second public primary
             #    in the same file must not ride along (the narrow --import
             #    show-only first-fpr check was fail-open on a bundled extra key).
-            # 3. VALIDSIG last-field primary — the signer may be a subkey; the
+            # 3. VALIDSIG primary (field 12) — the signer may be a subkey; the
             #    pin is the primary fingerprint. Removing only one of these
             #    leaves a hole the other two do not cover.
             local listing fprs _f
@@ -461,13 +469,14 @@ verify_signature() {
             fi
             log "Verifying signature with gpg (pinned fingerprint)..."
             # The listing pin (fprs == ACTIVE_PGP_FPR) is the selected generation.
-            # VALIDSIG's last field must equal that imported primary so a
-            # signature from some other key in the homedir cannot ride along.
-            # Comparing VALIDSIG to ACTIVE_PGP_FPR a second time would mask a
-            # listing that checked the default pin instead of the selected one.
+            # VALIDSIG field 12 (primary-key-fpr) must equal that imported
+            # primary so a signature from some other key in the homedir cannot
+            # ride along. $NF is flags on GnuPG 2.5.x. Comparing VALIDSIG to
+            # ACTIVE_PGP_FPR a second time would mask a listing that checked
+            # the default pin instead of the selected one.
             # --trust-model always still emits EXPKEYSIG/EXPSIG/REVKEYSIG and
             # KEYEXPIRED with rc=0 plus VALIDSIG; those are not a valid pin.
-            local status sig_primary gpg_bad=false gpg_rc=0 gpg_tok
+            local status sig_primary gpg_bad=false gpg_rc=0 gpg_tok nvalid=0
             if ! gpg --batch --no-tty --homedir "$GPG_HOME" --import "$gpg_key" 2>/dev/null; then
                 gpg_cleanup
                 err "GPG signature verification failed"
@@ -481,7 +490,8 @@ verify_signature() {
             while IFS= read -r line; do
                 case "$line" in
                     "[GNUPG:] VALIDSIG "*)
-                        sig_primary="${line##* }"
+                        nvalid=$((nvalid + 1))
+                        sig_primary="$(gpg_validsig_primary "$line")"
                         ;;
                 esac
                 gpg_tok="${line#'[GNUPG:] '}"
@@ -495,6 +505,10 @@ verify_signature() {
             if [ "$gpg_rc" -ne 0 ] || [ "$gpg_bad" = true ]; then
                 gpg_cleanup
                 err "GPG signature verification failed"
+            fi
+            if [ "$nvalid" -ne 1 ]; then
+                gpg_cleanup
+                err "GPG signature must contain exactly one VALIDSIG (got ${nvalid})"
             fi
             if [ "$sig_primary" != "$fprs" ]; then
                 gpg_cleanup
