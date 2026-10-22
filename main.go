@@ -1,7 +1,9 @@
 package main
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -2196,42 +2198,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return 1
 			}
 
-			switch classification.ArchiveFormat {
-			case ArchiveFormatZip:
-				if err := extractZip(assetPath, extractDir); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract zip: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTarXz:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xJf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTarBz2:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xjf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTar:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTarGz:
-				fallthrough
-			default:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xzf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
+			if err := extractArchive(classification.ArchiveFormat, assetPath, extractDir); err != nil {
+				_, _ = fmt.Fprintf(stderr, "%v\n", err) //nolint:errcheck
+				return 1
 			}
 
 			binaryPath, err = resolveArchiveBinaryPath(extractDir, binaryName, runtime.GOOS)
@@ -2477,42 +2446,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return 1
 			}
 
-			switch classification.ArchiveFormat {
-			case ArchiveFormatZip:
-				if err := extractZip(assetPath, extractDir); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract zip: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTarXz:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xJf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTarBz2:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xjf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTar:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTarGz:
-				fallthrough
-			default:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xzf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
+			if err := extractArchive(classification.ArchiveFormat, assetPath, extractDir); err != nil {
+				_, _ = fmt.Fprintf(stderr, "%v\n", err) //nolint:errcheck
+				return 1
 			}
 
 			binaryPath, err = resolveArchiveBinaryPath(extractDir, binaryName, runtime.GOOS)
@@ -3096,42 +3032,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 
-		switch classification.ArchiveFormat {
-		case ArchiveFormatZip:
-			if err := extractZip(assetPath, extractDir); err != nil {
-				_, _ = fmt.Fprintf(stderr, "extract zip: %v\n", err) //nolint:errcheck
-				return 1
-			}
-		case ArchiveFormatTarXz:
-			// #nosec G204,G702 -- tar args are fixed; paths are local temp files
-			cmd := exec.Command("tar", "xJf", assetPath, "-C", extractDir)
-			if err := cmd.Run(); err != nil {
-				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-				return 1
-			}
-		case ArchiveFormatTarBz2:
-			// #nosec G204,G702 -- tar args are fixed; paths are local temp files
-			cmd := exec.Command("tar", "xjf", assetPath, "-C", extractDir)
-			if err := cmd.Run(); err != nil {
-				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-				return 1
-			}
-		case ArchiveFormatTar:
-			// #nosec G204,G702 -- tar args are fixed; paths are local temp files
-			cmd := exec.Command("tar", "xf", assetPath, "-C", extractDir)
-			if err := cmd.Run(); err != nil {
-				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-				return 1
-			}
-		case ArchiveFormatTarGz:
-			fallthrough
-		default:
-			// #nosec G204,G702 -- tar args are fixed; paths are local temp files
-			cmd := exec.Command("tar", "xzf", assetPath, "-C", extractDir)
-			if err := cmd.Run(); err != nil {
-				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-				return 1
-			}
+		if err := extractArchive(classification.ArchiveFormat, assetPath, extractDir); err != nil {
+			_, _ = fmt.Fprintf(stderr, "%v\n", err) //nolint:errcheck
+			return 1
 		}
 
 		binaryPath, err = resolveArchiveBinaryPath(extractDir, binaryName, goos)
@@ -3397,6 +3300,177 @@ func archiveFormatFromString(s string) ArchiveFormat {
 	}
 }
 
+func extractArchive(format ArchiveFormat, assetPath, extractDir string) error {
+	switch format {
+	case ArchiveFormatZip:
+		if err := extractZip(assetPath, extractDir); err != nil {
+			return fmt.Errorf("extract zip: %w", err)
+		}
+		return nil
+	case ArchiveFormatTarXz:
+		if err := extractTarCmd(assetPath, extractDir, "-xJf"); err != nil {
+			return fmt.Errorf("extract archive: %w", err)
+		}
+		return nil
+	case ArchiveFormatTarBz2:
+		if err := extractTarCmd(assetPath, extractDir, "-xjf"); err != nil {
+			return fmt.Errorf("extract archive: %w", err)
+		}
+		return nil
+	case ArchiveFormatTar:
+		if err := extractTarCmd(assetPath, extractDir, "-xf"); err != nil {
+			return fmt.Errorf("extract archive: %w", err)
+		}
+		return nil
+	case ArchiveFormatTarGz:
+		if err := extractTarGz(assetPath, extractDir); err != nil {
+			return fmt.Errorf("extract archive: %w", err)
+		}
+		return nil
+	default:
+		if err := extractTarGz(assetPath, extractDir); err != nil {
+			return fmt.Errorf("extract archive: %w", err)
+		}
+		return nil
+	}
+}
+
+func extractTarCmd(assetPath, extractDir, flag string) error {
+	args := extractTarCmdArgs(assetPath, extractDir, flag)
+	// #nosec G204,G702 -- tar args are fixed; paths are local temp files
+	cmd := exec.Command("tar", args...)
+	return cmd.Run()
+}
+
+func extractTarCmdArgs(assetPath, extractDir, flag string) []string {
+	if runtime.GOOS == "windows" {
+		// GNU tar treats "C:" as a remote host unless --force-local is set.
+		return []string{"--force-local", flag, assetPath, "-C", extractDir}
+	}
+	return []string{flag, assetPath, "-C", extractDir}
+}
+
+// archiveNameIsAbsolute reports whether an archive member name is absolute on
+// any OS we extract on. filepath.IsAbs("/evil") is false on Windows, so a
+// Unix-style absolute entry would otherwise extract (and Join can drop the
+// destination root). Drive-letter and UNC names are rejected on Unix too so
+// the check is the same everywhere.
+func archiveNameIsAbsolute(name string) bool {
+	if name == "" {
+		return false
+	}
+	if name[0] == '/' || name[0] == '\\' {
+		return true
+	}
+	if len(name) >= 2 && name[1] == ':' && isArchiveDriveLetter(name[0]) {
+		return true
+	}
+	return filepath.IsAbs(name) || filepath.VolumeName(name) != ""
+}
+
+func isArchiveDriveLetter(c byte) bool {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+}
+
+func archiveEntryDest(extractDirClean, name, kind string) (string, bool, error) {
+	errInvalid := fmt.Errorf("%s slip: invalid path %q", kind, name)
+	if archiveNameIsAbsolute(name) {
+		return "", false, errInvalid
+	}
+	cleaned := filepath.Clean(filepath.FromSlash(name))
+	if cleaned == "." {
+		return "", true, nil
+	}
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) {
+		return "", false, errInvalid
+	}
+	if archiveNameIsAbsolute(cleaned) || filepath.IsAbs(cleaned) || filepath.VolumeName(cleaned) != "" {
+		return "", false, errInvalid
+	}
+	prefix := extractDirClean + string(os.PathSeparator)
+	destPathClean := filepath.Clean(filepath.Join(extractDirClean, cleaned))
+	if destPathClean != extractDirClean && !strings.HasPrefix(destPathClean, prefix) {
+		return "", false, errInvalid
+	}
+	return destPathClean, false, nil
+}
+
+func extractTarGz(archivePath, extractDir string) error {
+	f, err := os.Open(archivePath) // #nosec G304 -- path is a local temp download
+	if err != nil {
+		return fmt.Errorf("open tar.gz %s: %w", archivePath, err)
+	}
+	defer f.Close() //nolint:errcheck // read-only archive, close error non-critical
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("gzip %s: %w", archivePath, err)
+	}
+	defer gz.Close() //nolint:errcheck // read-only gzip, close error non-critical
+
+	tr := tar.NewReader(gz)
+	extractDirClean := filepath.Clean(extractDir)
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read tar %s: %w", archivePath, err)
+		}
+		switch hdr.Typeflag {
+		case tar.TypeXHeader, tar.TypeXGlobalHeader, tar.TypeGNULongName, tar.TypeGNULongLink:
+			continue
+		}
+
+		destPathClean, skip, err := archiveEntryDest(extractDirClean, hdr.Name, "tar")
+		if err != nil {
+			return err
+		}
+		if skip {
+			continue
+		}
+
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			// #nosec G301,G703 -- SDR-002: tar extraction dir; SDR-006: prefix-contained path
+			if err := os.MkdirAll(destPathClean, 0o755); err != nil {
+				return fmt.Errorf("mkdir %s: %w", destPathClean, err)
+			}
+		case tar.TypeReg, tar.TypeRegA:
+			// #nosec G301,G703 -- SDR-002: tar extraction dir; SDR-006: prefix-contained path
+			if err := os.MkdirAll(filepath.Dir(destPathClean), 0o755); err != nil {
+				return fmt.Errorf("mkdir %s: %w", filepath.Dir(destPathClean), err)
+			}
+			// #nosec G302,G703 -- SDR-003: extracted file permissions; SDR-006: prefix-contained path
+			out, err := os.OpenFile(destPathClean, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+			if err != nil {
+				return fmt.Errorf("create %s: %w", destPathClean, err)
+			}
+			// #nosec G110 -- SDR-004: user-initiated archive extraction
+			if _, err := io.Copy(out, tr); err != nil {
+				_ = out.Close()
+				return fmt.Errorf("write %s: %w", destPathClean, err)
+			}
+			if err := out.Close(); err != nil {
+				return fmt.Errorf("close %s: %w", destPathClean, err)
+			}
+			if runtime.GOOS != "windows" {
+				perm := hdr.FileInfo().Mode().Perm()
+				if perm != 0 {
+					if err := os.Chmod(destPathClean, perm); err != nil { // #nosec G302,G703 -- apply archive-provided mode within validated extraction root
+						return fmt.Errorf("chmod %s: %w", destPathClean, err)
+					}
+				}
+			}
+		default:
+			return fmt.Errorf("tar contains unsupported file type %q", hdr.Name)
+		}
+	}
+	return nil
+}
+
 func extractZip(zipPath, extractDir string) error {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
@@ -3405,25 +3479,14 @@ func extractZip(zipPath, extractDir string) error {
 	defer r.Close() //nolint:errcheck // read-only zip, close error non-critical
 
 	extractDirClean := filepath.Clean(extractDir)
-	prefix := extractDirClean + string(os.PathSeparator)
 
 	for _, f := range r.File {
-		name := filepath.FromSlash(f.Name)
-		cleaned := filepath.Clean(name)
-		if cleaned == "." {
+		destPathClean, skip, err := archiveEntryDest(extractDirClean, f.Name, "zip")
+		if err != nil {
+			return err
+		}
+		if skip {
 			continue
-		}
-		if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) {
-			return fmt.Errorf("zip slip: invalid path %q", f.Name)
-		}
-		if filepath.IsAbs(cleaned) || filepath.VolumeName(cleaned) != "" {
-			return fmt.Errorf("zip slip: invalid path %q", f.Name)
-		}
-
-		destPath := filepath.Join(extractDirClean, cleaned)
-		destPathClean := filepath.Clean(destPath)
-		if destPathClean != extractDirClean && !strings.HasPrefix(destPathClean, prefix) {
-			return fmt.Errorf("zip slip: invalid path %q", f.Name)
 		}
 
 		mode := f.Mode()

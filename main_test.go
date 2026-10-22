@@ -1,7 +1,9 @@
 package main
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -9,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -36,12 +39,16 @@ func TestCopyFilePreservesPermissions(t *testing.T) {
 		t.Fatalf("copyFile: %v", err)
 	}
 
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		t.Fatalf("stat src: %v", err)
+	}
 	info, err := os.Stat(dst)
 	if err != nil {
 		t.Fatalf("stat dst: %v", err)
 	}
-	if got, want := info.Mode().Perm(), os.FileMode(0o755); got != want {
-		t.Fatalf("dst perms: got %o want %o", got, want)
+	if got, want := info.Mode().Perm(), srcInfo.Mode().Perm(); got != want {
+		t.Fatalf("dst perms: got %o want %o (src)", got, want)
 	}
 }
 
@@ -129,12 +136,16 @@ func TestInstallFileCopyFallbackPreservesPermsWhenNoChmodNeeded(t *testing.T) {
 		t.Fatalf("installFileWithRename: %v", err)
 	}
 
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		t.Fatalf("stat src: %v", err)
+	}
 	info, err := os.Stat(dst)
 	if err != nil {
 		t.Fatalf("stat dst: %v", err)
 	}
-	if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
-		t.Fatalf("dst perms: got %o want %o", got, want)
+	if got, want := info.Mode().Perm(), srcInfo.Mode().Perm(); got != want {
+		t.Fatalf("dst perms: got %o want %o (src)", got, want)
 	}
 }
 
@@ -411,41 +422,59 @@ func TestExtractZipRejectsZipSlip(t *testing.T) {
 func TestExtractZipRejectsAbsolutePaths(t *testing.T) {
 	t.Parallel()
 
-	tmp := t.TempDir()
-	zipPath := filepath.Join(tmp, "abs.zip")
-	extractDir := filepath.Join(tmp, "extract")
-	if err := os.Mkdir(extractDir, 0o755); err != nil {
-		t.Fatalf("mkdir extractDir: %v", err)
+	tests := []struct {
+		name  string
+		entry string
+	}{
+		{name: "unix abs", entry: "/evil"},
+		{name: "backslash abs", entry: `\evil`},
+		{name: "drive slash", entry: "C:/evil"},
+		{name: "drive backslash", entry: `C:\evil`},
+		{name: "unc slash", entry: "//host/share/evil"},
+		{name: "unc backslash", entry: `\\host\share\evil`},
 	}
 
-	out, err := os.Create(zipPath)
-	if err != nil {
-		t.Fatalf("create zip: %v", err)
-	}
-	zw := zip.NewWriter(out)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	hdr := &zip.FileHeader{Name: "/evil", Method: zip.Deflate}
-	w, err := zw.CreateHeader(hdr)
-	if err != nil {
-		_ = zw.Close()
-		_ = out.Close()
-		t.Fatalf("CreateHeader: %v", err)
-	}
-	if _, err := w.Write([]byte("pwnd")); err != nil {
-		_ = zw.Close()
-		_ = out.Close()
-		t.Fatalf("write zip entry: %v", err)
-	}
-	if err := zw.Close(); err != nil {
-		_ = out.Close()
-		t.Fatalf("close zip writer: %v", err)
-	}
-	if err := out.Close(); err != nil {
-		t.Fatalf("close zip file: %v", err)
-	}
+			tmp := t.TempDir()
+			zipPath := filepath.Join(tmp, "abs.zip")
+			extractDir := filepath.Join(tmp, "extract")
+			if err := os.Mkdir(extractDir, 0o755); err != nil {
+				t.Fatalf("mkdir extractDir: %v", err)
+			}
 
-	if err := extractZip(zipPath, extractDir); err == nil {
-		t.Fatalf("expected absolute path rejection")
+			out, err := os.Create(zipPath)
+			if err != nil {
+				t.Fatalf("create zip: %v", err)
+			}
+			zw := zip.NewWriter(out)
+
+			hdr := &zip.FileHeader{Name: tc.entry, Method: zip.Deflate}
+			w, err := zw.CreateHeader(hdr)
+			if err != nil {
+				_ = zw.Close()
+				_ = out.Close()
+				t.Fatalf("CreateHeader: %v", err)
+			}
+			if _, err := w.Write([]byte("pwnd")); err != nil {
+				_ = zw.Close()
+				_ = out.Close()
+				t.Fatalf("write zip entry: %v", err)
+			}
+			if err := zw.Close(); err != nil {
+				_ = out.Close()
+				t.Fatalf("close zip writer: %v", err)
+			}
+			if err := out.Close(); err != nil {
+				t.Fatalf("close zip file: %v", err)
+			}
+
+			if err := extractZip(zipPath, extractDir); err == nil {
+				t.Fatalf("expected absolute path rejection for %q", tc.entry)
+			}
+		})
 	}
 }
 
@@ -555,6 +584,190 @@ func TestExtractZipNestedPaths(t *testing.T) {
 		if info.Mode().Perm()&0o111 == 0 {
 			t.Fatalf("expected tool to be executable, mode=%o", info.Mode().Perm())
 		}
+	}
+}
+
+func TestArchiveNameIsAbsolute(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{name: "relative", in: "bin/tool", want: false},
+		{name: "bare", in: "tool", want: false},
+		{name: "unix abs", in: "/evil", want: true},
+		{name: "backslash abs", in: `\evil`, want: true},
+		{name: "drive slash", in: "C:/evil", want: true},
+		{name: "drive backslash", in: `C:\evil`, want: true},
+		{name: "drive relative", in: "C:evil", want: true},
+		{name: "unc slash", in: "//host/share/evil", want: true},
+		{name: "unc backslash", in: `\\host\share\evil`, want: true},
+		{name: "empty", in: "", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := archiveNameIsAbsolute(tc.in); got != tc.want {
+				t.Fatalf("archiveNameIsAbsolute(%q)=%v want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExtractTarCmdArgsForceLocalOnWindows(t *testing.T) {
+	t.Parallel()
+
+	got := extractTarCmdArgs(`C:\a\file.tar.xz`, `C:\a\out`, "-xJf")
+	if runtime.GOOS == "windows" {
+		if len(got) < 1 || got[0] != "--force-local" {
+			t.Fatalf("windows tar args: got %v, want --force-local first", got)
+		}
+		return
+	}
+	if len(got) < 1 || got[0] != "-xJf" {
+		t.Fatalf("unix tar args: got %v, want -xJf first", got)
+	}
+	for _, a := range got {
+		if a == "--force-local" {
+			t.Fatalf("unix tar args unexpectedly include --force-local: %v", got)
+		}
+	}
+}
+
+func TestExtractTarGz(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "tool.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	writeTestTarGz(t, archivePath, []testTarEntry{
+		{name: "sfetch", body: "hello-tar", mode: 0o755},
+	})
+
+	if err := extractArchive(ArchiveFormatTarGz, archivePath, extractDir); err != nil {
+		t.Fatalf("extractArchive tar.gz: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(extractDir, "sfetch"))
+	if err != nil {
+		t.Fatalf("read extracted: %v", err)
+	}
+	if string(got) != "hello-tar" {
+		t.Fatalf("extracted content: got %q want %q", string(got), "hello-tar")
+	}
+}
+
+func TestExtractTarGzFixture(t *testing.T) {
+	t.Parallel()
+
+	extractDir := t.TempDir()
+	if err := extractTarGz("testdata/integration/sfetch_test_darwin_arm64.tar.gz", extractDir); err != nil {
+		t.Fatalf("extractTarGz fixture: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(extractDir, "sfetch")); err != nil {
+		t.Fatalf("expected sfetch in fixture extract: %v", err)
+	}
+}
+
+func TestExtractTarGzRejectsAbsolutePaths(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		entry string
+	}{
+		{name: "unix abs", entry: "/evil"},
+		{name: "drive slash", entry: "C:/evil"},
+		{name: "unc slash", entry: "//host/share/evil"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tmp := t.TempDir()
+			archivePath := filepath.Join(tmp, "abs.tar.gz")
+			extractDir := filepath.Join(tmp, "extract")
+			if err := os.Mkdir(extractDir, 0o755); err != nil {
+				t.Fatalf("mkdir extractDir: %v", err)
+			}
+			writeTestTarGz(t, archivePath, []testTarEntry{
+				{name: tc.entry, body: "pwnd", mode: 0o644},
+			})
+			if err := extractTarGz(archivePath, extractDir); err == nil {
+				t.Fatalf("expected absolute path rejection for %q", tc.entry)
+			}
+		})
+	}
+}
+
+func TestExtractTarGzRejectsZipSlip(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "slip.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	writeTestTarGz(t, archivePath, []testTarEntry{
+		{name: "../evil", body: "pwnd", mode: 0o644},
+	})
+	if err := extractTarGz(archivePath, extractDir); err == nil {
+		t.Fatalf("expected tar slip rejection")
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "evil")); err == nil {
+		t.Fatalf("tar slip wrote outside extraction dir")
+	}
+}
+
+type testTarEntry struct {
+	name string
+	body string
+	mode os.FileMode
+}
+
+func writeTestTarGz(t *testing.T, path string, entries []testTarEntry) {
+	t.Helper()
+	out, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create tar.gz: %v", err)
+	}
+	gz := gzip.NewWriter(out)
+	tw := tar.NewWriter(gz)
+	for _, e := range entries {
+		hdr := &tar.Header{
+			Name:     e.name,
+			Mode:     int64(e.mode),
+			Size:     int64(len(e.body)),
+			Typeflag: tar.TypeReg,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			_ = tw.Close()
+			_ = gz.Close()
+			_ = out.Close()
+			t.Fatalf("write tar header: %v", err)
+		}
+		if _, err := io.WriteString(tw, e.body); err != nil {
+			_ = tw.Close()
+			_ = gz.Close()
+			_ = out.Close()
+			t.Fatalf("write tar body: %v", err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		_ = gz.Close()
+		_ = out.Close()
+		t.Fatalf("close tar writer: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		_ = out.Close()
+		t.Fatalf("close gzip writer: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatalf("close tar.gz: %v", err)
 	}
 }
 
