@@ -64,6 +64,17 @@ func TestInstallScriptDetectPlatform(t *testing.T) {
 			want: "windows_arm64",
 		},
 		{
+			name:             "windows arm64 wow64 hint beats emulated powershell x64",
+			unameS:           "MINGW64_NT-10.0",
+			unameM:           "x86_64",
+			mockPowerShellOS: "X64",
+			env: map[string]string{
+				"PROCESSOR_ARCHITECTURE": "AMD64",
+				"PROCESSOR_ARCHITEW6432": "ARM64",
+			},
+			want: "windows_arm64",
+		},
+		{
 			name:   "non windows still uses uname",
 			unameS: "Linux",
 			unameM: "aarch64",
@@ -87,6 +98,13 @@ uname() {
 		-m) printf '%s\n' "$MOCK_UNAME_M" ;;
 		*) command uname "$@" ;;
 	esac
+}
+powershell.exe() {
+	if [ -n "$MOCK_POWERSHELL_OS" ]; then
+		printf '%s\r\n' "$MOCK_POWERSHELL_OS"
+		return 0
+	fi
+	return 1
 }
 source "$1"
 detect_platform
