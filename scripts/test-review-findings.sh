@@ -174,12 +174,20 @@ for label in ("ubuntu-latest-arm64-s", "windows-latest-arm64-s"):
         raise SystemExit(f"actionlint.yaml must allow {label}")
 PY
 
-# M8: checklist promotes via make release-publish and includes Homebrew.
-if grep -nE 'gh release edit.*draft=false' "$root/RELEASE_CHECKLIST.md" | grep -v 'Do not run'; then
-	fail "M8: checklist must not instruct gh release edit --draft=false"
-fi
-grep -q 'make release-publish' "$root/RELEASE_CHECKLIST.md" || fail "M8: checklist must name make release-publish"
+# M8: operator docs promote via make release-publish; no bare RELEASE_TAG=;
+# gh release edit --draft=false only as a prohibition.
+for doc in "$root/RELEASE_CHECKLIST.md" "$root/README.md" "$root/docs/security.md"; do
+	if grep -nE 'gh release edit.*draft=false' "$doc" | grep -v 'Do not run' | grep -v 'never gh release edit'; then
+		fail "M8: $doc must not instruct gh release edit --draft=false"
+	fi
+	if grep -nE '(^|[^A-Z_])RELEASE_TAG=' "$doc" | grep -v SFETCH_RELEASE_TAG; then
+		fail "M8: $doc must not document bare RELEASE_TAG="
+	fi
+	grep -q 'make release-publish' "$doc" || fail "M8: $doc must name make release-publish"
+	grep -q 'release-create-draft' "$doc" || fail "M8: $doc must create the draft after checksums"
+done
 grep -qi 'Homebrew' "$root/RELEASE_CHECKLIST.md" || fail "M8: checklist must include the Homebrew handoff"
+grep -q 'verify-package-manager-handoff' "$mk" && fail "M8: do not add verify-package-manager-handoff yet"
 
 # M9: install-release-anchors refuses existing dest files.
 grep -q 'refusing to overwrite' "$root/scripts/install-release-anchors.sh" ||
@@ -210,5 +218,49 @@ PY
 grep -q 'EXPKEYSIG' "$root/scripts/install-sfetch.sh" || fail "SEC-M: installer must reject EXPKEYSIG"
 grep -q 'EXPSIG' "$root/scripts/install-sfetch.sh" || fail "SEC-M: installer must reject EXPSIG"
 grep -q 'KEYEXPIRED' "$root/scripts/install-sfetch.sh" || fail "SEC-M: installer must reject KEYEXPIRED"
+
+# Round-4: no private task codes; installer GnuPG home is short /tmp;
+# physical tar headers counted at the gzip boundary; origin helper shared;
+# native macOS runs the GPG suites without TMPDIR=/tmp; VALIDSIG 2.5 labelled synthetic.
+grep -nE 'SFT-TASK-[0-9]+' "$ci" "$wf" && fail "L1: workflows must not carry private task codes"
+grep -q 'mktemp -d /tmp/sfetch-gpg.XXXXXX' "$root/scripts/install-sfetch.sh" ||
+	fail "M3: installer GnuPG home must be mktemp -d /tmp/sfetch-gpg.XXXXXX"
+python3 - "$root/main.go" <<'PY' || fail "M1: physical tar header budget must wrap gzip"
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+if "type tarBoundReader struct" not in text:
+    raise SystemExit("tarBoundReader missing")
+ext = text.find("func extractTarGzLimited")
+if ext < 0:
+    raise SystemExit("extractTarGzLimited missing")
+body = text[ext:ext + 2500]
+if "tarBoundReader" not in body or "tar.NewReader(bound)" not in body:
+    raise SystemExit("gzip output is not wrapped in tarBoundReader")
+if "tar.NewReader(gz)" in body:
+    raise SystemExit("tar.NewReader still consumes gzip directly")
+PY
+grep -q 'require_sfetch_github_origin' "$root/scripts/release-origin.sh" ||
+	fail "M2: shared origin validator missing"
+grep -q 'require_sfetch_github_origin' "$root/scripts/release-verify-published-tag.sh" ||
+	fail "M2: published-tag script must use the shared origin validator"
+python3 - "$ci" <<'PY' || fail "M3: native darwin-arm64 must run GPG suites without TMPDIR=/tmp"
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+if "Native installer GPG suites" not in text:
+    raise SystemExit("native GPG suite step missing")
+if "test-install-anchor-select.sh" not in text or "test-install-gpg-mutants.sh" not in text:
+    raise SystemExit("native GPG suites must run both shell tests")
+block = text.split("Native installer GPG suites", 1)[1].split("- name:", 1)[0]
+if "TMPDIR=/tmp" in block.replace("Do not set TMPDIR=/tmp", ""):
+    raise SystemExit("native GPG suites must not set TMPDIR=/tmp")
+if "darwin-arm64" not in block:
+    raise SystemExit("GPG suites must be gated on darwin-arm64")
+PY
+grep -qi 'synthetic' "$root/testdata/gpg-mutants/README.md" ||
+	fail "L2: validsig-2.5.status must be labelled synthetic"
+grep -q '00 extra' "$root/testdata/gpg-mutants/validsig-2.5.status" ||
+	fail "L2: keep the synthetic trailing fields for the field-12 test"
 
 echo "[ok] review-finding static guards"

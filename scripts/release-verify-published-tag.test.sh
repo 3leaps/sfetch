@@ -34,7 +34,7 @@ git -C "$src" config gpg.format openpgp
 git -C "$src" config gpg.program gpg
 git -C "$src" config commit.gpgsign false
 mkdir -p "$src/scripts" "$src/docs/security" "$src/keys" "$src/config/release"
-cp "$root/scripts/"{verify-pinned-tag.sh,validate-release-anchors.sh,release-verify-published-tag.sh,release-decernor.sh} "$src/scripts/"
+cp "$root/scripts/"{verify-pinned-tag.sh,validate-release-anchors.sh,release-verify-published-tag.sh,release-decernor.sh,release-origin.sh} "$src/scripts/"
 cp "$root/config/release/tagger-identity.txt" "$src/config/release/"
 gpg --batch --armor --export "$primary" > "$src/docs/security/release-signing-keys.asc"
 python3 - "$src/docs/security/sfetch-minisign.pub" <<'PY'
@@ -97,7 +97,7 @@ export PATH="$scratch/bin:$PATH" FIXTURE_REMOTE="$scratch/remote.git" SFETCH_REL
 export SFETCH_GPG_SIGNING_FINGERPRINT="$primary"
 
 # The operator's trusted checkout carries the current verifier and helpers.
-cp "$root/scripts/"{verify-pinned-tag.sh,validate-release-anchors.sh,release-verify-published-tag.sh,release-decernor.sh} "$op/scripts/"
+cp "$root/scripts/"{verify-pinned-tag.sh,validate-release-anchors.sh,release-verify-published-tag.sh,release-decernor.sh,release-origin.sh} "$op/scripts/"
 gate() { (cd "$op" && ./scripts/release-verify-published-tag.sh); }
 expect_fail() {
     if gate > "$scratch/out" 2>&1; then

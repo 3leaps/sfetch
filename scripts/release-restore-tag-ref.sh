@@ -9,13 +9,12 @@ tag="${SFETCH_RELEASE_TAG:-}"
 	echo 'error: canonical release tag required' >&2
 	exit 1
 }
-case "$(git config --get remote.origin.url)" in
-https://github.com/3leaps/sfetch | https://github.com/3leaps/sfetch.git) ;;
-*)
+# shellcheck source=scripts/release-origin.sh
+source "$(cd "$(dirname "$0")" && pwd -P)/release-origin.sh"
+require_sfetch_github_origin || {
 	echo 'error: unexpected release origin' >&2
 	exit 1
-	;;
-esac
+}
 command -v gh >/dev/null 2>&1 || {
 	echo 'error: gh (GitHub CLI) is required to read the tag object' >&2
 	exit 1

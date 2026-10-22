@@ -67,7 +67,7 @@ CORPUS_DEST ?= test-corpus
 .PHONY: release-prepare-tag-message release-tag release-push-tag release-verify-tag release-verify-remote-tag
 .PHONY: release-create-draft release-publish release-insert-anchors release-export-pin release-validate-pin
 .PHONY: version-check version-set version-patch version-minor version-major
-.PHONY: print-sfetch-version golangci-lint-install test-release-verify-checksums test-release-verify-signatures test-release-workflow-draft test-bootstrap-sfetch-verified test-bootstrap-range-release test-install-anchor-select test-install-gpg-mutants test-goneat-key-map test-makefile-release-tag test-upload-release-draft test-version-ldflags require-release-tag
+.PHONY: print-sfetch-version golangci-lint-install test-release-verify-checksums test-release-verify-signatures test-release-workflow-draft test-bootstrap-sfetch-verified test-bootstrap-range-release test-install-anchor-select test-install-gpg-mutants test-goneat-key-map test-makefile-release-tag test-upload-release-draft test-version-ldflags test-release-origin test-release-walkthrough require-release-tag
 
 all: build
 
@@ -375,6 +375,8 @@ release-tag-tests: ## Signed-tag tooling tests (throwaway keys only; never the d
 	@./scripts/release-stage-tagged-pubkeys.test.sh
 	@./scripts/ci-install-decernor.test.sh
 	@./scripts/test-review-findings.sh
+	@./scripts/test-release-origin.sh
+	@./scripts/test-release-walkthrough.sh
 	@echo "[ok] Release tag tooling tests passed"
 
 release-preflight: ## Verify clean-tree pre-tag requirements (does not tag)

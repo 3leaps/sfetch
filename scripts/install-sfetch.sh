@@ -418,10 +418,9 @@ verify_signature() {
     if [ "$verified" = false ] && [ "$REQUIRE_MINISIGN" = false ] && [ "$VERIFY_GPG" = true ] && [ -f "${sums_file}.asc" ]; then
         local gpg_key="${tmpdir}/sfetch-release-signing-key.asc"
         if [ -f "$gpg_key" ]; then
-            # Isolated home inside tmpdir, so the EXIT trap removes it on every
-            # path; gpg_cleanup also stops the agent gpg may start for it.
-            GPG_HOME="${tmpdir}/gnupg"
-            mkdir -m 700 "$GPG_HOME" || err "cannot create GnuPG home"
+            # Isolated home under /tmp: macOS default TMPDIR is too long for
+            # the gpg-agent socket. gpg_cleanup stops the agent and removes it.
+            GPG_HOME="$(mktemp -d /tmp/sfetch-gpg.XXXXXX)" || err "cannot create GnuPG home"
             # Three overlapping checks, kept together on purpose (mutant 8):
             # 1. secret-key reject (has_sec) — a bundled secret packet must not
             #    ride along even when the public pin matches.

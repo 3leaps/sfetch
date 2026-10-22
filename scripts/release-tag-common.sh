@@ -5,6 +5,8 @@ set -euo pipefail
 tag_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # shellcheck source=scripts/release-decernor.sh
 source "$tag_root/scripts/release-decernor.sh"
+# shellcheck source=scripts/release-origin.sh
+source "$tag_root/scripts/release-origin.sh"
 
 tag_discard_verify_home() {
 	if [[ -n "${TAG_VERIFY_GNUPGHOME:-}" ]]; then
@@ -123,24 +125,10 @@ tag_message_file() {
 }
 
 tag_origin() {
-	local url host
-	url="$(git config --get remote.origin.url)"
-	case "$url" in
-	https://github.com/3leaps/sfetch | https://github.com/3leaps/sfetch.git | \
-		git@github.com:3leaps/sfetch | git@github.com:3leaps/sfetch.git) ;;
-	git@*:3leaps/sfetch | git@*:3leaps/sfetch.git)
-		host="${url#git@}"
-		host="${host%%:*}"
-		[[ "$(ssh -G "$host" 2>/dev/null | awk '$1=="hostname" {print $2;exit}')" == github.com ]] || {
-			tag_die 'origin SSH host must resolve to github.com'
-			return 1
-		}
-		;;
-	*)
+	require_sfetch_github_origin || {
 		tag_die 'origin must be 3leaps/sfetch on GitHub'
 		return 1
-		;;
-	esac
+	}
 }
 
 tag_checkout() {
@@ -174,7 +162,7 @@ tag_stat_mode() {
 # agent on cleanup.
 tag_fresh_verify_gnupg_home() {
 	local dir mode
-	dir="$(mktemp -d "${TMPDIR:-/tmp}/sfetch-tag-gnupg.XXXXXX")" || {
+	dir="$(mktemp -d /tmp/sfetch-tag-gnupg.XXXXXX)" || {
 		tag_die 'cannot create GnuPG home'
 		return 1
 	}
@@ -255,7 +243,7 @@ tag_bind_operator_gnupg_home() {
 # Fresh isolated signing home. Never an existing operator directory.
 tag_fresh_signing_gnupg_home() {
 	local dir mode
-	dir="$(mktemp -d "${TMPDIR:-/tmp}/sfetch-tag-sign-gnupg.XXXXXX")" || {
+	dir="$(mktemp -d /tmp/sfetch-tag-sign-gnupg.XXXXXX)" || {
 		tag_die 'cannot create signing GnuPG home'
 		return 1
 	}

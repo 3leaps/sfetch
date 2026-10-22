@@ -292,26 +292,41 @@ $SHA_CMD -c SHA256SUMS --ignore-missing
 bash install-sfetch.sh --tag "$TAG"
 ```
 
-### Manual signing workflow
+### Maintainer-only release ceremony
 
-Tag CI creates a **draft** release with unsigned archives. Maintainers generate
-`SHA256SUMS` / `SHA512SUMS`, sign them **and** `install-sfetch.sh` with minisign
-(optional PGP on manifests only), verify, upload, then publish the draft:
+Tag CI is read-only. It never creates a GitHub Release. Signing, draft
+creation, and publish run on the maintainer machine only. Bare `RELEASE_TAG`
+is refused. Do not run `gh release edit --draft=false` — that bypasses the
+verified publish gate. Full inputs and the ordered sequence live in
+[RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 
 ```bash
+export SFETCH_RELEASE_TAG=v$(cat VERSION)
 export SFETCH_MINISIGN_KEY=/path/to/sfetch.key
-export SFETCH_PGP_KEY_ID=security@fulmenhq.dev  # optional
+export SFETCH_MINISIGN_PUB=/path/to/sfetch.pub
+export SFETCH_PGP_KEY_ID=<signing-subkey-fpr>!   # required for publish (both .asc manifests)
+export SFETCH_GPG_HOMEDIR=/path/to/isolated/gpg/homedir
+export SFETCH_GPG_SIGNING_FINGERPRINT=0CACA49B3119B6BC12B2CA11B9B485F294B9FE07
+export SFETCH_DECERNOR_BIN=/path/to/decernor
+export SFETCH_TAGGER_NAME SFETCH_TAGGER_EMAIL    # must match config/release/tagger-identity.txt
+export SFETCH_TAG_MESSAGE_DIR=/path/to/${SFETCH_RELEASE_TAG}
+export RELEASE_RUN_ID=<release.yml run id>
+export RELEASE_RUN_ATTEMPT=<successful attempt>
 
-RELEASE_TAG=v0.4.14 make release-download
-RELEASE_TAG=v0.4.14 make release-checksums
-RELEASE_TAG=v0.4.14 make release-sign      # signs manifests + install-sfetch.sh
+make release-preflight
+make release-tag && make release-push-tag
+# select the successful release.yml run+attempt for this tag (see checklist)
+make release-download
+make release-checksums
+make release-create-draft    # after checksums, before signing
+make release-sign
+make release-export-keys     # stage tagged public keys
 make release-verify
-RELEASE_TAG=v0.4.14 make release-notes
-RELEASE_TAG=v0.4.14 make release-upload
-gh release edit v0.4.14 --draft=false      # publish only after signatures upload
+make release-notes
+make release-upload
+make release-publish         # verified publish; never gh release edit --draft=false
+# package-manager handoff: Homebrew tap + Scoop sibling (no make target yet)
 ```
-
-Set `RELEASE_TAG` to the tag you're publishing. The scripts in `scripts/` can be used individually if you prefer manual control.
 
 ### Quick examples
 

@@ -102,8 +102,8 @@ jobs:
           ./scripts/bootstrap-sfetch-verified.sh --version "$TAG" --dir "$DEST" --yes
           "$DEST/sfetch" --version
 
-  # Five-way native go test (SFT-TASK-010). `platforms` is the stable aggregate
-  # required check. Named *-s runners are org-hosted; labels are the pin.
+  # Five-way native go test. `platforms` is the stable aggregate required
+  # check. Named *-s runners are org-hosted; labels are the pin.
   native:
     name: native (${{ matrix.target }})
     strategy:
@@ -151,6 +151,20 @@ jobs:
           set -euo pipefail
           go env GOOS GOARCH
           go test ./...
+
+      - name: Native installer GPG suites
+        if: matrix.target == 'darwin-arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v gpg >/dev/null 2>&1 || brew install gnupg
+          command -v minisign >/dev/null 2>&1 || brew install minisign
+          command -v python3 >/dev/null 2>&1 || brew install python
+          command -v gpg
+          command -v minisign
+          # Default runner TMPDIR (often /var/folders/.../T). Do not set TMPDIR=/tmp.
+          ./scripts/test-install-anchor-select.sh
+          ./scripts/test-install-gpg-mutants.sh
 
   platforms:
     name: platforms

@@ -14,6 +14,34 @@ fail() {
 }
 pass() { echo "PASS: $*"; }
 
+WORK=""
+GPG_HOMES=()
+cleanup_anchor() {
+    local h
+    for h in "${GPG_HOMES[@]+"${GPG_HOMES[@]}"}"; do
+        [ -n "$h" ] || continue
+        gpgconf --homedir "$h" --kill all >/dev/null 2>&1 || true
+        rm -rf "$h"
+    done
+    rm -f "$SRC_COPY"
+    rm -rf "${WORK:-}"
+}
+new_gpg_home() {
+    local d
+    d="$(mktemp -d /tmp/sfetch-gpg.XXXXXX)" || fail "mktemp GnuPG home"
+    chmod 700 "$d" || fail "chmod GnuPG home"
+    GPG_HOMES+=("$d")
+    printf '%s' "$d"
+}
+gpg_run() {
+    local log="${WORK:-/tmp}/gpg-fixture.err"
+    if ! "$@" >"$log" 2>&1; then
+        echo "FAIL: gpg fixture failed: $*" >&2
+        cat "$log" >&2
+        fail "gpg fixture"
+    fi
+}
+
 INSTALLER="${ROOT}/scripts/install-sfetch.sh"
 ENGINE="${ROOT}/scripts/bootstrap-sfetch-verified.sh"
 ANCHOR="${ROOT}/docs/security/sfetch-minisign.pub"
@@ -31,7 +59,9 @@ RETIRED="${ROOT}/docs/security/sfetch-minisign-retired-1.pub"
 # would execute the installer.
 [ "$(grep -c '^main "$@"$' "$INSTALLER")" -eq 1 ] || fail "installer entry line not exactly-once (refusing to source)"
 SRC_COPY="$(mktemp "${TMPDIR:-/tmp}/sft-install-src.XXXXXX")"
-trap 'rm -f "$SRC_COPY"' EXIT
+trap cleanup_anchor EXIT
+grep -q 'mktemp -d /tmp/sfetch-gpg.XXXXXX' "$INSTALLER" ||
+    fail "installer GnuPG home must use mktemp -d /tmp/sfetch-gpg.XXXXXX"
 grep -v '^main "$@"$' "$INSTALLER" >"$SRC_COPY"
 grep -q '^main ' "$SRC_COPY" && fail "strip failed: main invocation remains"
 # Ambient overrides must not leak into the coherence checks.
@@ -143,7 +173,6 @@ pass "SSOT stays single-current; retired pin labelled"
 # selection and verify_signature run unmodified.
 if command -v minisign >/dev/null 2>&1; then
     WORK="$(mktemp -d "${TMPDIR:-/tmp}/sft-anchor.XXXXXX")"
-    trap 'rm -f "$SRC_COPY"; rm -rf "$WORK"' EXIT
     minisign -G -W -p "$WORK/cur.pub" -s "$WORK/cur.key" >/dev/null 2>&1 || fail "keygen current"
     minisign -G -W -p "$WORK/old.pub" -s "$WORK/old.key" >/dev/null 2>&1 || fail "keygen legacy"
     SFETCH_MINISIGN_PUBKEY="$(sed -n 2p "$WORK/cur.pub")"
@@ -171,11 +200,10 @@ if command -v minisign >/dev/null 2>&1; then
 
     # GPG route (minisign not required): the fingerprint pin follows the tag.
     if command -v gpg >/dev/null 2>&1; then
-        GH="$WORK/gnupg"
-        mkdir -m 700 "$GH"
+        GH="$(new_gpg_home)"
         gpg_gen() {
-            gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
-                --quick-gen-key "$1" ed25519 sign never >/dev/null 2>&1 || fail "gpg keygen $1"
+            gpg_run gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
+                --quick-gen-key "$1" ed25519 sign never
             gpg --homedir "$GH" --with-colons --fingerprint "$1" | awk -F: '/^fpr:/ {print $10; exit}'
         }
         FPR_CUR="$(gpg_gen 'cur@test.invalid')"
@@ -239,8 +267,8 @@ if command -v minisign >/dev/null 2>&1; then
         if gpg_bundle_as v0.4.12 cur cur atk; then fail "v0.4.12: bundle refused even when the pinned key signed"; fi
         gpg_bundle_as v0.4.12 cur cur || fail "v0.4.12: single pinned key must verify"
         # Release keys sign with a subkey: VALIDSIG's primary field must still match.
-        gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
-            --quick-add-key "$FPR_CUR" ed25519 sign never >/dev/null 2>&1 || fail "add signing subkey"
+        gpg_run gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
+            --quick-add-key "$FPR_CUR" ed25519 sign never
         SUB_CUR="$(gpg --homedir "$GH" --with-colons --list-keys "$FPR_CUR" |
             awk -F: '$1 == "sub" { s = 1; next } s && $1 == "fpr" { f = $10 } END { print f }')"
         [ -n "$SUB_CUR" ] && [ "$SUB_CUR" != "$FPR_CUR" ] || fail "signing subkey"
@@ -334,14 +362,13 @@ if command -v minisign >/dev/null 2>&1; then
         pad="$(printf 'p%.0s' $(seq 1 1500))"
         for i in $(seq 1 100); do
             for k in "$FPR_CUR" "$FPR_OLD"; do
-                gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
-                    --quick-add-uid "$k" "${i}${pad} <pad${i}@test.invalid>" >/dev/null 2>&1 ||
-                    fail "add padding uid $i"
+                gpg_run gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
+                    --quick-add-uid "$k" "${i}${pad} <pad${i}@test.invalid>"
             done
         done
-        mkdir -m 700 "$WORK/probe"
+        PROBE_HOME="$(new_gpg_home)"
         big="$(gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' --armor \
-            --export-secret-keys "$FPR_CUR" | gpg --homedir "$WORK/probe" --batch --with-colons \
+            --export-secret-keys "$FPR_CUR" | gpg --homedir "$PROBE_HOME" --batch --with-colons \
             --import-options show-only --import 2>/dev/null | wc -c)" || true
         [ "${big:-0}" -gt 131072 ] || fail "padded secret listing too small to exercise SIGPIPE (${big:-0} bytes)"
         if gpg_single_secret_as v0.4.12 cur; then fail "v0.4.12: large pinned secret listing must be refused"; fi
@@ -403,32 +430,34 @@ SHIM
         # Expired pinned keys must not verify even under --trust-model always.
         # Sign first, then expire, then wait: setting seconds=1 *after* the
         # wait re-validates the key and the installer would correctly accept it.
-        EXP_HOME="$WORK/gnupg-exp"
-        mkdir -m 700 "$EXP_HOME"
-        gpg --homedir "$EXP_HOME" --batch --pinentry-mode loopback --passphrase '' \
-            --quick-gen-key 'exp@test.invalid' ed25519 sign never >/dev/null 2>&1 ||
-            fail "expired-key gen"
+        EXP_HOME="$(new_gpg_home)"
+        gpg_run gpg --homedir "$EXP_HOME" --batch --pinentry-mode loopback --passphrase '' \
+            --quick-gen-key 'exp@test.invalid' ed25519 sign never
         FPR_EXP="$(gpg --homedir "$EXP_HOME" --with-colons --fingerprint exp@test.invalid |
             awk -F: '/^fpr:/ {print $10; exit}')"
         [ -n "$FPR_EXP" ] || fail "expired-key fingerprint"
         d_exp="$(mktemp -d "$WORK/exp.XXXXXX")"
         cp "$WORK/SHA256SUMS" "$d_exp/SHA256SUMS"
-        gpg --homedir "$EXP_HOME" --batch --yes --pinentry-mode loopback --passphrase '' \
-            -u exp@test.invalid --armor --detach-sign -o "$d_exp/SHA256SUMS.asc" "$d_exp/SHA256SUMS" ||
-            fail "sign before expiry"
-        gpg --homedir "$EXP_HOME" --batch --yes --pinentry-mode loopback --passphrase '' \
-            --quick-set-expire "$FPR_EXP" seconds=1 >/dev/null 2>&1 ||
-            fail "set expire"
+        gpg_run gpg --homedir "$EXP_HOME" --batch --yes --pinentry-mode loopback --passphrase '' \
+            -u exp@test.invalid --armor --detach-sign -o "$d_exp/SHA256SUMS.asc" "$d_exp/SHA256SUMS"
+        gpg_run gpg --homedir "$EXP_HOME" --batch --yes --pinentry-mode loopback --passphrase '' \
+            --quick-set-expire "$FPR_EXP" seconds=1
         sleep 2
         gpg --homedir "$EXP_HOME" --batch --armor --export exp@test.invalid \
             >"$d_exp/sfetch-release-signing-key.asc"
-        mkdir -m 700 "$d_exp/probe"
-        gpg --homedir "$d_exp/probe" --batch --import "$d_exp/sfetch-release-signing-key.asc" >/dev/null 2>&1
+        EXP_PROBE="$(new_gpg_home)"
+        gpg_run gpg --homedir "$EXP_PROBE" --batch --import "$d_exp/sfetch-release-signing-key.asc"
         set +e
-        probe_status=$(gpg --homedir "$d_exp/probe" --batch --no-tty --trust-model always \
-            --status-fd 1 --verify "$d_exp/SHA256SUMS.asc" "$d_exp/SHA256SUMS" 2>/dev/null)
+        probe_status=$(gpg --homedir "$EXP_PROBE" --batch --no-tty --trust-model always \
+            --status-fd 1 --verify "$d_exp/SHA256SUMS.asc" "$d_exp/SHA256SUMS" 2>"$WORK/gpg-exp-verify.err")
+        exp_rc=$?
         set -e
-        printf '%s\n' "$probe_status" | grep -q EXPKEYSIG || fail "fixture must emit EXPKEYSIG"
+        if ! printf '%s\n' "$probe_status" | grep -q EXPKEYSIG; then
+            echo "FAIL: fixture must emit EXPKEYSIG (gpg rc=$exp_rc)" >&2
+            cat "$WORK/gpg-exp-verify.err" >&2
+            printf '%s\n' "$probe_status" >&2
+            fail "fixture must emit EXPKEYSIG"
+        fi
         if (
             VERIFY_MINISIGN=false VERIFY_GPG=true REQUIRE_MINISIGN=false REQUIRE_SIGNATURE=true
             SFETCH_PGP_FPR="$FPR_EXP"
