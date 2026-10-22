@@ -179,35 +179,61 @@ mkdir -p "$fake_home/.gnupg"
 chmod 700 "$fake_home/.gnupg"
 export SFETCH_GPG_SIGNING_FINGERPRINT=0CACA49B3119B6BC12B2CA11B9B485F294B9FE07
 export SFETCH_PGP_KEY_ID=0123456789ABCDEF0123456789ABCDEF01234567!
-(
+reject_default_home() {
+	local path="$1"
 	export HOME="$fake_home"
-	export SFETCH_GPG_HOMEDIR="$HOME/.gnupg"
+	export SFETCH_GPG_HOMEDIR="$path"
 	set +e
 	out="$(tag_bind_operator_gnupg_home 2>&1)"
 	rc=$?
 	set -e
 	[[ "$rc" -ne 0 ]]
 	[[ "$out" == *'must not be the default homedir'* ]]
+}
+reject_default_home "$fake_home/.gnupg"
+reject_default_home "$fake_home/.gnupg/"
+reject_default_home "$fake_home/./.gnupg"
+mkdir -p "$fake_home/tmp/nested"
+reject_default_home "$fake_home/tmp/nested/../../.gnupg"
+reject_default_home "$fake_home/tmp/../.gnupg"
+(
+	export HOME="$fake_home"
+	export SFETCH_GPG_HOMEDIR="$fake_home/.gnupg"
+	expect_fail tag_bind_operator_gnupg_home
 )
 throwaway="$scratch/gnupg-throwaway"
 mkdir -m 700 "$throwaway"
 (
 	export HOME="$fake_home"
+	unset GNUPGHOME
 	export SFETCH_GPG_HOMEDIR="$throwaway"
 	tag_bind_operator_gnupg_home
-	[[ "$GNUPGHOME" == "$throwaway" ]]
+	# Source home is validated only; signing must not bind to it.
+	[[ "${GNUPGHOME:-}" != "$throwaway" ]]
 	[[ "$(tag_stat_mode "$throwaway")" == 700 ]]
 )
+# Existing non-0700 operator dirs are refused (do not chmod them into compliance).
+mode755="$scratch/inherited-0755"
+mkdir -m 755 "$mode755"
+(
+	export HOME="$fake_home"
+	export SFETCH_GPG_HOMEDIR="$mode755"
+	set +e
+	out="$(tag_bind_operator_gnupg_home 2>&1)"
+	rc=$?
+	set -e
+	[[ "$rc" -ne 0 ]]
+	[[ "$out" == *'mode 0700'* ]]
+	[[ "$(tag_stat_mode "$mode755")" == 755 ]]
+)
 # Relative symlink to an inherited 0755 home must be refused (do not follow).
-inherited="$scratch/inherited-0755"
-mkdir -m 755 "$inherited"
-ln -s "$inherited" "$scratch/rel-link"
+ln -s "$mode755" "$scratch/rel-link"
 (
 	export HOME="$fake_home"
 	export SFETCH_GPG_HOMEDIR="./rel-link"
 	expect_fail tag_bind_operator_gnupg_home
 )
-ln -s "$inherited" "$scratch/abs-link"
+ln -s "$mode755" "$scratch/abs-link"
 (
 	export HOME="$fake_home"
 	export SFETCH_GPG_HOMEDIR="$scratch/abs-link"
@@ -219,12 +245,58 @@ tag_fresh_verify_gnupg_home
 verify_home="$TAG_VERIFY_GNUPGHOME"
 tag_discard_verify_home
 [[ ! -e "$verify_home" ]]
-grep -q 'gpgconf --homedir' "$root/scripts/release-tag.sh" || {
-	echo 'error: signed-tag operator must gpgconf --kill all on EXIT' >&2
+# Signing uses a fresh 0700 temp home, never the operator directory.
+(
+	export HOME="$fake_home"
+	unset GNUPGHOME
+	export SFETCH_GPG_HOMEDIR="$throwaway"
+	tag_fresh_signing_gnupg_home
+	[[ -n "$TAG_SIGN_GNUPGHOME" ]]
+	[[ "$TAG_SIGN_GNUPGHOME" != "$throwaway" ]]
+	[[ "$TAG_SIGN_GNUPGHOME" != "$fake_home/.gnupg" ]]
+	[[ -d "$TAG_SIGN_GNUPGHOME" && ! -L "$TAG_SIGN_GNUPGHOME" ]]
+	[[ "$(tag_stat_mode "$TAG_SIGN_GNUPGHOME")" == 700 ]]
+	sign_home="$TAG_SIGN_GNUPGHOME"
+	tag_discard_signing_home
+	[[ ! -e "$sign_home" ]]
+)
+# Isolated import: signing GNUPGHOME is a temp copy, then discarded.
+op_home="$scratch/op-sign"
+mkdir -m 700 "$op_home"
+gpg --homedir "$op_home" --batch --pinentry-mode loopback --passphrase '' \
+	--quick-gen-key 'sign@test.invalid' ed25519 sign never >/dev/null 2>&1
+op_primary="$(gpg --homedir "$op_home" --with-colons --fingerprint sign@test.invalid | awk -F: '/^fpr:/ {print $10; exit}')"
+(
+	export HOME="$fake_home"
+	unset GNUPGHOME
+	export SFETCH_GPG_HOMEDIR="$op_home"
+	export SFETCH_PGP_KEY_ID="${op_primary}!"
+	tag_prepare_signing_home
+	[[ "$GNUPGHOME" == "$TAG_SIGN_GNUPGHOME" ]]
+	[[ "$GNUPGHOME" != "$op_home" ]]
+	[[ -d "$op_home" ]]
+	sign_home="$TAG_SIGN_GNUPGHOME"
+	tag_discard_signing_home
+	[[ ! -e "$sign_home" ]]
+	[[ -d "$op_home" ]]
+)
+gpgconf --homedir "$op_home" --kill all >/dev/null 2>&1 || true
+if ! python3 - "$root/scripts/release-tag.sh" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+trap = text.find("trap 'tag_cleanup_homes")
+selector = text.find("tag_key_selector")
+signing = text.find("tag_prepare_signing_home")
+if trap < 0 or selector < 0 or signing < 0 or not (trap < selector < signing):
+    raise SystemExit(f'order trap={trap} selector={selector} signing={signing}')
+PY
+then
+	echo 'error: release-tag.sh must arm cleanup before creating GnuPG homes' >&2
 	exit 1
-}
-grep -q 'tag_discard_verify_home' "$root/scripts/release-tag.sh" || {
-	echo 'error: signed-tag EXIT trap must discard the verify home' >&2
+fi
+grep -q 'tag_cleanup_homes' "$root/scripts/release-tag.sh" || {
+	echo 'error: signed-tag EXIT trap must discard signing and verify homes' >&2
 	exit 1
 }
 echo '[ok] signed-tag negative controls passed'

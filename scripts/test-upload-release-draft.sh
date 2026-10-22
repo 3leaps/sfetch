@@ -63,4 +63,17 @@ if grep -q 'release edit' "$GH_TRACE"; then
 fi
 pass "upload refuses a non-draft release without mutating it"
 
+PROV="${ROOT}/scripts/release-upload-provenance.sh"
+[ -f "$PROV" ] || fail "release-upload-provenance.sh missing"
+printf 'sum\n' >"$WORK/dist/SHA256SUMS"
+: >"$GH_TRACE"
+if "$PROV" v0.0.0 "$WORK/dist" >/dev/null 2>&1; then
+    fail "provenance upload must refuse when the release is not a draft"
+fi
+grep -q 'release view' "$GH_TRACE" || fail "provenance upload must read isDraft before mutating"
+if grep -q 'release upload' "$GH_TRACE"; then
+    fail "provenance upload must not clobber before the draft check"
+fi
+pass "provenance upload refuses a non-draft release without --clobber"
+
 echo "[ok] release-upload stays draft"

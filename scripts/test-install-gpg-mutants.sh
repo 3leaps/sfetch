@@ -161,11 +161,9 @@ elif n == 9:
     )
 elif n == 10:
     # VALIDSIG parsed from the first fingerprint field (subkey signer) rather
-    # than the last field (primary). Field 3 is the signing-key fpr; $NF is
-    # the primary. The prefix strip must escape the [GNUPG:] brackets so this
-    # is a real first-field parse, not a glob that leaves the line unchanged.
+    # than field 12 (primary). Field 3 is the signing-key fpr.
     sub(
-        r'sig_primary="\$\{line##\* \}"',
+        r'sig_primary="\$\(gpg_validsig_primary "\$line"\)"',
         '''sig_primary="$(awk '{print $3}' <<<"$line")"''',
     )
 elif n == 11:
@@ -346,20 +344,23 @@ probe_subkey() {
     bash -c '
 set -euo pipefail
 . "$1"
-SFETCH_PGP_FPR="$2"
+# Committed subkey-signature specimen: CONTROL must pass without depending on
+# live keygen, and field 12 must be used (GnuPG 2.5.x puts flags in $NF).
+spec="$2"
+primary="$(awk -F= "/^primary=/{print \$2}" "$spec/fingerprints.txt")"
+SFETCH_PGP_FPR="$primary"
 d="$(mktemp -d "$3/s.XXXXXX")"
-cp "$3/SHA256SUMS" "$d/SHA256SUMS"
-gpg --homedir "$4" --batch --armor --export "$2" >"$d/sfetch-release-signing-key.asc"
-gpg --homedir "$4" --batch --yes --pinentry-mode loopback --passphrase "" \
-    -u "$5!" --armor --detach-sign -o "$d/SHA256SUMS.asc" "$d/SHA256SUMS"
+cp "$spec/SHA256SUMS" "$d/SHA256SUMS"
+cp "$spec/SHA256SUMS.asc" "$d/SHA256SUMS.asc"
+cp "$spec/public.asc" "$d/sfetch-release-signing-key.asc"
 VERIFY_MINISIGN=false VERIFY_GPG=true REQUIRE_MINISIGN=false REQUIRE_SIGNATURE=true
-# Property: a subkey signature whose VALIDSIG last field is the primary must
-# verify. Mutant 10 compares the first field (subkey) and rejects.
+# Property: a subkey signature whose VALIDSIG primary field (12) matches the
+# pin must verify. Mutant 10 compares field 3 (subkey) and rejects.
 if select_trust_anchor v0.4.12 >/dev/null && (verify_signature "$d/SHA256SUMS" "$d") >/dev/null 2>&1; then
     exit 0
 fi
 exit 1
-' _ "$src" "$FPR_CUR" "$WORK" "$GH" "$SUB_CUR"
+' _ "$src" "$ROOT/testdata/gpg-mutants" "$WORK"
 }
 
 probe_homedir_leak() {
@@ -410,6 +411,16 @@ exit 0
 ' _ "$src" "$WORK" "$FPR_CUR"
 }
 
+# Probe convention: 0 = SURVIVE (property holds), 1 = KILL (expected
+# verification failure). Any other status is a harness/tool error, not a kill.
+classify_probe_rc() {
+    case "$1" in
+        0) printf 'SURVIVE' ;;
+        1) printf 'KILL' ;;
+        *) printf 'ERROR' ;;
+    esac
+}
+
 run_mutant() {
     local n="$1" name="$2" probe="$3"
     local cdir="$WORK/c$n" mdir="$WORK/m$n"
@@ -421,8 +432,8 @@ run_mutant() {
     "$probe" "$cdir/src"
     local crc=$?
     set -e
-    if [ "$crc" -ne 0 ]; then
-        echo "CONTROL-FAIL  $n  $name (unmutated must pass)"
+    if [ "$(classify_probe_rc "$crc")" != SURVIVE ]; then
+        echo "CONTROL-FAIL  $n  $name (unmutated must pass, rc=$crc)"
         return 1
     fi
     echo "CONTROL  $n  $name"
@@ -432,13 +443,43 @@ run_mutant() {
     "$probe" "$mdir/src"
     local rc=$?
     set -e
-    if [ "$rc" -eq 0 ]; then
-        echo "SURVIVE  $n  $name"
-        return 1
-    fi
-    echo "KILL     $n  $name"
-    return 0
+    local kind
+    kind="$(classify_probe_rc "$rc")"
+    case "$kind" in
+        SURVIVE)
+            echo "SURVIVE  $n  $name"
+            return 1
+            ;;
+        KILL)
+            echo "KILL     $n  $name"
+            return 0
+            ;;
+        *)
+            echo "ERROR    $n  $name (probe rc=$rc is not a kill)"
+            return 1
+            ;;
+    esac
 }
+
+[ "$(classify_probe_rc 0)" = SURVIVE ] || fail "classify 0 must be SURVIVE"
+[ "$(classify_probe_rc 1)" = KILL ] || fail "classify 1 must be KILL"
+[ "$(classify_probe_rc 127)" = ERROR ] || fail "classify 127 must be ERROR, not KILL"
+[ "$(classify_probe_rc 2)" = ERROR ] || fail "classify 2 must be ERROR, not KILL"
+pass "harness errors are not kills"
+
+# Field-12 parser: $NF is the primary on 2.2/2.4 and flags on 2.5.x.
+eval "$(sed -n '/^gpg_validsig_primary()/,/^}/p' "$INSTALLER")"
+command -v gpg_validsig_primary >/dev/null || fail "gpg_validsig_primary not loaded"
+SPEC="$ROOT/testdata/gpg-mutants"
+line22="$(cat "$SPEC/validsig-2.2.status")"
+line25="$(cat "$SPEC/validsig-2.5.status")"
+want_primary="$(awk -F= '/^primary=/{print $2}' "$SPEC/fingerprints.txt")"
+want_sub="$(awk -F= '/^signing=/{print $2}' "$SPEC/fingerprints.txt")"
+[ "$(gpg_validsig_primary "$line22")" = "$want_primary" ] || fail "2.2 VALIDSIG primary"
+[ "$(gpg_validsig_primary "$line25")" = "$want_primary" ] || fail "2.5 VALIDSIG primary (not \$NF)"
+[ "$(awk '{print $NF}' <<<"$line25")" != "$want_primary" ] || fail "2.5 specimen \$NF should not be the primary"
+[ "$(awk '{print $3}' <<<"$line22")" = "$want_sub" ] || fail "specimen field 3 is the subkey"
+pass "VALIDSIG field 12 is portable across GnuPG 2.2–2.5"
 
 killed=0
 survived=0

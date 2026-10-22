@@ -363,7 +363,7 @@ test-version-ldflags: ## Regression: LDFLAGS-injected version outside the repo
 # detect it. require-release-tag is a real prerequisite so the check runs
 # before any other prerequisite of a tag-consuming target.
 define require_sfetch_release_tag
-	@if [ -n "$(RELEASE_TAG)" ]; then echo "error: RELEASE_TAG is not accepted; set SFETCH_RELEASE_TAG only" >&2; exit 1; fi
+	@if [ "$(origin RELEASE_TAG)" != "undefined" ]; then echo "error: RELEASE_TAG is not accepted; set SFETCH_RELEASE_TAG only" >&2; exit 1; fi
 	@if [ -z "$(SFETCH_RELEASE_TAG)" ]; then echo "error: SFETCH_RELEASE_TAG required" >&2; exit 1; fi
 	@printf '%s\n' "$(SFETCH_RELEASE_TAG)" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$$' || { echo "error: SFETCH_RELEASE_TAG must be canonical vX.Y.Z" >&2; exit 1; }
 	@if [ "$(SFETCH_RELEASE_TAG)" != "v$(VERSION)" ]; then echo "error: SFETCH_RELEASE_TAG ($(SFETCH_RELEASE_TAG)) must equal v$(VERSION)" >&2; exit 1; fi

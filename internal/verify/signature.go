@@ -77,25 +77,51 @@ func VerifyPGPSignature(assetPath, sigPath, pubKeyPath, gpgBin string) error {
 	}
 	defer os.RemoveAll(home) //nolint:errcheck // best-effort cleanup of temp dir
 
-	homeArg := gpgPathArg(gpgBin, home)
-	importArgs := []string{"--batch", "--no-tty", "--homedir", homeArg, "--import", gpgPathArg(gpgBin, pubKeyPath)}
-	if err := runCommand(gpgBin, importArgs...); err != nil {
+	resolved := resolveGPGBin(gpgBin)
+	homeArg := gpgPathArg(resolved, home)
+	importArgs := []string{"--batch", "--no-tty", "--homedir", homeArg, "--import", gpgPathArg(resolved, pubKeyPath)}
+	if err := runCommand(resolved, importArgs...); err != nil {
 		return fmt.Errorf("import pgp key: %w", err)
 	}
 
-	verifyArgs := []string{"--batch", "--no-tty", "--homedir", homeArg, "--trust-model", "always", "--verify", gpgPathArg(gpgBin, sigPath), gpgPathArg(gpgBin, assetPath)}
-	if err := runCommand(gpgBin, verifyArgs...); err != nil {
+	verifyArgs := []string{"--batch", "--no-tty", "--homedir", homeArg, "--trust-model", "always", "--verify", gpgPathArg(resolved, sigPath), gpgPathArg(resolved, assetPath)}
+	if err := runCommand(resolved, verifyArgs...); err != nil {
 		return fmt.Errorf("verify pgp signature: %w", err)
 	}
 
 	return nil
 }
 
+// resolveGPGBin turns a bare `gpg` / `gpg.exe` (the CLI default) into the
+// absolute path LookPath finds, so MSYS vs native path conversion can see
+// the real binary. Absolute paths are left unchanged.
+func resolveGPGBin(gpgBin string) string {
+	if gpgBin == "" {
+		gpgBin = "gpg"
+	}
+	if !isBareGPGName(gpgBin) {
+		return gpgBin
+	}
+	resolved, err := exec.LookPath(gpgBin)
+	if err != nil {
+		return gpgBin
+	}
+	return resolved
+}
+
+func isBareGPGName(gpgBin string) bool {
+	if gpgBin == "" || strings.ContainsAny(gpgBin, `/\`) {
+		return false
+	}
+	base := strings.ToLower(gpgBin)
+	return base == "gpg" || base == "gpg.exe"
+}
+
 // gpgPathArg converts a filesystem path for the given gpg binary. Git for
 // Windows / MSYS gpg concatenates cwd onto a Windows --homedir (producing
 // "/d/a/sfetch/sfetch/C:\\Users\\..."), so those binaries get POSIX paths.
 func gpgPathArg(gpgBin, path string) string {
-	if needsMSYSPathConversion(gpgBin) {
+	if needsMSYSPathConversion(resolveGPGBin(gpgBin)) {
 		return toMSYSPath(path)
 	}
 	return path

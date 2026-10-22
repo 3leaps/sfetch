@@ -92,7 +92,13 @@ Path(sys.argv[2]).write_text(
     + "\n".join(consts)
     + "\n"
     + "\n".join(keep)
-    + '\npath="$(goneat_minisign_key_file "$1")"\n'
+    + '\nif [ "${1:-}" = --two-runs ]; then\n'
+    + '  p1="$(goneat_minisign_key_file v0.6.1)"\n'
+    + '  p2="$(goneat_minisign_key_file v0.6.1)"\n'
+    + '  printf "%s\\n%s\\n" "$p1" "$p2"\n'
+    + '  exit 0\n'
+    + 'fi\n'
+    + 'path="$(goneat_minisign_key_file "$1")"\n'
     + 'sed -n 2p "$path"\n'
 )
 PY
@@ -108,5 +114,12 @@ select_blob() {
 [ "$(select_blob v0.6.6)" = "$cur_blob" ] || fail "v0.6.6 must select current pin"
 if select_blob latest >/dev/null 2>&1; then fail "non-semver goneat tag must be refused"; fi
 pass "standalone goneat pin map selects exactly one literal per tag"
+
+mapfile -t two_paths < <(bash "$WORK/alone/driver.sh" --two-runs)
+[ "${#two_paths[@]}" -eq 2 ] || fail "two consecutive goneat key files expected"
+[ -n "${two_paths[0]}" ] && [ -f "${two_paths[0]}" ] || fail "first goneat key file missing"
+[ -n "${two_paths[1]}" ] && [ -f "${two_paths[1]}" ] || fail "second goneat key file missing"
+[ "${two_paths[0]}" != "${two_paths[1]}" ] || fail "two consecutive mktemp runs must not reuse a fixed name"
+pass "portable mktemp allows two consecutive goneat key files"
 
 echo "[ok] goneat key-by-version map"

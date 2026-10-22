@@ -3462,7 +3462,16 @@ func archiveEntryDest(extractDirClean, name, kind string) (string, bool, error) 
 	return destPathClean, false, nil
 }
 
+const (
+	maxTarEntries       = 256
+	maxTarExpandedBytes = 512 << 20
+)
+
 func extractTarGz(archivePath, extractDir string) error {
+	return extractTarGzLimited(archivePath, extractDir, maxTarEntries, maxTarExpandedBytes)
+}
+
+func extractTarGzLimited(archivePath, extractDir string, maxEntries int, maxBytes int64) error {
 	f, err := os.Open(archivePath) // #nosec G304,G703 -- local temp download; gosec-high excludes G304 but not G703
 	if err != nil {
 		return fmt.Errorf("open tar.gz %s: %w", archivePath, err)
@@ -3477,6 +3486,8 @@ func extractTarGz(archivePath, extractDir string) error {
 
 	tr := tar.NewReader(gz)
 	extractDirClean := filepath.Clean(extractDir)
+	entries := 0
+	var expanded int64
 
 	for {
 		hdr, err := tr.Next()
@@ -3489,6 +3500,11 @@ func extractTarGz(archivePath, extractDir string) error {
 		switch hdr.Typeflag {
 		case tar.TypeXHeader, tar.TypeXGlobalHeader, tar.TypeGNULongName, tar.TypeGNULongLink:
 			continue
+		}
+
+		entries++
+		if entries > maxEntries {
+			return fmt.Errorf("tar has too many entries")
 		}
 
 		destPathClean, skip, err := archiveEntryDest(extractDirClean, hdr.Name, "tar")
@@ -3506,6 +3522,12 @@ func extractTarGz(archivePath, extractDir string) error {
 				return fmt.Errorf("mkdir %s: %w", destPathClean, err)
 			}
 		case tar.TypeReg, tar.TypeRegA:
+			if hdr.Size < 0 {
+				return fmt.Errorf("tar entry %q has negative size", hdr.Name)
+			}
+			if hdr.Size > maxBytes || expanded > maxBytes-hdr.Size {
+				return fmt.Errorf("tar expanded size exceeds limit")
+			}
 			// #nosec G301,G703 -- SDR-002: tar extraction dir; SDR-006: prefix-contained path
 			if err := os.MkdirAll(filepath.Dir(destPathClean), 0o755); err != nil {
 				return fmt.Errorf("mkdir %s: %w", filepath.Dir(destPathClean), err)
@@ -3515,11 +3537,13 @@ func extractTarGz(archivePath, extractDir string) error {
 			if err != nil {
 				return fmt.Errorf("create %s: %w", destPathClean, err)
 			}
-			// #nosec G110 -- SDR-004: user-initiated archive extraction
-			if _, err := io.Copy(out, tr); err != nil {
+			// #nosec G110 -- SDR-004: user-initiated archive extraction; bounded by maxTarExpandedBytes
+			n, err := io.CopyN(out, tr, hdr.Size)
+			if err != nil {
 				_ = out.Close()
 				return fmt.Errorf("write %s: %w", destPathClean, err)
 			}
+			expanded += n
 			if err := out.Close(); err != nil {
 				return fmt.Errorf("close %s: %w", destPathClean, err)
 			}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Check the committed fingerprint anchors and that the pinned public primary matches.
+# Secondary listing check. Designated checker is Decernor (verify-pinned-tag.sh).
 set -euo pipefail
 # Optional arguments ANCHORS PIN check copies extracted from a commit instead
 # of the working tree.

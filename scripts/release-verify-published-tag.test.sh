@@ -2,6 +2,12 @@
 # Synthetic controls for the published-tag gate; all keys and remotes are temporary.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
+bin="${SFETCH_DECERNOR_BIN:-$(command -v decernor || true)}"
+[[ -n "$bin" && -x "$bin" && "$bin" == /* ]] || {
+    echo 'error: SFETCH_DECERNOR_BIN required (CI installs Decernor from config/release/decernor-ci-sha256.txt)' >&2
+    exit 1
+}
+export SFETCH_DECERNOR_BIN="$bin"
 scratch="$(mktemp -d)"
 cleanup() {
     local home
@@ -28,10 +34,30 @@ git -C "$src" config gpg.format openpgp
 git -C "$src" config gpg.program gpg
 git -C "$src" config commit.gpgsign false
 mkdir -p "$src/scripts" "$src/docs/security" "$src/keys" "$src/config/release"
-cp "$root/scripts/"{verify-pinned-tag.sh,validate-release-anchors.sh,release-verify-published-tag.sh} "$src/scripts/"
+cp "$root/scripts/"{verify-pinned-tag.sh,validate-release-anchors.sh,release-verify-published-tag.sh,release-decernor.sh} "$src/scripts/"
 cp "$root/config/release/tagger-identity.txt" "$src/config/release/"
 gpg --batch --armor --export "$primary" > "$src/docs/security/release-signing-keys.asc"
-printf 'gpg %s\nminisign %064d\n' "$primary" 0 > "$src/keys/expected-fingerprints.txt"
+python3 - "$src/docs/security/sfetch-minisign.pub" <<'PY'
+import base64, pathlib, sys
+blob = b'Ed' + b'\x01' * 8 + b'\x01' * 32
+pathlib.Path(sys.argv[1]).write_text(
+    'untrusted comment: synthetic public key\n' + base64.b64encode(blob).decode() + '\n'
+)
+PY
+"$bin" fingerprint "$src/docs/security/release-signing-keys.asc" --class public --kind gpg \
+    --format ndjson --path-mode none --gpg-role primary >"$scratch/gpg.ndjson"
+"$bin" fingerprint "$src/docs/security/sfetch-minisign.pub" --class public --kind minisign \
+    --format ndjson --path-mode none >"$scratch/minisign.ndjson"
+python3 - "$scratch" "$src/keys" <<'PY'
+import json, pathlib, sys
+base, keys = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+g = [json.loads(line) for line in (base / 'gpg.ndjson').read_text().splitlines() if line]
+m = [json.loads(line) for line in (base / 'minisign.ndjson').read_text().splitlines() if line and json.loads(line).get('fingerprint_scheme') == 'minisign-public-blob-sha256-v1']
+if len(g) != 1 or len(m) != 1:
+    raise SystemExit('error: expected one GPG primary and one minisign fingerprint')
+(keys / 'expected-fingerprints.ndjson').write_text(''.join(json.dumps(r, separators=(',', ':')) + '\n' for r in (g[0], m[0])))
+(keys / 'expected-fingerprints.txt').write_text('gpg ' + g[0]['fingerprint'] + '\nminisign ' + m[0]['fingerprint'] + '\n')
+PY
 git -C "$src" add -A
 git -C "$src" commit -qm fixture
 commit="$(git -C "$src" rev-parse HEAD)"
@@ -71,7 +97,7 @@ export PATH="$scratch/bin:$PATH" FIXTURE_REMOTE="$scratch/remote.git" SFETCH_REL
 export SFETCH_GPG_SIGNING_FINGERPRINT="$primary"
 
 # The operator's trusted checkout carries the current verifier and helpers.
-cp "$root/scripts/"{verify-pinned-tag.sh,validate-release-anchors.sh,release-verify-published-tag.sh} "$op/scripts/"
+cp "$root/scripts/"{verify-pinned-tag.sh,validate-release-anchors.sh,release-verify-published-tag.sh,release-decernor.sh} "$op/scripts/"
 gate() { (cd "$op" && ./scripts/release-verify-published-tag.sh); }
 expect_fail() {
     if gate > "$scratch/out" 2>&1; then
@@ -125,7 +151,16 @@ attacker="$(gpg --batch --with-colons --fingerprint --list-keys | awk -F: '$1=="
 gpg --batch --pinentry-mode loopback --passphrase '' --quick-add-key "$attacker" ed25519 sign 1d > /dev/null 2>&1
 attacker_sub="$(gpg --batch --with-colons --with-subkey-fingerprint --list-keys "$attacker" | awk -F: '$1=="sub" {s=1;next} s && $1=="fpr" {print $10;exit}')"
 gpg --batch --armor --export "$attacker" > "$src/docs/security/release-signing-keys.asc"
-printf 'gpg %s\nminisign %064d\n' "$attacker" 0 > "$src/keys/expected-fingerprints.txt"
+"$bin" fingerprint "$src/docs/security/release-signing-keys.asc" --class public --kind gpg \
+    --format ndjson --path-mode none --gpg-role primary >"$scratch/gpg.ndjson"
+python3 - "$scratch" "$src/keys" <<'PY'
+import json, pathlib, sys
+base, keys = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+g = [json.loads(line) for line in (base / 'gpg.ndjson').read_text().splitlines() if line]
+m = [json.loads(line) for line in (base / 'minisign.ndjson').read_text().splitlines() if line and json.loads(line).get('fingerprint_scheme') == 'minisign-public-blob-sha256-v1']
+(keys / 'expected-fingerprints.ndjson').write_text(''.join(json.dumps(r, separators=(',', ':')) + '\n' for r in (g[0], m[0])))
+(keys / 'expected-fingerprints.txt').write_text('gpg ' + g[0]['fingerprint'] + '\nminisign ' + m[0]['fingerprint'] + '\n')
+PY
 git -C "$src" add -A
 git -C "$src" commit -qm 'attacker pin'
 printf 'Fixture release\n' > "$scratch/msg"
@@ -145,7 +180,7 @@ gate > /dev/null
 # An unverified target carrying a marker-writing fake verifier and helper must
 # never be executed: the gate runs only the operator's trusted scripts.
 marker="$scratch/target-code-executed"
-for script in verify-pinned-tag.sh validate-release-anchors.sh release-verify-published-tag.sh; do
+for script in verify-pinned-tag.sh validate-release-anchors.sh release-verify-published-tag.sh release-decernor.sh; do
     printf '#!/usr/bin/env bash\ntouch %q\nexit 0\n' "$marker" > "$src/scripts/$script"
     chmod +x "$src/scripts/$script"
 done
