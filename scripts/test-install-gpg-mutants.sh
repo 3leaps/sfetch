@@ -140,7 +140,7 @@ elif n == 8:
         flags=re.M,
     )
     sub(
-        r'if \[ "\$sig_primary" != "\$ACTIVE_PGP_FPR" \]; then\n                    gpg_cleanup\n                    err "GPG signature is not from the pinned key \(got \$\{sig_primary:-none\}\)"\n                fi\n',
+        r'if \[ "\$sig_primary" != "\$fprs" \]; then\n                gpg_cleanup\n                err "GPG signature is not from the pinned key \(got \$\{sig_primary:-none\}\)"\n            fi\n',
         '',
         flags=re.M,
     )
@@ -161,10 +161,12 @@ elif n == 9:
     )
 elif n == 10:
     # VALIDSIG parsed from the first fingerprint field (subkey signer) rather
-    # than the last field (primary).
+    # than the last field (primary). Field 3 is the signing-key fpr; $NF is
+    # the primary. The prefix strip must escape the [GNUPG:] brackets so this
+    # is a real first-field parse, not a glob that leaves the line unchanged.
     sub(
         r'sig_primary="\$\{line##\* \}"',
-        'sig_primary="${line#[GNUPG:] VALIDSIG }"; sig_primary="${sig_primary%% *}"',
+        '''sig_primary="$(awk '{print $3}' <<<"$line")"''',
     )
 elif n == 11:
     # GnuPG home outside the trapped tmpdir, cleanup function emptied.
@@ -243,7 +245,9 @@ cp "$4/SHA256SUMS" "$d/SHA256SUMS"
 minisign -S -s "$4/cur.key" -m "$d/SHA256SUMS" -x "$d/SHA256SUMS.minisig" >/dev/null
 VERIFY_MINISIGN=true VERIFY_GPG=false REQUIRE_MINISIGN=true REQUIRE_SIGNATURE=true
 # Property: a current-key signature must be rejected for a legacy tag.
-if select_trust_anchor v0.4.11 >/dev/null && verify_signature "$d/SHA256SUMS" "$d" >/dev/null 2>&1; then
+# Run verify in a subshell: err() uses exit, which would otherwise kill this
+# probe and look like a KILL even on unmutated code.
+if select_trust_anchor v0.4.11 >/dev/null && (verify_signature "$d/SHA256SUMS" "$d") >/dev/null 2>&1; then
     exit 1
 fi
 exit 0
@@ -264,7 +268,7 @@ gpg --homedir "$5" --batch --yes --pinentry-mode loopback --passphrase "" \
     -u cur@test.invalid --armor --detach-sign -o "$d/SHA256SUMS.asc" "$d/SHA256SUMS"
 VERIFY_MINISIGN=false VERIFY_GPG=true REQUIRE_MINISIGN=false REQUIRE_SIGNATURE=true
 # Property: the current GPG key must be rejected for a legacy tag.
-if select_trust_anchor v0.4.11 >/dev/null && verify_signature "$d/SHA256SUMS" "$d" >/dev/null 2>&1; then
+if select_trust_anchor v0.4.11 >/dev/null && (verify_signature "$d/SHA256SUMS" "$d") >/dev/null 2>&1; then
     exit 1
 fi
 exit 0
@@ -287,7 +291,7 @@ gpg --homedir "$6" --batch --yes --pinentry-mode loopback --passphrase "" \
     -u cur@test.invalid --armor --detach-sign -o "$d/SHA256SUMS.asc" "$d/SHA256SUMS"
 VERIFY_MINISIGN=true VERIFY_GPG=true REQUIRE_MINISIGN=false REQUIRE_SIGNATURE=true
 # Property: a minisign reject must not fall through to a valid GPG signature.
-if select_trust_anchor v0.4.12 >/dev/null && verify_signature "$d/SHA256SUMS" "$d" >/dev/null 2>&1; then
+if select_trust_anchor v0.4.12 >/dev/null && (verify_signature "$d/SHA256SUMS" "$d") >/dev/null 2>&1; then
     exit 1
 fi
 exit 0
@@ -308,7 +312,7 @@ gpg --homedir "$4" --batch --yes --pinentry-mode loopback --passphrase "" \
     -u atk@test.invalid --armor --detach-sign -o "$d/SHA256SUMS.asc" "$d/SHA256SUMS"
 VERIFY_MINISIGN=false VERIFY_GPG=true REQUIRE_MINISIGN=false REQUIRE_SIGNATURE=true
 # Property: a bundled extra primary must be refused even when the pin is present.
-if select_trust_anchor v0.4.12 >/dev/null && verify_signature "$d/SHA256SUMS" "$d" >/dev/null 2>&1; then
+if select_trust_anchor v0.4.12 >/dev/null && (verify_signature "$d/SHA256SUMS" "$d") >/dev/null 2>&1; then
     exit 1
 fi
 exit 0
@@ -330,7 +334,7 @@ gpg --homedir "$4" --batch --yes --pinentry-mode loopback --passphrase "" \
 VERIFY_MINISIGN=false VERIFY_GPG=true REQUIRE_MINISIGN=false REQUIRE_SIGNATURE=true
 # Property: a secret-key listing (including >128KB) must be refused. Mutant 9
 # can SIGPIPE and skip the reject.
-if select_trust_anchor v0.4.12 >/dev/null && verify_signature "$d/SHA256SUMS" "$d" >/dev/null 2>&1; then
+if select_trust_anchor v0.4.12 >/dev/null && (verify_signature "$d/SHA256SUMS" "$d") >/dev/null 2>&1; then
     exit 1
 fi
 exit 0
@@ -351,7 +355,7 @@ gpg --homedir "$4" --batch --yes --pinentry-mode loopback --passphrase "" \
 VERIFY_MINISIGN=false VERIFY_GPG=true REQUIRE_MINISIGN=false REQUIRE_SIGNATURE=true
 # Property: a subkey signature whose VALIDSIG last field is the primary must
 # verify. Mutant 10 compares the first field (subkey) and rejects.
-if select_trust_anchor v0.4.12 >/dev/null && verify_signature "$d/SHA256SUMS" "$d" >/dev/null 2>&1; then
+if select_trust_anchor v0.4.12 >/dev/null && (verify_signature "$d/SHA256SUMS" "$d") >/dev/null 2>&1; then
     exit 0
 fi
 exit 1
@@ -408,8 +412,20 @@ exit 0
 
 run_mutant() {
     local n="$1" name="$2" probe="$3"
-    local mdir="$WORK/m$n"
-    mkdir -p "$mdir"
+    local cdir="$WORK/c$n" mdir="$WORK/m$n"
+    mkdir -p "$cdir" "$mdir"
+    # Unmutated control must pass (property holds). A probe that reports KILL
+    # on good code is a broken oracle, not a killed mutant.
+    strip_installer "$INSTALLER" "$cdir/src"
+    set +e
+    "$probe" "$cdir/src"
+    local crc=$?
+    set -e
+    if [ "$crc" -ne 0 ]; then
+        echo "CONTROL-FAIL  $n  $name (unmutated must pass)"
+        return 1
+    fi
+    echo "CONTROL  $n  $name"
     apply_mutant "$n" "$INSTALLER" "$mdir/install-sfetch.sh"
     strip_installer "$mdir/install-sfetch.sh" "$mdir/src"
     set +e

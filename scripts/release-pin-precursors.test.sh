@@ -13,7 +13,17 @@ mkdir -p "$fixture/repo/scripts" "$fixture/repo/docs" "$fixture/home" "$fixture/
 chmod 700 "$fixture/home" "$fixture/other-home" "$fixture/other-home/.gnupg"
 cp "$root/Makefile" "$root/VERSION" "$fixture/repo/"
 cp "$root/scripts/"{release-decernor.sh,release-export-pin.sh,release-validate-pin.sh,release-insert-anchors.sh} "$fixture/repo/scripts/"
-bin="${SFETCH_DECERNOR_BIN:-$(command -v decernor)}"
+if [[ -z "${SFETCH_DECERNOR_BIN:-}" ]]; then
+	if [[ "${CI:-}" == true ]]; then
+		echo 'error: SFETCH_DECERNOR_BIN required in CI (install from config/release/decernor-ci-sha256.txt)' >&2
+		exit 1
+	fi
+	SFETCH_DECERNOR_BIN="$(command -v decernor)" || {
+		echo 'error: SFETCH_DECERNOR_BIN required (CI installs Decernor from config/release/decernor-ci-sha256.txt)' >&2
+		exit 1
+	}
+fi
+bin="$SFETCH_DECERNOR_BIN"
 export SFETCH_DECERNOR_BIN="$bin"
 python3 - "$fixture/public.pub" "$fixture/private.pub" <<'PY'
 import base64

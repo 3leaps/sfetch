@@ -387,6 +387,47 @@ SHIM
         if gpg_verify_as v0.4.12 cur old; then fail "minisign reject must not fall back to gpg"; fi
         gpg_verify_as v0.4.12 cur cur || fail "v0.4.12 with valid minisign + gpg must verify"
         VERIFY_MINISIGN=true
+        # Expired pinned keys must not verify even under --trust-model always.
+        # Sign first, then expire, then wait: setting seconds=1 *after* the
+        # wait re-validates the key and the installer would correctly accept it.
+        EXP_HOME="$WORK/gnupg-exp"
+        mkdir -m 700 "$EXP_HOME"
+        gpg --homedir "$EXP_HOME" --batch --pinentry-mode loopback --passphrase '' \
+            --quick-gen-key 'exp@test.invalid' ed25519 sign never >/dev/null 2>&1 ||
+            fail "expired-key gen"
+        FPR_EXP="$(gpg --homedir "$EXP_HOME" --with-colons --fingerprint exp@test.invalid |
+            awk -F: '/^fpr:/ {print $10; exit}')"
+        [ -n "$FPR_EXP" ] || fail "expired-key fingerprint"
+        d_exp="$(mktemp -d "$WORK/exp.XXXXXX")"
+        cp "$WORK/SHA256SUMS" "$d_exp/SHA256SUMS"
+        gpg --homedir "$EXP_HOME" --batch --yes --pinentry-mode loopback --passphrase '' \
+            -u exp@test.invalid --armor --detach-sign -o "$d_exp/SHA256SUMS.asc" "$d_exp/SHA256SUMS" ||
+            fail "sign before expiry"
+        gpg --homedir "$EXP_HOME" --batch --yes --pinentry-mode loopback --passphrase '' \
+            --quick-set-expire "$FPR_EXP" seconds=1 >/dev/null 2>&1 ||
+            fail "set expire"
+        sleep 2
+        gpg --homedir "$EXP_HOME" --batch --armor --export exp@test.invalid \
+            >"$d_exp/sfetch-release-signing-key.asc"
+        mkdir -m 700 "$d_exp/probe"
+        gpg --homedir "$d_exp/probe" --batch --import "$d_exp/sfetch-release-signing-key.asc" >/dev/null 2>&1
+        set +e
+        probe_status=$(gpg --homedir "$d_exp/probe" --batch --no-tty --trust-model always \
+            --status-fd 1 --verify "$d_exp/SHA256SUMS.asc" "$d_exp/SHA256SUMS" 2>/dev/null)
+        set -e
+        printf '%s\n' "$probe_status" | grep -q EXPKEYSIG || fail "fixture must emit EXPKEYSIG"
+        if (
+            VERIFY_MINISIGN=false VERIFY_GPG=true REQUIRE_MINISIGN=false REQUIRE_SIGNATURE=true
+            SFETCH_PGP_FPR="$FPR_EXP"
+            select_trust_anchor v0.4.12
+            verify_signature "$d_exp/SHA256SUMS" "$d_exp"
+        ) >/dev/null 2>&1; then
+            fail "expired pinned GPG key must be refused"
+        fi
+        grep -q EXPKEYSIG "$INSTALLER" || fail "installer must reject EXPKEYSIG"
+        grep -q KEYEXPIRED "$INSTALLER" || fail "installer must reject KEYEXPIRED"
+        pass "gpg route: expired pinned key refused"
+
         pass "gpg route: fingerprint pin follows the tag; minisign reject does not fall back"
     else
         [ "${CI:-}" != "true" ] || fail "gpg required in CI for the gpg half"

@@ -461,31 +461,49 @@ verify_signature() {
                 err "GPG key fingerprint mismatch (expected ${ACTIVE_PGP_FPR}, got ${fprs:-unknown})"
             fi
             log "Verifying signature with gpg (pinned fingerprint)..."
-            # Accept only a VALIDSIG whose primary-key fingerprint is the pin.
-            local status sig_primary
-            if gpg --batch --no-tty --homedir "$GPG_HOME" --import "$gpg_key" 2>/dev/null &&
-                status=$(gpg --batch --no-tty --homedir "$GPG_HOME" --trust-model always \
-                    --status-fd 1 --verify "${sums_file}.asc" "$sums_file" 2>/dev/null); then
-                sig_primary=""
-                while IFS= read -r line; do
-                    case "$line" in
-                        "[GNUPG:] VALIDSIG "*)
-                            sig_primary="${line##* }"
-                            break
-                            ;;
-                    esac
-                done <<<"$status"
-                if [ "$sig_primary" != "$ACTIVE_PGP_FPR" ]; then
-                    gpg_cleanup
-                    err "GPG signature is not from the pinned key (got ${sig_primary:-none})"
-                fi
-                log "GPG signature verified"
-                verified=true
-                TRUST_LEVEL="medium (gpg, pinned key)"
-            else
+            # The listing pin (fprs == ACTIVE_PGP_FPR) is the selected generation.
+            # VALIDSIG's last field must equal that imported primary so a
+            # signature from some other key in the homedir cannot ride along.
+            # Comparing VALIDSIG to ACTIVE_PGP_FPR a second time would mask a
+            # listing that checked the default pin instead of the selected one.
+            # --trust-model always still emits EXPKEYSIG/EXPSIG/REVKEYSIG and
+            # KEYEXPIRED with rc=0 plus VALIDSIG; those are not a valid pin.
+            local status sig_primary gpg_bad=false gpg_rc=0 gpg_tok
+            if ! gpg --batch --no-tty --homedir "$GPG_HOME" --import "$gpg_key" 2>/dev/null; then
                 gpg_cleanup
                 err "GPG signature verification failed"
             fi
+            set +e
+            status=$(gpg --batch --no-tty --homedir "$GPG_HOME" --trust-model always \
+                --status-fd 1 --verify "${sums_file}.asc" "$sums_file" 2>/dev/null)
+            gpg_rc=$?
+            set -e
+            sig_primary=""
+            while IFS= read -r line; do
+                case "$line" in
+                    "[GNUPG:] VALIDSIG "*)
+                        sig_primary="${line##* }"
+                        ;;
+                esac
+                gpg_tok="${line#'[GNUPG:] '}"
+                gpg_tok="${gpg_tok%% *}"
+                case "$gpg_tok" in
+                    EXPKEYSIG|EXPSIG|REVKEYSIG|KEYREVOKED|KEYEXPIRED|BADSIG|ERRSIG)
+                        gpg_bad=true
+                        ;;
+                esac
+            done <<<"${status:-}"
+            if [ "$gpg_rc" -ne 0 ] || [ "$gpg_bad" = true ]; then
+                gpg_cleanup
+                err "GPG signature verification failed"
+            fi
+            if [ "$sig_primary" != "$fprs" ]; then
+                gpg_cleanup
+                err "GPG signature is not from the pinned key (got ${sig_primary:-none})"
+            fi
+            log "GPG signature verified"
+            verified=true
+            TRUST_LEVEL="medium (gpg, pinned key)"
             gpg_cleanup
         else
             warn "GPG public key not found in release"

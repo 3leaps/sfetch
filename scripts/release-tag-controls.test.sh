@@ -19,15 +19,32 @@ for ext in txt ndjson; do
 	printf 'new\n' >"$scratch/anchor-stage/expected-fingerprints.$ext"
 	printf 'old\n' >"$scratch/anchor-dest/expected-fingerprints.$ext"
 done
+if "$root/scripts/install-release-anchors.sh" \
+	"$scratch/anchor-stage" "$scratch/anchor-dest" >/dev/null 2>&1; then
+	echo 'error: expected overwrite refusal' >&2
+	exit 1
+fi
+for ext in txt ndjson; do
+	[[ "$(cat "$scratch/anchor-dest/expected-fingerprints.$ext")" == old ]]
+done
+rm -f "$scratch/anchor-dest"/expected-fingerprints.*
 if SFETCH_TEST_FAIL_ANCHOR_INSTALL=1 "$root/scripts/install-release-anchors.sh" \
 	"$scratch/anchor-stage" "$scratch/anchor-dest" >/dev/null 2>&1; then
 	echo 'error: expected pair rollback' >&2
 	exit 1
 fi
 for ext in txt ndjson; do
-	[[ "$(cat "$scratch/anchor-dest/expected-fingerprints.$ext")" == old ]]
+	[[ ! -e "$scratch/anchor-dest/expected-fingerprints.$ext" ]]
 done
 "$root/scripts/install-release-anchors.sh" "$scratch/anchor-stage" "$scratch/anchor-dest"
+for ext in txt ndjson; do
+	[[ "$(cat "$scratch/anchor-dest/expected-fingerprints.$ext")" == new ]]
+done
+if "$root/scripts/install-release-anchors.sh" \
+	"$scratch/anchor-stage" "$scratch/anchor-dest" >/dev/null 2>&1; then
+	echo 'error: second install overwrote existing anchors' >&2
+	exit 1
+fi
 for ext in txt ndjson; do
 	[[ "$(cat "$scratch/anchor-dest/expected-fingerprints.$ext")" == new ]]
 done
@@ -61,6 +78,13 @@ expect_fail env -u SFETCH_TAG_MESSAGE_DIR bash -c 'source "$1"; tag_message_file
 expect_fail env SFETCH_TAG_MESSAGE_DIR="$scratch" bash -c 'source "$1"; tag_message_file' _ "$root/scripts/release-tag-common.sh"
 export SFETCH_PGP_KEY_ID=0123456789ABCDEF
 expect_fail tag_selector_shape
+# 40-hex without the trailing '!' must be refused. Deleting '!' from the
+# tag_selector_shape regex would accept this value.
+export SFETCH_PGP_KEY_ID=0123456789ABCDEF0123456789ABCDEF01234567
+export SFETCH_GPG_SIGNING_FINGERPRINT=0123456789ABCDEF0123456789ABCDEF01234567
+expect_fail tag_selector_shape
+export SFETCH_PGP_KEY_ID=0123456789ABCDEF0123456789ABCDEF01234567!
+tag_selector_shape
 unset SFETCH_PGP_KEY_ID
 expect_fail tag_selector_shape
 git init -q -b main "$scratch/repo"
@@ -158,23 +182,49 @@ export SFETCH_PGP_KEY_ID=0123456789ABCDEF0123456789ABCDEF01234567!
 (
 	export HOME="$fake_home"
 	export SFETCH_GPG_HOMEDIR="$HOME/.gnupg"
-	expect_fail tag_key_selector
+	set +e
+	out="$(tag_bind_operator_gnupg_home 2>&1)"
+	rc=$?
+	set -e
+	[[ "$rc" -ne 0 ]]
+	[[ "$out" == *'must not be the default homedir'* ]]
 )
 throwaway="$scratch/gnupg-throwaway"
 mkdir -m 700 "$throwaway"
 (
 	export HOME="$fake_home"
 	export SFETCH_GPG_HOMEDIR="$throwaway"
-	# Must get past the default-homedir refusal. Later gpg list-keys fails
-	# because the throwaway ring is empty — that is not the default homedir.
-	set +e
-	out="$(tag_key_selector 2>&1)"
-	rc=$?
-	set -e
-	[[ "$out" != *'must not be the default homedir'* ]] || {
-		echo "error: throwaway GPG home was treated as the default homedir" >&2
-		exit 1
-	}
-	[[ "$rc" -ne 0 ]]
+	tag_bind_operator_gnupg_home
+	[[ "$GNUPGHOME" == "$throwaway" ]]
+	[[ "$(tag_stat_mode "$throwaway")" == 700 ]]
 )
+# Relative symlink to an inherited 0755 home must be refused (do not follow).
+inherited="$scratch/inherited-0755"
+mkdir -m 755 "$inherited"
+ln -s "$inherited" "$scratch/rel-link"
+(
+	export HOME="$fake_home"
+	export SFETCH_GPG_HOMEDIR="./rel-link"
+	expect_fail tag_bind_operator_gnupg_home
+)
+ln -s "$inherited" "$scratch/abs-link"
+(
+	export HOME="$fake_home"
+	export SFETCH_GPG_HOMEDIR="$scratch/abs-link"
+	expect_fail tag_bind_operator_gnupg_home
+)
+tag_fresh_verify_gnupg_home
+[[ -d "$TAG_VERIFY_GNUPGHOME" && ! -L "$TAG_VERIFY_GNUPGHOME" ]]
+[[ "$(tag_stat_mode "$TAG_VERIFY_GNUPGHOME")" == 700 ]]
+verify_home="$TAG_VERIFY_GNUPGHOME"
+tag_discard_verify_home
+[[ ! -e "$verify_home" ]]
+grep -q 'gpgconf --homedir' "$root/scripts/release-tag.sh" || {
+	echo 'error: signed-tag operator must gpgconf --kill all on EXIT' >&2
+	exit 1
+}
+grep -q 'tag_discard_verify_home' "$root/scripts/release-tag.sh" || {
+	echo 'error: signed-tag EXIT trap must discard the verify home' >&2
+	exit 1
+}
 echo '[ok] signed-tag negative controls passed'

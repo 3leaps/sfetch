@@ -50,9 +50,17 @@ printf 'bin\n' >"$WORK/dist/sfetch_linux_amd64.tar.gz"
 : >"$WORK/dist/install-sfetch.sh.minisig"
 export GH_TRACE="$WORK/trace"
 export PATH="$WORK/bin:$PATH"
+: >"$GH_TRACE"
 if "$UPLOAD" v0.0.0 "$WORK/dist" >/dev/null 2>&1; then
     fail "upload must refuse when the release is not a draft"
 fi
-pass "upload refuses a non-draft release"
+grep -q 'release view' "$GH_TRACE" || fail "upload must read isDraft before mutating"
+if grep -q 'release upload' "$GH_TRACE"; then
+    fail "upload must not mutate assets before the draft check"
+fi
+if grep -q 'release edit' "$GH_TRACE"; then
+    fail "upload must not edit the release before the draft check"
+fi
+pass "upload refuses a non-draft release without mutating it"
 
 echo "[ok] release-upload stays draft"

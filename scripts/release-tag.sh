@@ -11,7 +11,9 @@ tag_checkout
 [[ -z "$(git ls-remote --tags origin "refs/tags/$SFETCH_RELEASE_TAG")" ]] || tag_die 'remote tag already exists'
 [[ -z "$(git show-ref --tags "refs/tags/$SFETCH_RELEASE_TAG" || true)" ]] || tag_die 'local tag already exists'
 message="$(mktemp)"
-trap 'rm -f "$message"' EXIT
+trap 'gpgconf --homedir "${GNUPGHOME:-/nonesuch}" --kill all >/dev/null 2>&1 || true
+	tag_discard_verify_home
+	rm -f "$message"' EXIT
 tag_expected_message >"$message"
 export GIT_COMMITTER_NAME="$SFETCH_TAGGER_NAME" GIT_COMMITTER_EMAIL="$SFETCH_TAGGER_EMAIL"
 # Host git may be configured for SSH signing (gpg.format=ssh). Force OpenPGP

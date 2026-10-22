@@ -65,14 +65,9 @@ jobs:
         run: |
           set -euo pipefail
           tool_dir="$(mktemp -d "$RUNNER_TEMP/decernor.XXXXXX")"
-          curl -fsSL \
-            'https://github.com/3leaps/decernor/releases/download/v0.1.8/decernor_0.1.8_linux_amd64.tar.gz' \
-            --output "$tool_dir/decernor_0.1.8_linux_amd64.tar.gz"
-          (cd "$tool_dir" && sha256sum --check "$GITHUB_WORKSPACE/config/release/decernor-ci-sha256.txt")
-          tar -xzf "$tool_dir/decernor_0.1.8_linux_amd64.tar.gz" -C "$tool_dir" decernor
-          chmod 0755 "$tool_dir/decernor"
-          export SFETCH_DECERNOR_BIN="$tool_dir/decernor"
-          ./scripts/release-validate-pin.sh
+          export SFETCH_DECERNOR_BIN
+          SFETCH_DECERNOR_BIN="$(./scripts/ci-install-decernor.sh "$tool_dir")"
+          ./scripts/release-verify-committed-anchors.sh
 
   build:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -89,6 +84,7 @@ jobs:
 
       - name: Build only the verified tag object and commit
         env:
+          GH_TOKEN: ${{ github.token }}
           VERIFIED_COMMIT: ${{ needs.verify-signature.outputs.commit }}
           SFETCH_EXPECTED_TAG_OBJECT: ${{ needs.verify-signature.outputs.tag_object }}
           SFETCH_RELEASE_TAG: ${{ github.ref_name }}

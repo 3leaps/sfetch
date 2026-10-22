@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Replace a public anchor pair with rollback on error or interruption.
+# Install a public anchor pair without overwrite. Roll back a partial first write.
 set -euo pipefail
 staging="${1:?staging directory required}"
 dest="${2:?destination required}"
@@ -11,17 +11,17 @@ for name in expected-fingerprints.txt expected-fingerprints.ndjson; do
 	}
 done
 mkdir -p "$dest"
-backup="$(mktemp -d)"
 for name in expected-fingerprints.txt expected-fingerprints.ndjson; do
-	if [[ -f "$dest/$name" ]]; then cp "$dest/$name" "$backup/$name"; fi
+	if [[ -e "$dest/$name" || -L "$dest/$name" ]]; then
+		echo "error: refusing to overwrite existing $dest/$name" >&2
+		exit 1
+	fi
 done
 rollback() {
 	trap - EXIT INT TERM HUP
 	for name in expected-fingerprints.txt expected-fingerprints.ndjson; do
-		rm -f "$dest/$name.new"
-		if [[ -f "$backup/$name" ]]; then mv -f "$backup/$name" "$dest/$name"; else rm -f "$dest/$name"; fi
+		rm -f "$dest/$name.new" "$dest/$name"
 	done
-	rm -rf "$backup"
 }
 trap rollback EXIT
 trap 'rollback; exit 130' INT
@@ -30,14 +30,13 @@ trap 'rollback; exit 129' HUP
 for name in expected-fingerprints.txt expected-fingerprints.ndjson; do
 	cp "$staging/$name" "$dest/$name.new"
 done
-mv -f "$dest/expected-fingerprints.ndjson.new" "$dest/expected-fingerprints.ndjson"
+mv "$dest/expected-fingerprints.ndjson.new" "$dest/expected-fingerprints.ndjson"
 if [[ "${SFETCH_TEST_FAIL_ANCHOR_INSTALL:-}" == 1 ]]; then
 	echo 'error: interrupted pair installation' >&2
 	exit 1
 fi
-mv -f "$dest/expected-fingerprints.txt.new" "$dest/expected-fingerprints.txt"
+mv "$dest/expected-fingerprints.txt.new" "$dest/expected-fingerprints.txt"
 if [[ "$#" -gt 0 ]]; then
 	"$@"
 fi
 trap - EXIT INT TERM HUP
-rm -rf "$backup"

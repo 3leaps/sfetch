@@ -3,6 +3,16 @@
 set -euo pipefail
 
 tag_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=scripts/release-decernor.sh
+source "$tag_root/scripts/release-decernor.sh"
+
+tag_discard_verify_home() {
+	if [[ -n "${TAG_VERIFY_GNUPGHOME:-}" ]]; then
+		gpgconf --homedir "$TAG_VERIFY_GNUPGHOME" --kill all >/dev/null 2>&1 || true
+		rm -rf "$TAG_VERIFY_GNUPGHOME"
+		TAG_VERIFY_GNUPGHOME=""
+	fi
+}
 
 tag_die() {
 	echo "error: $*" >&2
@@ -112,51 +122,131 @@ tag_selector_shape() {
 	}
 }
 
-tag_key_selector() {
-	tag_selector_shape || return 1
-	"$tag_root/scripts/validate-release-anchors.sh" >/dev/null
-	[[ "$(awk '$1=="gpg" {print $2}' "$tag_root/keys/expected-fingerprints.txt")" == "$SFETCH_GPG_SIGNING_FINGERPRINT" ]] || {
-		tag_die 'operator fingerprint differs from committed anchor'
+tag_stat_mode() {
+	if stat -c '%a' "$1" >/dev/null 2>&1; then
+		stat -c '%a' "$1"
+	else
+		stat -f '%OLp' "$1"
+	fi
+}
+
+# Fresh isolated keyring for selector verification. Never reuse an existing
+# directory or follow a symlink: mktemp -d, refuse -L, chmod 0700, kill the
+# agent on cleanup.
+tag_fresh_verify_gnupg_home() {
+	local dir mode
+	dir="$(mktemp -d "${TMPDIR:-/tmp}/sfetch-tag-gnupg.XXXXXX")" || {
+		tag_die 'cannot create GnuPG home'
 		return 1
 	}
-	[[ -n "${SFETCH_GPG_HOMEDIR:-}" && -d "$SFETCH_GPG_HOMEDIR" ]] || {
+	if [[ -L "$dir" || ! -d "$dir" ]]; then
+		rm -rf "$dir"
+		tag_die 'GnuPG home must be a fresh directory, not a symlink'
+		return 1
+	fi
+	chmod 700 "$dir" || {
+		rm -rf "$dir"
+		tag_die 'cannot chmod GnuPG home'
+		return 1
+	}
+	mode="$(tag_stat_mode "$dir")"
+	[[ "$mode" == "700" ]] || {
+		rm -rf "$dir"
+		tag_die 'GnuPG home must be mode 0700'
+		return 1
+	}
+	TAG_VERIFY_GNUPGHOME="$dir"
+}
+
+# Signing home: absolute, not a symlink, not an inherited default, mode 0700.
+# Relative paths and symlink-to-existing-dir probes are refused before any
+# gpg invocation. Do not follow symlinks (no pwd -P).
+tag_bind_operator_gnupg_home() {
+	[[ -n "${SFETCH_GPG_HOMEDIR:-}" ]] || {
 		tag_die 'external GPG home required'
 		return 1
 	}
-	local home default_home
-	home="$(cd "$SFETCH_GPG_HOMEDIR" && pwd -P)"
-	case "$home" in "$tag_root"/* | "$tag_root")
+	[[ "$SFETCH_GPG_HOMEDIR" == /* ]] || {
+		tag_die 'GPG home must be an absolute path'
+		return 1
+	}
+	[[ ! -L "$SFETCH_GPG_HOMEDIR" ]] || {
+		tag_die 'GPG home must not be a symlink'
+		return 1
+	}
+	[[ -d "$SFETCH_GPG_HOMEDIR" ]] || {
+		tag_die 'external GPG home required'
+		return 1
+	}
+	local component="$SFETCH_GPG_HOMEDIR"
+	while [[ "$component" != / ]]; do
+		[[ ! -L "$component" ]] || {
+			tag_die 'GPG home may not contain symlink ancestors'
+			return 1
+		}
+		component="${component%/*}"
+		[[ -n "$component" ]] || component=/
+	done
+	case "$SFETCH_GPG_HOMEDIR" in "$tag_root" | "$tag_root"/*)
 		tag_die 'GPG home must be outside repository'
 		return 1
 		;;
 	esac
+	chmod 700 "$SFETCH_GPG_HOMEDIR" || {
+		tag_die 'cannot chmod GPG home'
+		return 1
+	}
+	local mode
+	mode="$(tag_stat_mode "$SFETCH_GPG_HOMEDIR")"
+	[[ "$mode" == "700" ]] || {
+		tag_die 'GPG home must be mode 0700'
+		return 1
+	}
 	# Refuse the default GnuPG homedir so tests and the ceremony cannot
 	# sign with a real operator key by accident. Tests always set a
-	# throwaway GNUPGHOME via SFETCH_GPG_HOMEDIR.
-	default_home="$(cd "${GNUPGHOME:-$HOME/.gnupg}" 2>/dev/null && pwd -P || true)"
-	if [[ -n "$default_home" && "$home" == "$default_home" ]]; then
-		# Only reject when the configured home is the process default
-		# (typically ~/.gnupg). A throwaway directory is required.
-		case "$home" in
-		"$HOME/.gnupg" | "$HOME/.gnupg/"*)
-			tag_die 'GPG home must not be the default homedir'
-			return 1
-			;;
-		esac
-	fi
-	if [[ "$home" == "$(cd "$HOME/.gnupg" 2>/dev/null && pwd -P || echo /nonexistent)" ]]; then
+	# throwaway GNUPGHOME via SFETCH_GPG_HOMEDIR. Compare the given path
+	# itself, never a symlink-resolved target.
+	local default_home="${GNUPGHOME:-$HOME/.gnupg}"
+	if [[ "$SFETCH_GPG_HOMEDIR" == "$default_home" || "$SFETCH_GPG_HOMEDIR" == "$HOME/.gnupg" ]]; then
 		tag_die 'GPG home must not be the default homedir'
 		return 1
 	fi
-	export GNUPGHOME="$home"
-	local listing primary subkey
-	listing="$(gpg --batch --with-colons --fingerprint --with-subkey-fingerprint --list-keys "${SFETCH_PGP_KEY_ID%!}" 2>/dev/null)" || tag_die 'signing subkey unavailable'
-	primary="$(printf '%s\n' "$listing" | awk -F: '$1=="pub" {p=1;next} p && $1=="fpr" {print $10;exit}')"
-	subkey="$(printf '%s\n' "$listing" | awk -F: -v f="${SFETCH_PGP_KEY_ID%!}" '$1=="sub" {s=1;cap=$12;next} s && $1=="fpr" {if ($10==f && cap ~ /[sS]/) print $10; s=0}')"
-	[[ "$primary" == "$SFETCH_GPG_SIGNING_FINGERPRINT" && "$subkey" == "${SFETCH_PGP_KEY_ID%!}" ]] || {
-		tag_die 'signing subkey not on pinned primary'
+	export GNUPGHOME="$SFETCH_GPG_HOMEDIR"
+}
+
+tag_key_selector() {
+	tag_selector_shape || return 1
+	resolve_release_decernor ceremony || {
+		tag_die 'trusted Decernor identity/version check failed'
 		return 1
 	}
+	"$tag_root/scripts/release-verify-committed-anchors.sh" >/dev/null || return 1
+	[[ "$(awk '$1=="gpg" {print $2}' "$tag_root/keys/expected-fingerprints.txt")" == "$SFETCH_GPG_SIGNING_FINGERPRINT" ]] || {
+		tag_die 'operator fingerprint differs from committed anchor'
+		return 1
+	}
+	tag_bind_operator_gnupg_home || return 1
+	tag_fresh_verify_gnupg_home || return 1
+	if ! gpg --homedir "$TAG_VERIFY_GNUPGHOME" --batch --quiet --import \
+		"$tag_root/docs/security/release-signing-keys.asc" 2>/dev/null; then
+		tag_discard_verify_home
+		tag_die 'committed public pin failed to import'
+		return 1
+	fi
+	local listing primary subkey
+	if ! listing="$(gpg --homedir "$TAG_VERIFY_GNUPGHOME" --batch --with-colons --fingerprint --with-subkey-fingerprint --list-keys "${SFETCH_PGP_KEY_ID%!}" 2>/dev/null)"; then
+		tag_discard_verify_home
+		tag_die 'signing subkey unavailable'
+		return 1
+	fi
+	primary="$(printf '%s\n' "$listing" | awk -F: '$1=="pub" {p=1;next} p && $1=="fpr" {print $10;exit}')"
+	subkey="$(printf '%s\n' "$listing" | awk -F: -v f="${SFETCH_PGP_KEY_ID%!}" '$1=="sub" {s=1;cap=$12;next} s && $1=="fpr" {if ($10==f && cap ~ /[sS]/) print $10; s=0}')"
+	if [[ "$primary" != "$SFETCH_GPG_SIGNING_FINGERPRINT" || "$subkey" != "${SFETCH_PGP_KEY_ID%!}" ]]; then
+		tag_discard_verify_home
+		tag_die 'signing subkey not on pinned primary'
+		return 1
+	fi
+	tag_discard_verify_home
 }
 
 tag_expected_message() {
