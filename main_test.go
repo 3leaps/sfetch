@@ -850,6 +850,7 @@ func TestCLIFlagValidation(t *testing.T) {
 		name       string
 		args       []string
 		wantCode   int
+		wantStdout string // substring to match in stdout
 		wantStderr string // substring to match in stderr
 	}{
 		{
@@ -910,13 +911,19 @@ func TestCLIFlagValidation(t *testing.T) {
 			name:       "version flag returns success",
 			args:       []string{"--version"},
 			wantCode:   0,
-			wantStderr: "sfetch",
+			wantStdout: "sfetch",
 		},
 		{
 			name:       "version-extended flag returns success",
 			args:       []string{"--version-extended"},
 			wantCode:   0,
-			wantStderr: "go version",
+			wantStdout: "go version",
+		},
+		{
+			name:       "version subcommand returns success",
+			args:       []string{"version"},
+			wantCode:   0,
+			wantStdout: "sfetch",
 		},
 	}
 
@@ -929,6 +936,9 @@ func TestCLIFlagValidation(t *testing.T) {
 			code := run(tc.args, &stdout, &stderr)
 			if code != tc.wantCode {
 				t.Errorf("exit code: got %d want %d (stderr=%q)", code, tc.wantCode, stderr.String())
+			}
+			if tc.wantStdout != "" && !strings.Contains(stdout.String(), tc.wantStdout) {
+				t.Errorf("stdout: got %q, want substring %q", stdout.String(), tc.wantStdout)
 			}
 			if tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
 				t.Errorf("stderr: got %q, want substring %q", stderr.String(), tc.wantStderr)
@@ -1128,7 +1138,19 @@ func TestSigVerify(t *testing.T) {
 }
 
 func TestVersion(t *testing.T) {
-	// manual --version "sfetch dev"
+	t.Parallel()
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"--version"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("--version exit %d stderr=%q", code, stderr.String())
+	}
+	if got := stdout.String(); !strings.HasPrefix(got, "sfetch ") {
+		t.Fatalf("--version stdout: got %q", got)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("--version wrote stderr: %q", stderr.String())
+	}
 }
 
 func TestResolvePGPKey(t *testing.T) {
