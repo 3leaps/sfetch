@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -106,6 +105,11 @@ powershell.exe() {
 	fi
 	return 1
 }
+# Git Bash rewrites PROCESSOR_* at startup; apply the fixture after that.
+unset RUNNER_ARCH PROCESSOR_ARCHITECTURE PROCESSOR_ARCHITEW6432
+[ -n "${MOCK_RUNNER_ARCH:-}" ] && export RUNNER_ARCH="$MOCK_RUNNER_ARCH"
+[ -n "${MOCK_PROCESSOR_ARCHITECTURE:-}" ] && export PROCESSOR_ARCHITECTURE="$MOCK_PROCESSOR_ARCHITECTURE"
+[ -n "${MOCK_PROCESSOR_ARCHITEW6432:-}" ] && export PROCESSOR_ARCHITEW6432="$MOCK_PROCESSOR_ARCHITEW6432"
 source "$1"
 detect_platform
 `
@@ -118,16 +122,19 @@ detect_platform
 				"MOCK_UNAME_S",
 				"MOCK_UNAME_M",
 				"MOCK_POWERSHELL_OS",
+				"MOCK_RUNNER_ARCH",
+				"MOCK_PROCESSOR_ARCHITECTURE",
+				"MOCK_PROCESSOR_ARCHITEW6432",
 			)
 			cmd.Env = append(cmd.Env,
 				"MOCK_UNAME_S="+tt.unameS,
 				"MOCK_UNAME_M="+tt.unameM,
 				"MOCK_POWERSHELL_OS="+tt.mockPowerShellOS,
-				"PATH="+toolDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"MOCK_RUNNER_ARCH="+tt.env["RUNNER_ARCH"],
+				"MOCK_PROCESSOR_ARCHITECTURE="+tt.env["PROCESSOR_ARCHITECTURE"],
+				"MOCK_PROCESSOR_ARCHITEW6432="+tt.env["PROCESSOR_ARCHITEW6432"],
+				"PATH="+filepath.ToSlash(toolDir)+":"+os.Getenv("PATH"),
 			)
-			for k, v := range tt.env {
-				cmd.Env = append(cmd.Env, k+"="+v)
-			}
 
 			out, err := cmd.CombinedOutput()
 			if err != nil {
@@ -251,7 +258,18 @@ func filteredEnv(env []string, dropKeys ...string) []string {
 	filtered := make([]string, 0, len(env))
 	for _, entry := range env {
 		key, _, ok := strings.Cut(entry, "=")
-		if ok && slices.Contains(dropKeys, key) {
+		if !ok {
+			filtered = append(filtered, entry)
+			continue
+		}
+		drop := false
+		for _, d := range dropKeys {
+			if strings.EqualFold(key, d) {
+				drop = true
+				break
+			}
+		}
+		if drop {
 			continue
 		}
 		filtered = append(filtered, entry)
