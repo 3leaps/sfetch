@@ -483,7 +483,8 @@ fi
 pass "negative control: no remote write before create-draft"
 
 # Documented run-inspection command, using the field list from the checklist.
-fields="$(python3 - "$root/RELEASE_CHECKLIST.md" <<'PY'
+fields="$(
+	python3 - "$root/RELEASE_CHECKLIST.md" <<'PY'
 import pathlib, re, sys
 text = pathlib.Path(sys.argv[1]).read_text()
 m = re.search(r"gh run view[^\n]*--json ([A-Za-z,]+)", text)
@@ -517,11 +518,16 @@ for s in "${internal_scripts[@]}"; do
 done
 pass "fixture internal guards match the operator checkout"
 
-gpg_home="$scratch/gpg-home"
-mkdir -m 700 -p "$gpg_home"
-record_cleanup dir "$gpg_home"
+# GnuPG agent sockets need a short path even under the default macOS TMPDIR.
+# mktemp makes this home private; register_dir canonicalizes /tmp and records
+# it in this parent shell. All other fixture paths keep the normal TMPDIR.
+register_dir gpg_home /tmp/sft-walk-gpg.XXXXXX
+assert_no_symlink_ancestors "$gpg_home"
 gpg --homedir "$gpg_home" --batch --pinentry-mode loopback --passphrase '' \
-	--quick-gen-key '3 Leaps Infosec Team <infosec@3leaps.net>' ed25519 cert 1d >/dev/null 2>&1
+	--quick-gen-key '3 Leaps Infosec Team <infosec@3leaps.net>' ed25519 cert 1d >"$scratch/gpg-gen.log" 2>&1 || {
+	cat "$scratch/gpg-gen.log" >&2
+	fail "fixture GnuPG key generation failed"
+}
 primary="$(gpg --homedir "$gpg_home" --batch --with-colons --fingerprint --list-keys | awk -F: '$1=="fpr" {print $10;exit}')"
 gpg --homedir "$gpg_home" --batch --pinentry-mode loopback --passphrase '' \
 	--quick-add-key "$primary" ed25519 sign 1d >/dev/null 2>&1
@@ -646,37 +652,20 @@ run_make() {
 	shift 2
 	printf '%s\n' "$n" >"$SEQ_PHASE_FILE"
 	echo "make $target" >>"$seq_log"
-	# Preflight does not take SFETCH_RELEASE_TAG; its nested
-	# test-makefile-release-tag must see an unset tag.
-	if [[ "$target" == release-preflight ]]; then
-		env -u SFETCH_RELEASE_TAG make -C "$fixture" "$target" \
-			"SFETCH_DECERNOR_BIN=$decernor_bin" "$@"
-	else
-		make -C "$fixture" "$target" \
-			"SFETCH_RELEASE_TAG=v1.2.3" \
-			"SFETCH_TAG_MESSAGE_DIR=$msgdir" \
-			"SFETCH_MINISIGN_KEY=$scratch/minisign.key" \
-			"SFETCH_MINISIGN_PUB=$scratch/minisign.pub" \
-			"SFETCH_PGP_KEY_ID=${subkey}!" \
-			"SFETCH_GPG_HOMEDIR=$gpg_home" \
-			"SFETCH_GPG_SIGNING_FINGERPRINT=$primary" \
-			"SFETCH_DECERNOR_BIN=$decernor_bin" \
-			"SFETCH_TAGGER_NAME=3 Leaps Infosec Team" \
-			"SFETCH_TAGGER_EMAIL=infosec@3leaps.net" \
-			"RELEASE_RUN_ID=11" \
-			"RELEASE_RUN_ATTEMPT=1" \
-			"$@"
-	fi
+	make -C "$fixture" "$target" "$@"
 	if [[ "${SFETCH_WALKTHROUGH_FAIL_AT:-}" == "$target" ]]; then
 		fail "forced failure at $target"
 	fi
 }
 
 : >"$seq_log"
-# Preflight is a clean-tree check; it must not inherit the later tag input.
-unset SFETCH_RELEASE_TAG || true
+# Exercise the documented exported input, then the no-tag environment.
+# Only the second probe clears it, in a subshell; the ceremony keeps its tag.
 run_make 1 release-preflight
-export SFETCH_RELEASE_TAG=v1.2.3
+(
+	unset SFETCH_RELEASE_TAG
+	run_make 1 release-preflight
+)
 run_make 1 release-prepare-tag-message
 [ -f "$msgdir/message.txt" ] || fail "make release-prepare-tag-message must write message.txt"
 assert_no_symlink_ancestors "$msgdir"
@@ -712,9 +701,6 @@ run_make 7 release-export-keys
 run_make 8 release-verify
 run_make 9 release-notes
 run_make 9 release-upload
-# Publish requires release-notes-vX.Y.Z.md as a draft *asset*. upload-release-assets
-# sets the body via --notes-file; provenance is the script that uploads the file.
-run_make 9 release-upload-provenance
 run_make 10 release-publish
 if make -C "$fixture" update-scoop-manifest \
 	"SFETCH_RELEASE_TAG=v1.2.3" \

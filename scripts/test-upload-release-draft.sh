@@ -31,10 +31,16 @@ cat >"$WORK/bin/gh" <<'SH'
 printf '%s\n' "$*" >>"${GH_TRACE}"
 case "$*" in
   *'release view'*'isDraft'*)
-    printf '{"isDraft":false}\n'
+    printf '%s\n' "${FIXTURE_DRAFT:-false}"
     ;;
   *'release view'*)
     printf '{"isDraft":false,"tagName":"v0.0.0"}\n'
+    ;;
+  'release upload '*)
+    shift 3
+    for asset in "$@"; do
+      [[ "$asset" == --* ]] || cp "$asset" "${FIXTURE_ASSET_DIR:?}/"
+    done
     ;;
   *)
     exit 0
@@ -75,5 +81,15 @@ if grep -q 'release upload' "$GH_TRACE"; then
     fail "provenance upload must not clobber before the draft check"
 fi
 pass "provenance upload refuses a non-draft release without --clobber"
+
+# Normal upload must deliver the notes as an asset as well as the body.
+# Publish's real exact-set and byte checks run in the ceremony walkthrough.
+mkdir -p "$WORK/assets"
+: >"$GH_TRACE"
+FIXTURE_DRAFT=true FIXTURE_ASSET_DIR="$WORK/assets" "$UPLOAD" v0.0.0 "$WORK/dist" >/dev/null
+cmp "$WORK/dist/release-notes-v0.0.0.md" "$WORK/assets/release-notes-v0.0.0.md" ||
+    fail "normal upload must upload the exact notes file as a draft asset"
+grep -q -- '--notes-file .*--draft=true' "$GH_TRACE" || fail "notes body must preserve draft state"
+pass "normal upload delivers the notes asset and body while preserving draft state"
 
 echo "[ok] release-upload stays draft"

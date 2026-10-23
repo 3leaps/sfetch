@@ -52,6 +52,15 @@ assert_gone() {
 		[[ ! -e "$path" ]] || fail "leaked $kind $path"
 	done <"$record"
 	[[ -d "$decoy" ]] || fail "cleanup removed the unrelated decoy $decoy"
+	# The short GnuPG home must be independently registered, including on Linux
+	# where putting it under scratch would not always exceed the socket limit.
+	python3 - "$record" <<'PYGPG' || fail "missing canonical short GnuPG home in parent registry"
+import pathlib, sys
+paths = [pathlib.Path(line[4:]) for line in pathlib.Path(sys.argv[1]).read_text().splitlines() if line.startswith("dir ")]
+homes = [p for p in paths if p.name.startswith("sft-walk-gpg.")]
+if len(homes) != 1 or homes[0].parent != pathlib.Path("/tmp").resolve():
+    raise SystemExit("expected one independent GnuPG home under canonical /tmp")
+PYGPG
 	python3 - "$before" "$decoy" <<'PY' || fail "walkthrough leaked tmp dirs outside its registry"
 import glob, pathlib, sys
 before = set(pathlib.Path(sys.argv[1]).read_text().splitlines()) - {""}

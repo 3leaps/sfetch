@@ -33,6 +33,34 @@ then
     echo 'error: verify-pinned-tag.sh must call Decernor before the listing check' >&2
     exit 1
 fi
+# Exercise the actual status predicate under mawk when installed, otherwise
+# the system awk. This catches interval-regex regressions without a GPG mock.
+python3 - "$root/scripts/verify-pinned-tag.sh" <<'PYAWK'
+from pathlib import Path
+import re, shutil, subprocess, sys
+text = Path(sys.argv[1]).read_text()
+program = re.search(r"awk -v primary=.*? '\n(.*?)\n' \"\$keyring/status\"", text, re.S).group(1)
+primary, subkey = "A" * 40, "B" * 40
+status = f"[GNUPG:] GOODSIG fixture\n[GNUPG:] VALIDSIG {subkey} {primary}\n"
+engines = dict.fromkeys(filter(None, (shutil.which("awk"), shutil.which("mawk"))))
+cases = [("", True), (subkey + "!", True), (subkey, False),
+         (subkey[:-1] + "!", False), (subkey + "B!", False),
+         (subkey.lower() + "!", False), ("G" * 40 + "!", False),
+         (primary + "!", False), ("C" * 40 + "!", False)]
+for engine in engines:
+    def accepts(selector, data=status):
+        return subprocess.run([engine, "-v", "primary=" + primary, "-v",
+            "permitted=" + subkey, "-v", "selector=" + selector, program],
+            input=data, text=True).returncode == 0
+    for selector, expected in cases:
+        if accepts(selector) != expected:
+            raise SystemExit(f"{engine}: unexpected selector result: {selector!r}")
+    for bad in (status + "[GNUPG:] REVKEYSIG fixture\n", status + status,
+                status.replace(subkey, primary), status.replace(subkey, "C" * 40)):
+        if accepts(subkey + "!", bad):
+            raise SystemExit(f"{engine}: signer/status restriction failed")
+    print(f"[ok] {engine}: selector length, alphabet, exact subkey and signature controls")
+PYAWK
 scratch="$(mktemp -d)"
 cleanup() {
     local home

@@ -6,6 +6,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# One private, this-run directory owns every output, including early failures.
+scratch_dl="$(mktemp -d "${TMPDIR:-/tmp}/sft-make-dl.XXXXXX")"
+trap 'rm -rf "$scratch_dl"' EXIT
+
 fail() {
     echo "FAIL: $*" >&2
     exit 1
@@ -24,43 +28,41 @@ grep -q 'SFETCH_RELEASE_TAG' Makefile || fail "Makefile must consume SFETCH_RELE
 pass "Makefile does not assign RELEASE_TAG"
 
 # Command-line RELEASE_TAG must not reach a tag-consuming target.
-if make -s release-notes RELEASE_TAG=v0.0.0 >/tmp/sft-make-rt.out 2>&1; then
+if make -s release-notes RELEASE_TAG=v0.0.0 >"$scratch_dl/sft-make-rt.out" 2>&1; then
     fail "make release-notes RELEASE_TAG=... must be refused"
 fi
-grep -qi 'RELEASE_TAG is not accepted' /tmp/sft-make-rt.out ||
-    fail "refusal must name RELEASE_TAG (log: $(cat /tmp/sft-make-rt.out))"
+grep -qi 'RELEASE_TAG is not accepted' "$scratch_dl/sft-make-rt.out" ||
+    fail "refusal must name RELEASE_TAG (log: $(cat "$scratch_dl/sft-make-rt.out"))"
 pass "command-line RELEASE_TAG is refused"
 
 # Missing SFETCH_RELEASE_TAG must fail before side effects.
-if make -s release-notes >/tmp/sft-make-missing.out 2>&1; then
+if env -u SFETCH_RELEASE_TAG -u RELEASE_TAG make -s release-notes >"$scratch_dl/sft-make-missing.out" 2>&1; then
     fail "make release-notes without SFETCH_RELEASE_TAG must be refused"
 fi
-grep -q 'SFETCH_RELEASE_TAG required' /tmp/sft-make-missing.out ||
-    fail "missing-tag refusal (log: $(cat /tmp/sft-make-missing.out))"
+grep -q 'SFETCH_RELEASE_TAG required' "$scratch_dl/sft-make-missing.out" ||
+    fail "missing-tag refusal (log: $(cat "$scratch_dl/sft-make-missing.out"))"
 pass "missing SFETCH_RELEASE_TAG is refused"
 
 # Tag must equal v$(VERSION) and the check runs before other prerequisites.
 file_version="$(tr -d ' \n' <VERSION)"
 unset RELEASE_TAG || true
-if make -s release-notes SFETCH_RELEASE_TAG=v0.0.0 >/tmp/sft-make-ver.out 2>&1; then
+if make -s release-notes SFETCH_RELEASE_TAG=v0.0.0 >"$scratch_dl/sft-make-ver.out" 2>&1; then
     fail "make release-notes with a tag that is not v$(VERSION) must be refused"
 fi
-grep -q "must equal v${file_version}" /tmp/sft-make-ver.out ||
-    fail "VERSION mismatch refusal (log: $(cat /tmp/sft-make-ver.out))"
+grep -q "must equal v${file_version}" "$scratch_dl/sft-make-ver.out" ||
+    fail "VERSION mismatch refusal (log: $(cat "$scratch_dl/sft-make-ver.out"))"
 pass "SFETCH_RELEASE_TAG must equal v\$(VERSION)"
 
 # Empty RELEASE_TAG= is still a defined input (make origin=command line).
-if make -s release-notes RELEASE_TAG= "SFETCH_RELEASE_TAG=v${file_version}" >/tmp/sft-make-empty-rt.out 2>&1; then
+if make -s release-notes RELEASE_TAG= "SFETCH_RELEASE_TAG=v${file_version}" >"$scratch_dl/sft-make-empty-rt.out" 2>&1; then
     fail "make RELEASE_TAG= must be refused"
 fi
-grep -qi 'RELEASE_TAG is not accepted' /tmp/sft-make-empty-rt.out ||
-    fail "empty RELEASE_TAG= refusal (log: $(cat /tmp/sft-make-empty-rt.out))"
+grep -qi 'RELEASE_TAG is not accepted' "$scratch_dl/sft-make-empty-rt.out" ||
+    fail "empty RELEASE_TAG= refusal (log: $(cat "$scratch_dl/sft-make-empty-rt.out"))"
 pass "empty RELEASE_TAG= is refused"
 
 # H4: actually run release-download with a stubbed fetch script. make -n
 # alone does not prove the recipe runs.
-scratch_dl="$(mktemp -d "${TMPDIR:-/tmp}/sft-make-dl.XXXXXX")"
-trap 'rm -rf "$scratch_dl" /tmp/sft-make-rt.out /tmp/sft-make-missing.out /tmp/sft-make-ver.out /tmp/sft-make-empty-rt.out /tmp/sft-make-scoop.out /tmp/sft-make-scoop.err' EXIT
 mkdir -p "$scratch_dl/scripts"
 cp "$ROOT/VERSION" "$scratch_dl/VERSION"
 stub_log="$scratch_dl/called.log"
@@ -74,15 +76,15 @@ SH
 chmod +x "$scratch_dl/scripts/release-fetch-ci-artifacts.sh"
 if ! STUB_LOG="$stub_log" make -C "$scratch_dl" -f "$ROOT/Makefile" release-download \
     "SFETCH_RELEASE_TAG=v${file_version}" \
-    >/tmp/sft-make-dl.out 2>/tmp/sft-make-dl.err; then
-    fail "make release-download with stub fetch failed: $(cat /tmp/sft-make-dl.err)"
+    >"$scratch_dl/sft-make-dl.out" 2>"$scratch_dl/sft-make-dl.err"; then
+    fail "make release-download with stub fetch failed: $(cat "$scratch_dl/sft-make-dl.err")"
 fi
 [ -s "$stub_log" ] || fail "release-download must invoke release-fetch-ci-artifacts.sh (make -n is not enough)"
 grep -q "v${file_version}" "$stub_log" ||
     fail "stub fetch must receive the release tag (got: $(cat "$stub_log"))"
 grep -q 'dist/release' "$stub_log" ||
     fail "stub fetch must receive dist/release (got: $(cat "$stub_log"))"
-if grep -q 'download-release-assets.sh' /tmp/sft-make-dl.out /tmp/sft-make-dl.err "$stub_log"; then
+if grep -q 'download-release-assets.sh' "$scratch_dl/sft-make-dl.out" "$scratch_dl/sft-make-dl.err" "$stub_log"; then
     fail "release-download still calls download-release-assets.sh"
 fi
 pass "release-download invokes CI-artifact fetch"
@@ -142,12 +144,12 @@ if 'Skipping Scoop' in body:
 PY
 missing_bucket="$scratch_dl/missing-scoop"
 if make -s update-scoop-manifest SCOOP_BUCKET_DIR="$missing_bucket" \
-	>/tmp/sft-make-scoop.out 2>/tmp/sft-make-scoop.err; then
+    >"$scratch_dl/sft-make-scoop.out" 2>"$scratch_dl/sft-make-scoop.err"; then
 	fail "make update-scoop-manifest must fail closed when the sibling is missing"
 fi
-grep -qi 'not found' /tmp/sft-make-scoop.err ||
-	fail "missing scoop-bucket refusal (log: $(cat /tmp/sft-make-scoop.err /tmp/sft-make-scoop.out))"
-if grep -qi 'Skipping Scoop' /tmp/sft-make-scoop.out /tmp/sft-make-scoop.err; then
+grep -qi 'not found' "$scratch_dl/sft-make-scoop.err" ||
+    fail "missing scoop-bucket refusal (log: $(cat "$scratch_dl/sft-make-scoop.err" "$scratch_dl/sft-make-scoop.out"))"
+if grep -qi 'Skipping Scoop' "$scratch_dl/sft-make-scoop.out" "$scratch_dl/sft-make-scoop.err"; then
 	fail "update-scoop-manifest must not skip a missing sibling"
 fi
 pass "update-scoop-manifest is fail-closed and not part of release-upload"

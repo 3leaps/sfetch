@@ -27,7 +27,7 @@ fi
 # Assumes release artifacts were built in CI and downloaded locally.
 # This script only re-uploads/clobbers assets on GitHub.
 shopt -s nullglob
-ARTIFACTS=("$DIR"/sfetch_* "$DIR"/SHA256SUMS "$DIR"/SHA512SUMS "$DIR"/install-sfetch.sh)
+ARTIFACTS=("$DIR"/sfetch_* "$DIR"/SHA256SUMS "$DIR"/SHA512SUMS "$DIR"/install-sfetch.sh "$NOTES_FILE")
 # Build signature list from globs only; filter to existing files.
 # Include installer minisig explicitly (not covered by SHA*SUMS.* globs).
 SIG_CANDIDATES=(

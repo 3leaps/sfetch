@@ -16,7 +16,7 @@ elif [[ $# -gt 0 ]]; then
 fi
 tag="${SFETCH_RELEASE_TAG:-}"
 [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || die 'canonical release tag required'
-object="$(git rev-parse "refs/tags/$tag" 2> /dev/null)" || die 'tag absent'
+object="$(git rev-parse "refs/tags/$tag" 2>/dev/null)" || die 'tag absent'
 [[ "$(git cat-file -t "$object")" == tag ]] || die 'annotated tag required'
 target="$(git rev-parse "${object}^{}")"
 [[ "$published" == 1 || "$target" == "$(git rev-parse HEAD)" ]] || die 'tag target must be HEAD'
@@ -30,7 +30,7 @@ committed() {
     local path="$1" out="$2" mode
     mode="$(git ls-tree "$target" -- "$path" | awk '{print $1}')"
     [[ "$mode" == 100644 || "$mode" == 100755 ]] || die "committed $path required in the tagged commit"
-    git cat-file blob "$target:$path" > "$out"
+    git cat-file blob "$target:$path" >"$out"
     [[ -s "$out" ]] || die "committed $path is empty"
 }
 pin="$keyring/release-signing-keys.asc"
@@ -50,7 +50,7 @@ resolve_release_decernor ceremony || die 'trusted Decernor identity/version chec
     --anchors "$anchors" \
     --anchors-ndjson "$anchors_ndjson" \
     --gpg "$pin" --minisign "$minisign_pin" >/dev/null || die 'Decernor rejected committed pin and anchors'
-"$(dirname "$0")/validate-release-anchors.sh" "$anchors" "$pin" > /dev/null || die 'committed pin and anchors disagree'
+"$(dirname "$0")/validate-release-anchors.sh" "$anchors" "$pin" >/dev/null || die 'committed pin and anchors disagree'
 tagger="$(git cat-file tag "$object" | sed -n 's/^tagger \(.*\) [0-9][0-9]* [+-][0-9][0-9][0-9][0-9]$/\1/p' | head -1)"
 [[ "$tagger" == "$(cat "$keyring/tagger-identity.txt")" ]] || die 'infosec tagger required'
 primary="$(awk '$1=="gpg" {print $2}' "$anchors")"
@@ -68,7 +68,7 @@ signing_subkeys="$(GNUPGHOME="$keyring/home" gpg --batch --with-colons --with-su
     die 'pin must hold exactly one signing subkey'
 permitted="$signing_subkeys"
 [[ "$permitted" =~ ^[0-9A-F]{40}$ && "$permitted" != "$primary" ]] || die 'pinned signing subkey malformed'
-GNUPGHOME="$keyring/home" git -c gpg.program=gpg verify-tag --raw "$object" > "$keyring/status" 2>&1 || {
+GNUPGHOME="$keyring/home" git -c gpg.program=gpg verify-tag --raw "$object" >"$keyring/status" 2>&1 || {
     awk '$1=="[GNUPG:]" {print "signature status:", $2}' "$keyring/status" >&2
     die 'tag signature invalid under pin'
 }
@@ -80,7 +80,7 @@ awk -v primary="$primary" -v permitted="$permitted" -v selector="${SFETCH_PGP_KE
   $1=="[GNUPG:]" && $2 ~ /^(EXPKEYSIG|EXPSIG|REVKEYSIG|KEYREVOKED|BADSIG|ERRSIG)$/ {bad++}
   END {
     if (bad || good!=1 || valid!=1 || signer_primary!=primary || subkey==primary || subkey!=permitted) exit 1
-    if (selector!="" && (selector !~ /^[0-9A-F]{40}!$/ || subkey "!" != selector)) exit 1
+    if (selector!="" && (length(selector)!=41 || selector !~ /^[0-9A-F]+!$/ || subkey "!" != selector)) exit 1
   }
 ' "$keyring/status" || die 'signing subkey, expiry or revocation check failed'
 echo '[ok] signed tag verified against the public pin committed in the tagged commit'
