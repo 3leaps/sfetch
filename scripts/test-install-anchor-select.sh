@@ -17,22 +17,43 @@ pass() { echo "PASS: $*"; }
 WORK=""
 GPG_HOMES=()
 cleanup_anchor() {
-    local h
-    for h in "${GPG_HOMES[@]+"${GPG_HOMES[@]}"}"; do
+    local h status=0
+    local recorded=("${GPG_HOMES[@]+"${GPG_HOMES[@]}"}")
+    if [ "${GPG_EXPECT_HOMES:-0}" = 1 ] && [ "${#recorded[@]}" -eq 0 ]; then
+        echo "FAIL: parent GnuPG home registry empty after homes were created" >&2
+        status=1
+    fi
+    for h in "${recorded[@]}"; do
         [ -n "$h" ] || continue
         gpgconf --homedir "$h" --kill all >/dev/null 2>&1 || true
         rm -rf "$h"
     done
     rm -f "$SRC_COPY"
     rm -rf "${WORK:-}"
+    for h in "${recorded[@]}"; do
+        [ -n "$h" ] || continue
+        if [ -e "$h" ]; then
+            echo "FAIL: GnuPG home still exists after cleanup: $h" >&2
+            status=1
+        fi
+    done
+    return "$status"
 }
 new_gpg_home() {
+    local dest="${1:?new_gpg_home dest var}"
     local d
     d="$(mktemp -d /tmp/sfetch-gpg.XXXXXX)" || fail "mktemp GnuPG home"
     chmod 700 "$d" || fail "chmod GnuPG home"
     GPG_HOMES+=("$d")
-    printf '%s' "$d"
+    GPG_EXPECT_HOMES=1
+    printf -v "$dest" '%s' "$d"
 }
+if grep -nE '\$\(new_gpg_home\)' "${BASH_SOURCE[0]}"; then
+    fail "new_gpg_home must be called in the parent shell, not via command substitution"
+fi
+if grep -nE 'rm[[:space:]]+-rf[[:space:]]+["'\'']?/tmp/sfetch-gpg' "${BASH_SOURCE[0]}"; then
+    fail "must not broadly remove /tmp/sfetch-gpg.*"
+fi
 gpg_run() {
     local log="${WORK:-/tmp}/gpg-fixture.err"
     if ! "$@" >"$log" 2>&1; then
@@ -200,7 +221,8 @@ if command -v minisign >/dev/null 2>&1; then
 
     # GPG route (minisign not required): the fingerprint pin follows the tag.
     if command -v gpg >/dev/null 2>&1; then
-        GH="$(new_gpg_home)"
+        new_gpg_home GH
+        [ "${#GPG_HOMES[@]}" -ge 1 ] || fail "parent GnuPG home registry empty after new_gpg_home"
         gpg_gen() {
             gpg_run gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
                 --quick-gen-key "$1" ed25519 sign never
@@ -366,7 +388,7 @@ if command -v minisign >/dev/null 2>&1; then
                     --quick-add-uid "$k" "${i}${pad} <pad${i}@test.invalid>"
             done
         done
-        PROBE_HOME="$(new_gpg_home)"
+        new_gpg_home PROBE_HOME
         big="$(gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' --armor \
             --export-secret-keys "$FPR_CUR" | gpg --homedir "$PROBE_HOME" --batch --with-colons \
             --import-options show-only --import 2>/dev/null | wc -c)" || true
@@ -430,7 +452,7 @@ SHIM
         # Expired pinned keys must not verify even under --trust-model always.
         # Sign first, then expire, then wait: setting seconds=1 *after* the
         # wait re-validates the key and the installer would correctly accept it.
-        EXP_HOME="$(new_gpg_home)"
+        new_gpg_home EXP_HOME
         gpg_run gpg --homedir "$EXP_HOME" --batch --pinentry-mode loopback --passphrase '' \
             --quick-gen-key 'exp@test.invalid' ed25519 sign never
         FPR_EXP="$(gpg --homedir "$EXP_HOME" --with-colons --fingerprint exp@test.invalid |
@@ -445,7 +467,7 @@ SHIM
         sleep 2
         gpg --homedir "$EXP_HOME" --batch --armor --export exp@test.invalid \
             >"$d_exp/sfetch-release-signing-key.asc"
-        EXP_PROBE="$(new_gpg_home)"
+        new_gpg_home EXP_PROBE
         gpg_run gpg --homedir "$EXP_PROBE" --batch --import "$d_exp/sfetch-release-signing-key.asc"
         set +e
         probe_status=$(gpg --homedir "$EXP_PROBE" --batch --no-tty --trust-model always \

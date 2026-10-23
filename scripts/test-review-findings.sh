@@ -301,4 +301,56 @@ grep -qi 'synthetic' "$root/testdata/gpg-mutants/README.md" ||
 grep -q '00 extra' "$root/testdata/gpg-mutants/validsig-2.5.status" ||
 	fail "L2: keep the synthetic trailing fields for the field-12 test"
 
+# M3-FU: parent-shell GnuPG home registration; never glob-remove /tmp/sfetch-gpg.*.
+for suite in "$root/scripts/test-install-gpg-mutants.sh" "$root/scripts/test-install-anchor-select.sh"; do
+	grep -nE '\$\(new_gpg_home\)' "$suite" &&
+		fail "M3-FU: $suite still captures new_gpg_home with command substitution"
+	grep -q 'printf -v "$dest"' "$suite" ||
+		fail "M3-FU: $suite must assign the dest var in the parent shell"
+	grep -nE 'rm[[:space:]]+-rf[[:space:]]+["'\'']?/tmp/sfetch-gpg' "$suite" &&
+		fail "M3-FU: $suite must not broadly remove /tmp/sfetch-gpg.*"
+done
+
+# M4 remainder: attempt (not runAttempt), REST path, message step before tag.
+for doc in "$root/RELEASE_CHECKLIST.md" "$root/README.md" "$root/docs/security.md"; do
+	grep -q 'release-prepare-tag-message' "$doc" ||
+		fail "M4: $doc must run make release-prepare-tag-message before tagging"
+	python3 - "$doc" <<'PY' || fail "M4: ${doc} message step must precede release-tag"
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+msg = text.find("release-prepare-tag-message")
+tag = text.find("release-tag")
+if msg < 0 or tag < 0 or not (msg < tag):
+    raise SystemExit("release-prepare-tag-message must appear before release-tag")
+PY
+done
+python3 - "$root/RELEASE_CHECKLIST.md" "$root/scripts/test-release-walkthrough.sh" <<'PY' || fail "M4: run-inspection fields and walkthrough Make entrypoints"
+from pathlib import Path
+import re, sys
+checklist, walk = Path(sys.argv[1]).read_text(), Path(sys.argv[2]).read_text()
+if re.search(r"--json[^\n]*runAttempt", checklist):
+    raise SystemExit("checklist gh run view still requests runAttempt")
+if not re.search(r"gh run view[^\n]*--json conclusion,headSha,status,attempt,event", checklist):
+    raise SystemExit("checklist gh run view fields must be conclusion,headSha,status,attempt,event")
+if re.search(r"gh run view[^\n]*--json[^\n]*\bpath\b", checklist):
+    raise SystemExit("gh run view must not request path")
+if "actions/runs/" not in checklist or "attempts/" not in checklist:
+    raise SystemExit("checklist must read workflow path from the REST attempt resource")
+if re.search(r"true\s+#", walk):
+    raise SystemExit("walkthrough still has true placeholder phases")
+if "make release-create-draft" not in walk or "make release-prepare-tag-message" not in walk:
+    raise SystemExit("walkthrough must invoke make release-prepare-tag-message and make release-create-draft")
+mut = checklist.replace("status,attempt,event", "status,runAttempt,event,path")
+if "runAttempt" not in mut:
+    raise SystemExit("mutation did not restore runAttempt")
+if re.search(r"gh run view[^\n]*--json conclusion,headSha,status,attempt,event", mut) and "runAttempt" not in mut.split("gh run view", 1)[-1].split("\n", 1)[0]:
+    raise SystemExit("mutation checker did not observe the restored field list")
+dropped = checklist.replace("release-prepare-tag-message", "")
+if dropped.find("release-prepare-tag-message") >= 0:
+    raise SystemExit("mutation did not drop the message step")
+if dropped.find("release-tag") < 0:
+    raise SystemExit("dropped copy lost release-tag")
+PY
+
 echo "[ok] review-finding static guards"

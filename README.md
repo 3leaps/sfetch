@@ -314,8 +314,10 @@ export RELEASE_RUN_ID=<release.yml run id>
 export RELEASE_RUN_ATTEMPT=<successful attempt>
 
 make release-preflight
+make release-prepare-tag-message
 make release-tag && make release-push-tag
-# select the successful release.yml run+attempt for this tag (see checklist)
+# inspect run: gh run view "$RELEASE_RUN_ID" --json conclusion,headSha,status,attempt,event
+# workflow path: gh api repos/3leaps/sfetch/actions/runs/$RELEASE_RUN_ID/attempts/$RELEASE_RUN_ATTEMPT --jq .path
 make release-download
 make release-checksums
 make release-create-draft    # after checksums, before signing
