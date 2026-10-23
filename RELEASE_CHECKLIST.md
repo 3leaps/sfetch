@@ -40,6 +40,7 @@ Why this matters: after verified publish, `make update-scoop-manifest` writes th
   ```bash
   export SFETCH_RELEASE_TAG=v$(cat VERSION)
   make release-preflight
+  make release-prepare-tag-message   # writes $SFETCH_TAG_MESSAGE_DIR/message.txt
   make release-tag          # local signed annotated tag; throwaway tests never use the operator key
   make release-push-tag     # publish the signed tag
   ```
@@ -82,11 +83,15 @@ installer.
 
 Tag CI may be re-run. Artifacts belong to the **latest** attempt of a run, so
 name a completed **success** attempt of `.github/workflows/release.yml` whose
-`head_branch` is `$SFETCH_RELEASE_TAG` and `head_sha` is the tagged commit:
+`head_branch` is `$SFETCH_RELEASE_TAG` and `head_sha` is the tagged commit.
+`gh run view` exposes that attempt as `attempt` (not `runAttempt`). It does
+not return the workflow `path`; read the path from the REST attempt resource
+(the same mapping `release-fetch-ci-artifacts.sh` uses):
 
 ```bash
 gh run list --repo 3leaps/sfetch --workflow release.yml --branch "$SFETCH_RELEASE_TAG"
-gh run view "$RELEASE_RUN_ID" --repo 3leaps/sfetch --json conclusion,headSha,status,runAttempt,event,path
+gh run view "$RELEASE_RUN_ID" --repo 3leaps/sfetch --json conclusion,headSha,status,attempt,event
+gh api "repos/3leaps/sfetch/actions/runs/${RELEASE_RUN_ID}/attempts/${RELEASE_RUN_ATTEMPT}" --jq .path
 ```
 
 If a later attempt exists, set `RELEASE_RUN_ATTEMPT` to that attempt. The fetch
@@ -97,6 +102,7 @@ script refuses a non-success, mismatched commit, or a run that has moved on.
 1. **Preflight, message, tag** (after VERSION/changelog prep on `main`)
    ```bash
    make release-preflight
+   make release-prepare-tag-message   # required; local-tag refuses a missing message.txt
    make release-tag          # local signed annotated tag; throwaway tests never use the operator key
    make release-push-tag     # publish the signed tag
    ```

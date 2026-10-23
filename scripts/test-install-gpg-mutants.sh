@@ -33,22 +33,43 @@ command -v python3 >/dev/null 2>&1 || fail "python3 required for mutant applicat
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/sft-mutants.XXXXXX")"
 GPG_HOMES=()
 cleanup_mutants() {
-    local h
-    for h in "${GPG_HOMES[@]+"${GPG_HOMES[@]}"}"; do
+    local h status=0
+    local recorded=("${GPG_HOMES[@]+"${GPG_HOMES[@]}"}")
+    if [ "${GPG_EXPECT_HOMES:-0}" = 1 ] && [ "${#recorded[@]}" -eq 0 ]; then
+        echo "FAIL: parent GnuPG home registry empty after homes were created" >&2
+        status=1
+    fi
+    for h in "${recorded[@]}"; do
         [ -n "$h" ] || continue
         gpgconf --homedir "$h" --kill all >/dev/null 2>&1 || true
         rm -rf "$h"
     done
     rm -rf "$WORK"
+    for h in "${recorded[@]}"; do
+        [ -n "$h" ] || continue
+        if [ -e "$h" ]; then
+            echo "FAIL: GnuPG home still exists after cleanup: $h" >&2
+            status=1
+        fi
+    done
+    return "$status"
 }
 trap cleanup_mutants EXIT
 new_gpg_home() {
+    local dest="${1:?new_gpg_home dest var}"
     local d
     d="$(mktemp -d /tmp/sfetch-gpg.XXXXXX)" || fail "mktemp GnuPG home"
     chmod 700 "$d" || fail "chmod GnuPG home"
     GPG_HOMES+=("$d")
-    printf '%s' "$d"
+    GPG_EXPECT_HOMES=1
+    printf -v "$dest" '%s' "$d"
 }
+if grep -nE '\$\(new_gpg_home\)' "${BASH_SOURCE[0]}"; then
+    fail "new_gpg_home must be called in the parent shell, not via command substitution"
+fi
+if grep -nE 'rm[[:space:]]+-rf[[:space:]]+["'\'']?/tmp/sfetch-gpg' "${BASH_SOURCE[0]}"; then
+    fail "must not broadly remove /tmp/sfetch-gpg.*"
+fi
 gpg_run() {
     local log="$WORK/gpg-fixture.err"
     if ! "$@" >"$log" 2>&1; then
@@ -103,7 +124,8 @@ CUR_PUB="$(sed -n 2p "$WORK/cur.pub")"
 OLD_PUB="$(sed -n 2p "$WORK/old.pub")"
 printf 'abc  sfetch_linux_amd64.tar.gz\n' >"$WORK/SHA256SUMS"
 
-GH="$(new_gpg_home)"
+new_gpg_home GH
+[ "${#GPG_HOMES[@]}" -ge 1 ] || fail "parent GnuPG home registry empty after new_gpg_home"
 gpg_gen() {
     gpg_run gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
         --quick-gen-key "$1" ed25519 sign never
@@ -124,7 +146,7 @@ for i in $(seq 1 100); do
     gpg_run gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' \
         --quick-add-uid "$FPR_CUR" "${i}${pad} <pad${i}@test.invalid>"
 done
-PROBE_HOME="$(new_gpg_home)"
+new_gpg_home PROBE_HOME
 big="$(gpg --homedir "$GH" --batch --pinentry-mode loopback --passphrase '' --armor \
     --export-secret-keys "$FPR_CUR" | gpg --homedir "$PROBE_HOME" --batch --with-colons \
     --import-options show-only --import 2>/dev/null | wc -c)" || true
