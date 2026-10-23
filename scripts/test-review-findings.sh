@@ -341,6 +341,26 @@ if re.search(r"true\s+#", walk):
     raise SystemExit("walkthrough still has true placeholder phases")
 if "make release-create-draft" not in walk or "make release-prepare-tag-message" not in walk:
     raise SystemExit("walkthrough must invoke make release-prepare-tag-message and make release-create-draft")
+if re.search(r"^install_logger\s*\(", walk, re.M):
+    raise SystemExit("walkthrough still replaces internal scripts with install_logger")
+if "pwd -P" not in walk:
+    raise SystemExit("walkthrough must canonicalize the fixture root with pwd -P")
+if 'printf -v "$dest"' not in walk or "CLEANUP_DIRS+=" not in walk or "trap cleanup EXIT" not in walk:
+    raise SystemExit("walkthrough must register temps in the parent shell and remove them on EXIT")
+if re.search(r'rm\s+-rf\s+["\']?/tmp/sfetch', walk) or re.search(r"rm\s+-rf\s+['\"]?/tmp/sft-walk\*", walk):
+    raise SystemExit("walkthrough must not glob-remove /tmp/sfetch-* or /tmp/sft-walk*")
+for name in (
+    "release-verify-committed-anchors.sh",
+    "release-inspect-tag-ruleset.sh",
+    "release-tag.sh",
+    "release-push-tag.sh",
+    "release-verify-published-tag.sh",
+    "release-fetch-ci-artifacts.sh",
+    "verify-signatures.sh",
+    "release-publish.sh",
+):
+    if f'cat >"$fixture/scripts/{name}"' in walk or f"install_logger \"$fixture/scripts/{name}\"" in walk:
+        raise SystemExit(f"walkthrough still stubs internal {name}")
 mut = checklist.replace("status,attempt,event", "status,runAttempt,event,path")
 if "runAttempt" not in mut:
     raise SystemExit("mutation did not restore runAttempt")
