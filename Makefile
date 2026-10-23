@@ -67,7 +67,7 @@ CORPUS_DEST ?= test-corpus
 .PHONY: release-prepare-tag-message release-tag release-push-tag release-verify-tag release-verify-remote-tag
 .PHONY: release-create-draft release-publish release-insert-anchors release-export-pin release-validate-pin
 .PHONY: version-check version-set version-patch version-minor version-major
-.PHONY: print-sfetch-version golangci-lint-install test-release-verify-checksums test-release-verify-signatures test-release-workflow-draft test-bootstrap-sfetch-verified test-bootstrap-range-release test-install-anchor-select test-install-gpg-mutants test-gpg-home-cleanup test-goneat-key-map test-makefile-release-tag test-upload-release-draft test-version-ldflags test-release-origin test-release-walkthrough require-release-tag
+.PHONY: print-sfetch-version golangci-lint-install test-release-verify-checksums test-release-verify-signatures test-release-workflow-draft test-bootstrap-sfetch-verified test-bootstrap-range-release test-install-anchor-select test-install-gpg-mutants test-gpg-home-cleanup test-goneat-key-map test-makefile-release-tag test-upload-release-draft test-version-ldflags test-release-origin test-release-walkthrough test-release-walkthrough-cleanup require-release-tag
 
 all: build
 
@@ -327,6 +327,12 @@ test-install-gpg-mutants: ## Mutation tests: all 11 installer GPG-route mutants 
 test-gpg-home-cleanup: ## GnuPG test homes registered in the parent shell; this-run cleanup only
 	@./scripts/test-gpg-home-cleanup.sh
 
+test-release-walkthrough: ## Maintainer-ceremony walkthrough (real internal guards; stub gh/network)
+	@./scripts/test-release-walkthrough.sh
+
+test-release-walkthrough-cleanup: ## Walkthrough temps are this-run-only; decoy /tmp/sft-walk.* survives
+	@./scripts/test-release-walkthrough-cleanup.sh
+
 test-goneat-key-map: ## Regression: engine goneat pin map (rotation at v0.6.1)
 	@./scripts/test-goneat-key-map.sh
 
@@ -381,6 +387,7 @@ release-tag-tests: ## Signed-tag tooling tests (throwaway keys only; never the d
 	@./scripts/test-release-origin.sh
 	@./scripts/test-gpg-home-cleanup.sh
 	@./scripts/test-release-walkthrough.sh
+	@./scripts/test-release-walkthrough-cleanup.sh
 	@echo "[ok] Release tag tooling tests passed"
 
 release-preflight: ## Verify clean-tree pre-tag requirements (does not tag)
