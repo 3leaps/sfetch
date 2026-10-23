@@ -9,18 +9,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.15] - 2026-10-23
+
 ### Added
 
-- `sfetch version` and `sfetch --version` print `sfetch <version>` to stdout.
-  `version --extended` and `--version-extended` include git commit, build time,
-  Go version, and OS/arch. Optional `--json` emits the same fields.
+- **Version commands and structured output.** `sfetch version` and
+  `sfetch --version` write the version to stdout. Extended output includes
+  commit, build time, Go version, and platform; `version --json` emits the
+  same metadata as JSON.
+- **Maintainer release targets.** Explicit tag inputs, reviewed tag messages,
+  signed-tag verification, CI artifact download by run/attempt, draft
+  creation, and byte-verified publication are available through Make.
+- **Five-platform native CI.** macOS arm64, Linux amd64/arm64, and Windows
+  amd64/arm64 run native tests, with installer GnuPG coverage on macOS.
+
+### Changed
+
+- **Native bounded tar.gz extraction.** Extraction validates paths, accepts
+  regular files/directories, and limits expanded data and physical headers,
+  including PAX and GNU metadata. Links and unsupported types are refused.
+- **Tag CI produces workflow artifacts.** The workflow verifies the signed
+  tag and committed public pins; draft creation, signing, upload, and verified
+  publication are maintainer actions.
+- **Bootstrap range and published pin.** The engine supports through
+  v0.4.15; development self-bootstrap and CI install smoke pin signed v0.4.14.
+- **Version output uses stdout.** Scripts consuming `--version` from stderr
+  must switch to stdout or JSON output.
+
+### Security
+
+- **OpenPGP input and signer checks.** Installer verification rejects secret
+  keys, multiple primary keys, and ambiguous status results, and binds the
+  signer to the pinned primary fingerprint.
+- **Committed release identities.** Public exports and fingerprint anchors
+  from the tagged revision govern verification. Decernor validates the
+  exports, and temporary GnuPG homes isolate signing/verification operations.
 
 ### Fixed
 
-- **Pinned gosec in CI.** `gosec` is pinned to v2.29.0 (same `go install` into
-  `bin/` pattern as golangci-lint). `make gosec-high` fails closed if `gosec`
-  is missing, instead of exiting 127 when goneat cooling skips a newer
-  `@latest` build.
+- **Draft upload includes release notes.** The normal upload path supplies
+  the notes asset required by the exact-set and byte-verification publish gate.
+- **Release-tooling portability.** GnuPG fixtures use short private homes
+  with parent-shell cleanup; preflight tag tests isolate inherited inputs;
+  signing selectors work with Debian's default awk.
+- **Pinned gosec provisioning.** CI installs v2.29.0 explicitly and checks
+  its module version; the security gate refuses a missing scanner.
 
 ## [0.4.14] - 2026-10-21
 
@@ -254,7 +287,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Maintenance note:** This file is pruned to the latest 10 releases. For older entries, see `docs/releases/`.
 
-[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.14...HEAD
+[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.15...HEAD
+[0.4.15]: https://github.com/3leaps/sfetch/compare/v0.4.14...v0.4.15
 [0.4.14]: https://github.com/3leaps/sfetch/compare/v0.4.13...v0.4.14
 [0.4.13]: https://github.com/3leaps/sfetch/compare/v0.4.12...v0.4.13
 [0.4.12]: https://github.com/3leaps/sfetch/compare/v0.4.11...v0.4.12

@@ -24,8 +24,9 @@ Why this matters: after verified publish, `make update-scoop-manifest` writes th
 
 ## 1. Prepare & Tag
 
-- [ ] Ensure `main` is clean and `make precommit` passes
-- [ ] Update `VERSION` file with new semver (e.g., `0.4.12`)
+- [ ] Start a release branch from clean, updated `main`
+- [ ] Advance `VERSION` with `make version-patch` (or `make version-set V=0.4.15` for an explicit version)
+- [ ] Advance the Makefile `SFETCH_VERSION` self-bootstrap/CI smoke pin to the previous fully signed, published release. Confirm it with `make print-sfetch-version`; never pin an unpublished release
 - [ ] **Advance verified-bootstrap range constants** (required every release — missing bump fails consumers, not sfetch CI, unless you run the assert):
   - [ ] Set `SFETCH_BOOTSTRAP_MAX` in `scripts/bootstrap-sfetch-verified.sh` to `v$(cat VERSION)` (committed constant — **do not** derive at engine runtime from `VERSION` or the consumer tree)
   - [ ] Review `SFETCH_MINISIG_SINCE` (first tag that publishes `install-sfetch.sh.minisig`). Wrong value mis-routes (3-step vs 5-step); both routes still verify, but route selection is part of the contract
@@ -35,8 +36,11 @@ Why this matters: after verified publish, `make update-scoop-manifest` writes th
 - [ ] Update `CHANGELOG.md` (move Unreleased to new version section)
 - [ ] Update `RELEASE_NOTES.md`
 - [ ] Create `docs/releases/vX.Y.Z.md`
-- [ ] Commit: `git add -A && git commit -m "release: prepare vX.Y.Z"`
-- [ ] Push `main`. The maintainer (not an agent) then signs and pushes the tag:
+- [ ] Read through `README.md` and this checklist for version examples and workflow changes
+- [ ] Run the full gates with the project toolchain and pinned local tools: `GOTOOLCHAIN=go1.26.10 PATH="$PWD/bin:$PATH" make prepush`
+- [ ] Commit the release pack on the release branch; obtain review, open a pull request, and merge after review and CI pass
+- [ ] Return to clean, updated `main` at the merged release pack
+- [ ] Configure the signing, identity, Decernor, and message-directory inputs in section 2 before starting the maintainer ceremony. The maintainer (not an agent) then signs and pushes the tag:
   ```bash
   export SFETCH_RELEASE_TAG=v$(cat VERSION)
   make release-preflight
@@ -44,6 +48,8 @@ Why this matters: after verified publish, `make update-scoop-manifest` writes th
   make release-tag          # local signed annotated tag; throwaway tests never use the operator key
   make release-push-tag     # publish the signed tag
   ```
+  The preflight tag-ruleset report (`FOUND`, `ABSENT`, or `UNKNOWN`) is advisory;
+  it is not authorization to sign or publish.
 - [ ] Wait for GitHub Actions tag workflow to complete
   - Workflow is read-only (`contents: read`); it never creates a GitHub Release
   - CI validates VERSION file matches tag and verifies the signed tag object
@@ -62,7 +68,7 @@ Do not run `gh release edit --draft=false` — that bypasses the verified publis
 ```bash
 export SFETCH_RELEASE_TAG=v$(cat VERSION)
 export SFETCH_MINISIGN_KEY=/path/to/sfetch.key
-export SFETCH_MINISIGN_PUB=/path/to/sfetch.pub
+export SFETCH_MINISIGN_PUB=/path/to/sfetch.pub   # only for `make release-export-pin` when no committed pin exists; verification reads the tagged blob
 export SFETCH_PGP_KEY_ID=<signing-subkey-fpr>!   # required for publish (SHA256SUMS.asc and SHA512SUMS.asc)
 export SFETCH_GPG_HOMEDIR=/path/to/isolated/gpg/homedir   # not the default homedir
 export SFETCH_GPG_SIGNING_FINGERPRINT=0CACA49B3119B6BC12B2CA11B9B485F294B9FE07
