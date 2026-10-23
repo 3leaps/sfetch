@@ -95,7 +95,7 @@ tools:
     description: Go security checker
     kind: go
     detect_command: gosec -version
-    install_package: github.com/securego/gosec/v2/cmd/gosec@latest
+    install_package: github.com/securego/gosec/v2/cmd/gosec@v2.29.0
     version_args:
       - -version
     check_args:
