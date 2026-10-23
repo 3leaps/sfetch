@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Pinned gosec in CI.** `gosec` is pinned to v2.29.0 (same `go install` into
+  `bin/` pattern as golangci-lint). `make gosec-high` fails closed if `gosec`
+  is missing, instead of exiting 127 when goneat cooling skips a newer
+  `@latest` build.
+
 ## [0.4.14] - 2026-10-21
 
 ### Security

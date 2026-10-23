@@ -49,6 +49,7 @@ SFETCH_VERSION := v0.4.13
 GONEAT_VERSION ?= v0.6.6
 GOVULNCHECK_VERSION ?= v1.8.0
 GOLANGCI_LINT_VERSION ?= v2.14.0
+GOSEC_VERSION ?= v2.29.0
 
 # Tool paths (sfetch bootstrap may land in bin/; goneat must be on PATH)
 SFETCH = $(shell [ -x "$(BIN_DIR)/sfetch" ] && echo "$(BIN_DIR)/sfetch" || command -v sfetch 2>/dev/null)
@@ -62,7 +63,7 @@ CORPUS_DEST ?= test-corpus
 .PHONY: release-verify-key release-verify-minisign-pubkey release-verify-keys release-verify-signatures release-verify
 .PHONY: release-clean bootstrap-script build-all gosec gosec-high update-scoop-manifest
 .PHONY: version-check version-set version-patch version-minor version-major
-.PHONY: print-sfetch-version golangci-lint-install test-release-verify-checksums test-release-verify-signatures test-release-workflow-draft test-bootstrap-sfetch-verified test-bootstrap-range-release test-install-anchor-select
+.PHONY: print-sfetch-version golangci-lint-install gosec-install test-gosec-pin test-release-verify-checksums test-release-verify-signatures test-release-workflow-draft test-bootstrap-sfetch-verified test-bootstrap-range-release test-install-anchor-select
 
 all: build
 
@@ -162,6 +163,18 @@ golangci-lint-install: ## Install pinned golangci-lint into bin/ and assert its 
 	fi; \
 	echo "[ok] golangci-lint $(GOLANGCI_LINT_VERSION) in $(BIN_DIR)"
 
+# gosec -version prints "dev" for go install builds (no release ldflags).
+# Assert the module version recorded in the binary instead.
+gosec-install: ## Install pinned gosec into bin/ and assert its version
+	@mkdir -p $(BIN_DIR)
+	GOBIN=$(BIN_DIR) go install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)
+	@modver="$$(go version -m "$(BIN_DIR)/gosec" 2>/dev/null | awk '$$1=="mod" && $$2=="github.com/securego/gosec/v2" {print $$3; exit}')"; \
+	if [ -z "$$modver" ] || [ "$$modver" != "$(GOSEC_VERSION)" ]; then \
+		echo "[!!] gosec version mismatch (have: $$modver; want: $(GOSEC_VERSION))" >&2; \
+		exit 1; \
+	fi; \
+	echo "[ok] gosec $(GOSEC_VERSION) in $(BIN_DIR)"
+
 # -----------------------------------------------------------------------------
 # Format, Lint, Assess (via goneat)
 # -----------------------------------------------------------------------------
@@ -206,6 +219,11 @@ gosec: ## Run gosec security scanner
 	gosec ./...
 
 gosec-high: ## Run gosec (high confidence only)
+	@export PATH="$(BIN_DIR):$$PATH"; \
+	if ! command -v gosec >/dev/null 2>&1; then \
+		echo "[!!] gosec not found on PATH; run 'make gosec-install' (pinned $(GOSEC_VERSION))" >&2; \
+		exit 1; \
+	fi; \
 	gosec -confidence high -exclude G301,G302,G107,G304 ./...
 
 # -----------------------------------------------------------------------------
@@ -217,6 +235,7 @@ precommit: ## Run pre-commit checks (goneat assess + Go tests + build)
 	goneat assess --categories format,lint --check --fail-on critical
 	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 	go test -v -race ./...
+	$(MAKE) test-gosec-pin
 	$(MAKE) gosec-high
 	$(MAKE) build-all
 	# CI runs make precommit (not prepush); keep fail-closed release-verify regression on this path.
@@ -292,6 +311,9 @@ release-verify-checksums: ## Verify checksums in dist/release (fail-closed; port
 
 # Negative + positive regression for release-verify-checksums (exit status only).
 # Wired into precommit because sfetch CI runs make precommit, not prepush.
+test-gosec-pin: ## Regression: gosec pin and fail-closed missing-binary guard
+	@./scripts/test-gosec-pin.sh
+
 test-release-verify-checksums: ## Regression: fail-closed checksum verify (corrupt/absent/empty)
 	@./scripts/test-release-verify-checksums.sh
 

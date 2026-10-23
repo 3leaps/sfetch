@@ -56,6 +56,12 @@ jobs:
           export PATH="$PWD/bin:$PATH"
           [ "$(command -v golangci-lint)" = "$PWD/bin/golangci-lint" ]
 
+      - name: Install pinned gosec
+        run: |
+          make gosec-install
+          export PATH="$PWD/bin:$PATH"
+          [ "$(command -v gosec)" = "$PWD/bin/gosec" ]
+
       - name: Quality
         run: |
           export PATH="$PWD/bin:$PATH"
