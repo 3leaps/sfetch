@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `sfetch version` and `sfetch --version` print `sfetch <version>` to stdout.
+  `version --extended` and `--version-extended` include git commit, build time,
+  Go version, and OS/arch. Optional `--json` emits the same fields.
+
 ### Fixed
 
 - **Pinned gosec in CI.** `gosec` is pinned to v2.29.0 (same `go install` into

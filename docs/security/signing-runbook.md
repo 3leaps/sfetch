@@ -81,25 +81,25 @@ export PGP_KEY_ID=security@yourorg.dev  # Optional
 
 ```bash
 # 1. Download CI-built artifacts
-RELEASE_TAG=v0.2.0 make release-download
+SFETCH_RELEASE_TAG=v0.2.0 make release-download
 
 # 2. Generate checksum manifests and sign them
-RELEASE_TAG=v0.2.0 make release-checksums
-RELEASE_TAG=v0.2.0 make release-sign
+SFETCH_RELEASE_TAG=v0.2.0 make release-checksums
+SFETCH_RELEASE_TAG=v0.2.0 make release-sign
 # Produces: SHA256SUMS, SHA512SUMS plus .minisig/.asc (if PGP_KEY_ID set)
 
 # 3. Export public keys for the release
 make release-export-minisign-key
-make release-export-key  # PGP, requires PGP_KEY_ID
+make release-export-key  # PGP, requires SFETCH_PGP_KEY_ID as 40-hex!
 
 # 4. Verify the exported PGP key
-make verify-release-key
+make release-verify-key
 
 # 5. Copy release notes
-RELEASE_TAG=v0.2.0 make release-notes
+SFETCH_RELEASE_TAG=v0.2.0 make release-notes
 
-# 6. Upload to GitHub
-RELEASE_TAG=v0.2.0 make release-upload
+# 6. Upload to GitHub (stays draft; promote with make release-publish)
+SFETCH_RELEASE_TAG=v0.2.0 make release-upload
 ```
 
 ### Verification Test

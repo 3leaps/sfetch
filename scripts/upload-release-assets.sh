@@ -27,7 +27,7 @@ fi
 # Assumes release artifacts were built in CI and downloaded locally.
 # This script only re-uploads/clobbers assets on GitHub.
 shopt -s nullglob
-ARTIFACTS=("$DIR"/sfetch_* "$DIR"/SHA256SUMS "$DIR"/SHA512SUMS "$DIR"/install-sfetch.sh)
+ARTIFACTS=("$DIR"/sfetch_* "$DIR"/SHA256SUMS "$DIR"/SHA512SUMS "$DIR"/install-sfetch.sh "$NOTES_FILE")
 # Build signature list from globs only; filter to existing files.
 # Include installer minisig explicitly (not covered by SHA*SUMS.* globs).
 SIG_CANDIDATES=(
@@ -45,6 +45,14 @@ for f in "${SIG_CANDIDATES[@]}"; do
 done
 if [ ${#ARTIFACTS[@]} -eq 0 ]; then
     echo "no artifacts to upload" >&2
+    exit 1
+fi
+# Read-only draft check first. Upload and edit must not run against a
+# published release, and must not themselves flip the draft flag so a later
+# check would pass.
+is_draft="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
+if [ "$is_draft" != true ]; then
+    echo "error: release ${TAG} is not a draft; refusing to upload" >&2
     exit 1
 fi
 echo "📤 Uploading binaries/checksums for ${TAG}"
@@ -67,10 +75,15 @@ if [ "$has_installer_sig" != true ]; then
     exit 1
 fi
 gh release upload "$TAG" "${SIGNATURES[@]}" --clobber
-echo "📝 Updating release notes"
-gh release edit "$TAG" --notes-file "$NOTES_FILE"
-echo "✅ Release updated"
+echo "📝 Updating release notes (draft preserved)"
+# Stay a draft. Promotion is make release-publish after byte verification.
+gh release edit "$TAG" --notes-file "$NOTES_FILE" --draft=true
+is_draft="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
+if [ "$is_draft" != true ]; then
+    echo "error: release ${TAG} is not a draft after upload; refusing to continue" >&2
+    exit 1
+fi
+echo "✅ Draft release updated (still draft)"
 echo ""
-echo "If the release is still a draft, publish only after this upload succeeds:"
-echo "  gh release edit ${TAG} --draft=false"
-echo "Until then the release is incomplete / non-consumable for bootstrap consumers."
+echo "Do not publish from this target. After byte verification:"
+echo "  SFETCH_RELEASE_TAG=${TAG} make release-publish"

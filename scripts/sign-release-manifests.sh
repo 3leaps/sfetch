@@ -8,7 +8,8 @@ set -euo pipefail
 # Environment variables:
 #   SFETCH_MINISIGN_KEY - Path to minisign secret key file. Primary format.
 #   SFETCH_PGP_KEY_ID   - GPG key ID for PGP signing. Optional secondary format.
-#   SFETCH_GPG_HOMEDIR  - Custom GPG homedir (optional, defaults to ~/.gnupg)
+#   SFETCH_GPG_HOMEDIR  - Isolated GPG homedir (required when PGP signing).
+#                         Must not be the default ~/.gnupg.
 #
 # Signing sets (deliberate split — do not "harmonise" without a lock):
 #   minisign: SHA256SUMS, SHA512SUMS, and install-sfetch.sh
@@ -81,11 +82,23 @@ if [ -n "$SFETCH_PGP_KEY_ID" ]; then
         echo "error: SFETCH_PGP_KEY_ID set but gpg not found in PATH" >&2
         exit 1
     fi
+    if [[ ! "$SFETCH_PGP_KEY_ID" =~ ^[0-9A-F]{40}!$ ]]; then
+        echo "error: SFETCH_PGP_KEY_ID must be the exact uppercase signing subkey fingerprint with !" >&2
+        exit 1
+    fi
+    if [ -z "$SFETCH_GPG_HOMEDIR" ] || [ ! -d "$SFETCH_GPG_HOMEDIR" ]; then
+        echo "error: SFETCH_GPG_HOMEDIR is required for PGP signing (isolated home; not the default homedir)" >&2
+        exit 1
+    fi
+    gpg_home_real="$(cd "$SFETCH_GPG_HOMEDIR" && pwd -P)"
+    default_home="$(cd "${HOME}/.gnupg" 2>/dev/null && pwd -P || true)"
+    if [ -n "$default_home" ] && [ "$gpg_home_real" = "$default_home" ]; then
+        echo "error: SFETCH_GPG_HOMEDIR must not be the default homedir" >&2
+        exit 1
+    fi
     has_pgp=true
     echo "PGP signing enabled (key: $SFETCH_PGP_KEY_ID)"
-    if [ -n "$SFETCH_GPG_HOMEDIR" ]; then
-        echo "GPG homedir: $SFETCH_GPG_HOMEDIR"
-    fi
+    echo "GPG homedir: $SFETCH_GPG_HOMEDIR"
 fi
 
 if [ "$has_minisign" = false ] && [ "$has_pgp" = false ]; then
@@ -122,11 +135,7 @@ if [ "$has_pgp" = true ]; then
     echo "=== PGP signatures (manifests only) ==="
     for file in "${checksum_files[@]}"; do
         echo "🔏 [PGP] Signing $file"
-        if [ -n "$SFETCH_GPG_HOMEDIR" ]; then
-            env GNUPGHOME="$SFETCH_GPG_HOMEDIR" gpg --batch --yes --armor --local-user "$SFETCH_PGP_KEY_ID" --detach-sign -o "$DIR/$file.asc" "$DIR/$file"
-        else
-            gpg --batch --yes --armor --local-user "$SFETCH_PGP_KEY_ID" --detach-sign -o "$DIR/$file.asc" "$DIR/$file"
-        fi
+        env GNUPGHOME="$SFETCH_GPG_HOMEDIR" gpg --batch --yes --armor --local-user "$SFETCH_PGP_KEY_ID" --detach-sign -o "$DIR/$file.asc" "$DIR/$file"
     done
 fi
 

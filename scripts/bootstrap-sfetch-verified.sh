@@ -49,7 +49,7 @@ readonly SFETCH_BOOTSTRAP_MAX="v0.4.14"
 # when 3-step exists. Both routes verify; neither silently falls back.
 readonly SFETCH_MINISIG_SINCE="v0.4.11"
 
-# Embedded trust anchor — must match scripts/sfetch-minisign-anchor.pub (SSOT),
+# Embedded trust anchor — must match docs/security/sfetch-minisign.pub (SSOT),
 # main.go (go:embed of that file), and scripts/install-sfetch.sh. Do NOT fetch
 # sfetch-minisign.pub from the release for authentication (circular).
 # The published .pub is for human out-of-band comparison only.
@@ -64,6 +64,17 @@ readonly SFETCH_MINISIGN_PUBKEY="RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVq
 # range-release assert fails once MIN advances past it, forcing the removal).
 readonly SFETCH_PREVKEY_MAX="v0.4.11"
 readonly SFETCH_MINISIGN_PUBKEY_LEGACY="RWTAoUJ007VE3h8tbHlBCyk2+y0nn7kyA4QP34LTzdtk8M6A2sryQtZC"
+
+# goneat minisign pin map. GONEAT_PREVKEY_MAX is the last tag signed with the
+# retired fulmenhq key (historical fact, never advance it). Tags at or below
+# it verify against the retired literal; tags above verify against the current
+# literal. Never try both keys for one tag.
+# Standalone copies of this script have no docs/security tree beside them
+# (PDR-0008 §2.6): literals only, with a committed equality test against
+# docs/security/fulmenhq-goneat-minisign.pub and -retired-1.pub.
+readonly GONEAT_PREVKEY_MAX="v0.6.0"
+readonly GONEAT_MINISIGN_PUBKEY="RWSw6HZljWd3fZtcpUuPQPiJ1WoBKP+AyJ2Tvm4HsFWtRd3aHxA4jNRM"
+readonly GONEAT_MINISIGN_PUBKEY_LEGACY="RWTdae+P+E9KI1OJ6lCiuydYLbciBRyGsAgtnTSf/su2zmGdBPN9DN3J"
 
 readonly MINISIGN_VERSION_EXPECTED="0.12"
 readonly MINISIGN_WIN_URL="https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip"
@@ -168,6 +179,31 @@ semver_le() {
     local r
     r="$(semver_cmp "$1" "$2")" || die "semver comparison failed for $1 vs $2"
     [[ "$r" != "1" ]]
+}
+
+# Select the goneat minisign pin for an exact tag. Writes a temp public-key
+# file from the embedded literal so a standalone copy of this script does not
+# need a docs/security tree beside it.
+goneat_minisign_key_file() {
+    local ver="$1"
+    local blob tmp
+    if ! is_exact_semver_tag "$ver"; then
+        die "goneat-version must be exact vMAJOR.MINOR.PATCH (got: $ver)"
+    fi
+    if semver_le "$ver" "$GONEAT_PREVKEY_MAX"; then
+        blob="$GONEAT_MINISIGN_PUBKEY_LEGACY"
+    else
+        blob="$GONEAT_MINISIGN_PUBKEY"
+    fi
+    # BSD/macOS mktemp requires the XXXXXX suffix at the end of the template.
+    # A ".pub" suffix makes the name fixed and the second run fails.
+    if [ -n "${WORK:-}" ] && [ -d "$WORK" ]; then
+        tmp="$(mktemp -d "${WORK}/goneat-minisign.XXXXXX")"
+    else
+        tmp="$(mktemp -d "${TMPDIR:-/tmp}/goneat-minisign.XXXXXX")"
+    fi
+    printf 'untrusted comment: fulmenhq goneat release signing\n%s\n' "$blob" >"$tmp/key.pub"
+    printf '%s\n' "$tmp/key.pub"
 }
 
 # -----------------------------------------------------------------------------
@@ -313,6 +349,7 @@ cleanup() {
     rm -rf "${WORK}"
 }
 trap cleanup EXIT
+# goneat_minisign_key_file writes under WORK when it is set (this trap).
 
 # Resolve install dir path without creating it yet (validate before side effects).
 # acquire-minisign-only / install mode create the directory after validation.
@@ -644,8 +681,11 @@ version_output_matches_pin "$REPORT" "$VERSION" ||
 # install or version failure is non-zero (no soft skip when requested).
 if [ -n "$GONEAT_VERSION" ]; then
     log "installing goneat ${GONEAT_VERSION} via verified sfetch"
+    GONEAT_KEY="$(goneat_minisign_key_file "$GONEAT_VERSION")"
+    log "goneat trust anchor: ${GONEAT_KEY}"
     "$SFETCH_BIN" --repo fulmenhq/goneat --tag "$GONEAT_VERSION" \
-        --dest-dir "$INSTALL_DIR" --require-minisign ||
+        --dest-dir "$INSTALL_DIR" --require-minisign \
+        --minisign-key "$GONEAT_KEY" ||
         die "goneat install failed for ${GONEAT_VERSION} (requested; fail closed)"
     GONEAT_BIN="${INSTALL_DIR}/goneat"
     if [ "$OS" = "windows" ] && [ -f "${INSTALL_DIR}/goneat.exe" ]; then

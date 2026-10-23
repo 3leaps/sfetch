@@ -16,9 +16,11 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
@@ -41,7 +43,7 @@ jobs:
             --tag v0.6.6 \
             --dest-dir bin \
             --require-minisign \
-            --minisign-key .github/keys/fulmenhq-goneat-minisign.pub
+            --minisign-key docs/security/fulmenhq-goneat-minisign.pub
           ./bin/goneat version
 
       - name: Install development tools via goneat
@@ -56,6 +58,18 @@ jobs:
           export PATH="$PWD/bin:$PATH"
           [ "$(command -v golangci-lint)" = "$PWD/bin/golangci-lint" ]
 
+      - name: Install pinned Decernor
+        run: |
+          set -euo pipefail
+          tool_dir="$RUNNER_TEMP/decernor-ci"
+          mkdir -p "$tool_dir"
+          SFETCH_DECERNOR_BIN="$(./scripts/ci-install-decernor.sh "$tool_dir")"
+          case "$SFETCH_DECERNOR_BIN" in
+            *$'\n'*) echo "error: Decernor install printed extra stdout" >&2; exit 1 ;;
+          esac
+          echo "SFETCH_DECERNOR_BIN=$SFETCH_DECERNOR_BIN" >>"$GITHUB_ENV"
+          echo "Installed Decernor at $SFETCH_DECERNOR_BIN"
+
       - name: Install pinned gosec
         run: |
           make gosec-install
@@ -65,7 +79,13 @@ jobs:
       - name: Quality
         run: |
           export PATH="$PWD/bin:$PATH"
+          test -x "${SFETCH_DECERNOR_BIN:?SFETCH_DECERNOR_BIN required}"
           make precommit
+
+      - name: Assert version on packaged artifact
+        run: |
+          set -euo pipefail
+          ./scripts/test-version-ldflags.sh --packaged
 
       # Pin to Makefile SFETCH_VERSION (N-1 fully-signed release), never latest.
       # Main CI after a release tag races incomplete asset uploads if dry-run
@@ -88,6 +108,79 @@ jobs:
           ./scripts/bootstrap-sfetch-verified.sh --version "$TAG" --dir "$DEST" --yes
           "$DEST/sfetch" --version
 
+  # Five-way native go test. `platforms` is the stable aggregate required
+  # check. Named *-s runners are org-hosted; labels are the pin.
+  native:
+    name: native (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-amd64
+          - runner: ubuntu-latest-arm64-s
+            target: linux-arm64
+          - runner: macos-15
+            target: darwin-arm64
+          - runner: windows-2022
+            target: windows-amd64
+          - runner: windows-latest-arm64-s
+            target: windows-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: '1.26.10'
+
+      - name: Assert runner matches matrix target
+        shell: bash
+        run: |
+          set -euo pipefail
+          host="$(go env GOHOSTOS)/$(go env GOHOSTARCH)"
+          case "${{ matrix.target }}" in
+            linux-amd64) test "$host" = "linux/amd64" ;;
+            linux-arm64) test "$host" = "linux/arm64" ;;
+            darwin-arm64) test "$host" = "darwin/arm64" ;;
+            windows-amd64) test "$host" = "windows/amd64" ;;
+            windows-arm64) test "$host" = "windows/arm64" ;;
+            *) echo "::error::unknown matrix target ${{ matrix.target }}"; exit 1 ;;
+          esac
+          echo "runner host $host matches ${{ matrix.target }}"
+
+      - name: Native go test
+        shell: bash
+        run: |
+          set -euo pipefail
+          go env GOOS GOARCH
+          go test ./...
+
+      - name: Native installer GPG suites
+        if: matrix.target == 'darwin-arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v gpg >/dev/null 2>&1 || brew install gnupg
+          command -v minisign >/dev/null 2>&1 || brew install minisign
+          command -v python3 >/dev/null 2>&1 || brew install python
+          command -v gpg
+          command -v minisign
+          # Default runner TMPDIR (often /var/folders/.../T). Do not set TMPDIR=/tmp.
+          ./scripts/test-install-anchor-select.sh
+          ./scripts/test-install-gpg-mutants.sh
+
+  platforms:
+    name: platforms
+    if: always()
+    needs: native
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require all native platforms
+        run: test "${{ needs.native.result }}" = "success"
+
   # Dual-route consumer matrix: action thin-wraps the shared engine.
   # Default pin exercises minisig (v0.4.11+). Ubuntu also proves sha256sums on v0.4.10.
   setup-sfetch-matrix:
@@ -96,14 +189,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-          - os: macos-latest
-          - os: windows-latest
+          - os: ubuntu-24.04
+          - os: macos-15
+          - os: windows-2022
           # Named org runner when available
           - os: windows-latest-arm64-s
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Setup sfetch via composite action (v0.4.11 minisig route)
         uses: ./.github/actions/setup-sfetch
@@ -172,11 +267,13 @@ jobs:
 
   container-probe:
     name: Install probe (container)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: ubuntu:24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Install prerequisites
         shell: bash
@@ -211,15 +308,17 @@ jobs:
             --dest-dir "$BIN_DIR" \
             --cache-dir "$CACHE_DIR" \
             --require-minisign \
-            --minisign-key "$GITHUB_WORKSPACE/.github/keys/fulmenhq-goneat-minisign.pub"
+            --minisign-key "$GITHUB_WORKSPACE/docs/security/fulmenhq-goneat-minisign.pub"
 
           goneat version
 
   windows-dogfood-x64:
     name: Windows dogfood (x64)
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
@@ -247,7 +346,7 @@ jobs:
             --tag v0.6.6 `
             --dest-dir bin `
             --require-minisign `
-            --minisign-key .github/keys/fulmenhq-goneat-minisign.pub
+            --minisign-key docs/security/fulmenhq-goneat-minisign.pub
           .\bin\goneat.exe version
 
   windows-dogfood-arm64:
@@ -255,6 +354,8 @@ jobs:
     runs-on: windows-latest-arm64-s
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5.1.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
@@ -293,5 +394,5 @@ jobs:
             --tag v0.6.6 `
             --dest-dir bin `
             --require-minisign `
-            --minisign-key .github/keys/fulmenhq-goneat-minisign.pub
+            --minisign-key docs/security/fulmenhq-goneat-minisign.pub
           .\bin\goneat.exe version

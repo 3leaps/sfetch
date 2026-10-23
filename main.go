@@ -1,7 +1,9 @@
 package main
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -255,15 +257,15 @@ const (
 // minisignPubkeyRegex matches a valid minisign public key line (with or without comment header)
 var minisignPubkeyRegex = regexp.MustCompile(`^RW[A-Za-z0-9+/]{54}$`)
 
-// Canonical minisign trust anchor SSOT: scripts/sfetch-minisign-anchor.pub
+// Canonical minisign trust anchor SSOT: docs/security/sfetch-minisign.pub
 // EmbeddedMinisignPubkey is derived from that file (go:embed). Standalone
 // consumers (install-sfetch.sh, bootstrap-sfetch-verified.sh) embed the same
 // RW line and are checked against the SSOT in tests / release verify.
 //
-//go:embed scripts/sfetch-minisign-anchor.pub
+//go:embed docs/security/sfetch-minisign.pub
 var embeddedMinisignPubFile string
 
-// EmbeddedMinisignPubkey is the RW… line from scripts/sfetch-minisign-anchor.pub.
+// EmbeddedMinisignPubkey is the RW… line from docs/security/sfetch-minisign.pub.
 var EmbeddedMinisignPubkey = mustMinisignPubkeyLine(embeddedMinisignPubFile)
 
 // EmbeddedMinisignKeyID is a human label for the release signing key.
@@ -276,7 +278,7 @@ func mustMinisignPubkeyLine(content string) string {
 			return line
 		}
 	}
-	panic("scripts/sfetch-minisign-anchor.pub: missing RW… public key line")
+	panic("docs/security/sfetch-minisign.pub: missing RW… public key line")
 }
 
 // minisignSecretkeyPrefixes are known prefixes for secret key files
@@ -1689,7 +1691,81 @@ func normalizeArgs(args []string) []string {
 	return args
 }
 
+type versionInfoJSON struct {
+	Version   string `json:"version"`
+	GitCommit string `json:"gitCommit"`
+	BuildTime string `json:"buildTime"`
+	GoVersion string `json:"goVersion"`
+	OS        string `json:"os"`
+	Arch      string `json:"arch"`
+}
+
+func currentVersionInfo() versionInfoJSON {
+	return versionInfoJSON{
+		Version:   version,
+		GitCommit: gitCommit,
+		BuildTime: buildTime,
+		GoVersion: runtime.Version(),
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+	}
+}
+
+func printVersionInfo(w io.Writer, extended, jsonOut bool) int {
+	info := currentVersionInfo()
+	if jsonOut {
+		data, err := json.MarshalIndent(info, "", "  ")
+		if err != nil {
+			return 1
+		}
+		_, _ = fmt.Fprintln(w, string(data)) //nolint:errcheck // best-effort version output
+		return 0
+	}
+	_, _ = fmt.Fprintf(w, "sfetch %s\n", info.Version) //nolint:errcheck
+	if !extended {
+		return 0
+	}
+	_, _ = fmt.Fprintf(w, "  git commit: %s\n", info.GitCommit)        //nolint:errcheck
+	_, _ = fmt.Fprintf(w, "  build time: %s\n", info.BuildTime)        //nolint:errcheck
+	_, _ = fmt.Fprintf(w, "  go version: %s\n", info.GoVersion)        //nolint:errcheck
+	_, _ = fmt.Fprintf(w, "  os/arch:    %s/%s\n", info.OS, info.Arch) //nolint:errcheck
+	return 0
+}
+
+func runVersionCommand(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("sfetch version", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	extended := fs.Bool("extended", false, "print extended version/build info")
+	fs.BoolVar(extended, "e", false, "print extended version/build info")
+	jsonOut := fs.Bool("json", false, "JSON output")
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(stdout, "Usage: sfetch version [--extended] [--json]")                       //nolint:errcheck
+		_, _ = fmt.Fprintln(stdout, "")                                                                  //nolint:errcheck
+		_, _ = fmt.Fprintln(stdout, "Print version information. Use --extended for full build details.") //nolint:errcheck
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.Usage()
+			return 0
+		}
+		_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
+		fs.Usage()
+		return 2
+	}
+	if len(fs.Args()) > 0 {
+		_, _ = fmt.Fprintln(stderr, "error: version does not take positional arguments") //nolint:errcheck
+		return 2
+	}
+	return printVersionInfo(stdout, *extended, *jsonOut)
+}
+
 func run(args []string, stdout, stderr io.Writer) int {
+	// Subcommand must be argv[1] so it cannot collide with --url values or
+	// positional URLs (including normalizeArgs moving a leading https:// URL).
+	if len(args) > 0 && args[0] == "version" {
+		return runVersionCommand(args[1:], stdout, stderr)
+	}
+
 	args = normalizeArgs(args)
 	fs := flag.NewFlagSet("sfetch", flag.ContinueOnError)
 
@@ -1764,7 +1840,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	fs.Usage = func() {
-		_, _ = fmt.Fprintf(out, "Usage: sfetch [flags]\n\n") //nolint:errcheck // help output best-effort
+		_, _ = fmt.Fprintf(out, "Usage: sfetch [flags]\n")                         //nolint:errcheck // help output best-effort
+		_, _ = fmt.Fprintf(out, "       sfetch version [--extended] [--json]\n\n") //nolint:errcheck
 
 		_, _ = fmt.Fprintln(out, "Selection:") //nolint:errcheck
 		for _, name := range []string{"repo", "github-raw", "url", "tag", "latest", "asset-match", "asset-regex", "asset-type", "binary-name", "output", "dest-dir", "install", "cache-dir"} {
@@ -1847,19 +1924,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if *versionFlag {
-		_, _ = fmt.Fprintln(stderr, "sfetch", version) //nolint:errcheck // best-effort version output
-		return 0
+	if *versionFlag || *versionExtended {
+		return printVersionInfo(stdout, *versionExtended, *jsonOut)
 	}
-
-	if *versionExtended {
-		// Version info is best-effort output; errors ignored
-		_, _ = fmt.Fprintf(stderr, "sfetch %s\n", version)                                //nolint:errcheck
-		_, _ = fmt.Fprintf(stderr, "  build time: %s\n", buildTime)                       //nolint:errcheck
-		_, _ = fmt.Fprintf(stderr, "  git commit: %s\n", gitCommit)                       //nolint:errcheck
-		_, _ = fmt.Fprintf(stderr, "  go version: %s\n", runtime.Version())               //nolint:errcheck
-		_, _ = fmt.Fprintf(stderr, "  platform:   %s/%s\n", runtime.GOOS, runtime.GOARCH) //nolint:errcheck
-		return 0
+	if len(fs.Args()) == 1 && fs.Arg(0) == "version" && *repo == "" && *githubRaw == "" && strings.TrimSpace(*urlFlag) == "" {
+		return printVersionInfo(stdout, *versionExtended, *jsonOut)
 	}
 
 	if *extendedHelp {
@@ -2196,42 +2265,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return 1
 			}
 
-			switch classification.ArchiveFormat {
-			case ArchiveFormatZip:
-				if err := extractZip(assetPath, extractDir); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract zip: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTarXz:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xJf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTarBz2:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xjf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTar:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTarGz:
-				fallthrough
-			default:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xzf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
+			if err := extractArchive(classification.ArchiveFormat, assetPath, extractDir); err != nil {
+				_, _ = fmt.Fprintf(stderr, "%v\n", err) //nolint:errcheck
+				return 1
 			}
 
 			binaryPath, err = resolveArchiveBinaryPath(extractDir, binaryName, runtime.GOOS)
@@ -2477,42 +2513,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return 1
 			}
 
-			switch classification.ArchiveFormat {
-			case ArchiveFormatZip:
-				if err := extractZip(assetPath, extractDir); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract zip: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTarXz:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xJf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTarBz2:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xjf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTar:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
-			case ArchiveFormatTarGz:
-				fallthrough
-			default:
-				// #nosec G204 -- assetPath tmp controlled
-				cmd := exec.Command("tar", "xzf", assetPath, "-C", extractDir)
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-					return 1
-				}
+			if err := extractArchive(classification.ArchiveFormat, assetPath, extractDir); err != nil {
+				_, _ = fmt.Fprintf(stderr, "%v\n", err) //nolint:errcheck
+				return 1
 			}
 
 			binaryPath, err = resolveArchiveBinaryPath(extractDir, binaryName, runtime.GOOS)
@@ -3096,42 +3099,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 
-		switch classification.ArchiveFormat {
-		case ArchiveFormatZip:
-			if err := extractZip(assetPath, extractDir); err != nil {
-				_, _ = fmt.Fprintf(stderr, "extract zip: %v\n", err) //nolint:errcheck
-				return 1
-			}
-		case ArchiveFormatTarXz:
-			// #nosec G204,G702 -- tar args are fixed; paths are local temp files
-			cmd := exec.Command("tar", "xJf", assetPath, "-C", extractDir)
-			if err := cmd.Run(); err != nil {
-				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-				return 1
-			}
-		case ArchiveFormatTarBz2:
-			// #nosec G204,G702 -- tar args are fixed; paths are local temp files
-			cmd := exec.Command("tar", "xjf", assetPath, "-C", extractDir)
-			if err := cmd.Run(); err != nil {
-				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-				return 1
-			}
-		case ArchiveFormatTar:
-			// #nosec G204,G702 -- tar args are fixed; paths are local temp files
-			cmd := exec.Command("tar", "xf", assetPath, "-C", extractDir)
-			if err := cmd.Run(); err != nil {
-				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-				return 1
-			}
-		case ArchiveFormatTarGz:
-			fallthrough
-		default:
-			// #nosec G204,G702 -- tar args are fixed; paths are local temp files
-			cmd := exec.Command("tar", "xzf", assetPath, "-C", extractDir)
-			if err := cmd.Run(); err != nil {
-				_, _ = fmt.Fprintf(stderr, "extract archive: %v\n", err) //nolint:errcheck
-				return 1
-			}
+		if err := extractArchive(classification.ArchiveFormat, assetPath, extractDir); err != nil {
+			_, _ = fmt.Fprintf(stderr, "%v\n", err) //nolint:errcheck
+			return 1
 		}
 
 		binaryPath, err = resolveArchiveBinaryPath(extractDir, binaryName, goos)
@@ -3397,6 +3367,336 @@ func archiveFormatFromString(s string) ArchiveFormat {
 	}
 }
 
+func extractArchive(format ArchiveFormat, assetPath, extractDir string) error {
+	switch format {
+	case ArchiveFormatZip:
+		if err := extractZip(assetPath, extractDir); err != nil {
+			return fmt.Errorf("extract zip: %w", err)
+		}
+		return nil
+	case ArchiveFormatTarXz:
+		if err := extractTarCmd(assetPath, extractDir, "-xJf"); err != nil {
+			return fmt.Errorf("extract archive: %w", err)
+		}
+		return nil
+	case ArchiveFormatTarBz2:
+		if err := extractTarCmd(assetPath, extractDir, "-xjf"); err != nil {
+			return fmt.Errorf("extract archive: %w", err)
+		}
+		return nil
+	case ArchiveFormatTar:
+		if err := extractTarCmd(assetPath, extractDir, "-xf"); err != nil {
+			return fmt.Errorf("extract archive: %w", err)
+		}
+		return nil
+	case ArchiveFormatTarGz:
+		if err := extractTarGz(assetPath, extractDir); err != nil {
+			return fmt.Errorf("extract archive: %w", err)
+		}
+		return nil
+	default:
+		if err := extractTarGz(assetPath, extractDir); err != nil {
+			return fmt.Errorf("extract archive: %w", err)
+		}
+		return nil
+	}
+}
+
+func extractTarCmd(assetPath, extractDir, flag string) error {
+	args := extractTarCmdArgs(assetPath, extractDir, flag)
+	// #nosec G204,G702 -- tar args are fixed; paths are local temp files
+	cmd := exec.Command("tar", args...)
+	return cmd.Run()
+}
+
+func extractTarCmdArgs(assetPath, extractDir, flag string) []string {
+	if runtime.GOOS == "windows" {
+		// GNU tar treats "C:" as a remote host unless --force-local is set.
+		return []string{"--force-local", flag, assetPath, "-C", extractDir}
+	}
+	return []string{flag, assetPath, "-C", extractDir}
+}
+
+// archiveNameIsAbsolute reports whether an archive member name is absolute on
+// any OS we extract on. filepath.IsAbs("/evil") is false on Windows, so a
+// Unix-style absolute entry would otherwise extract (and Join can drop the
+// destination root). Drive-letter and UNC names are rejected on Unix too so
+// the check is the same everywhere.
+func archiveNameIsAbsolute(name string) bool {
+	if name == "" {
+		return false
+	}
+	if name[0] == '/' || name[0] == '\\' {
+		return true
+	}
+	if len(name) >= 2 && name[1] == ':' && isArchiveDriveLetter(name[0]) {
+		return true
+	}
+	return filepath.IsAbs(name) || filepath.VolumeName(name) != ""
+}
+
+func isArchiveDriveLetter(c byte) bool {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+}
+
+func archiveEntryDest(extractDirClean, name, kind string) (string, bool, error) {
+	errInvalid := fmt.Errorf("%s slip: invalid path %q", kind, name)
+	if archiveNameIsAbsolute(name) {
+		return "", false, errInvalid
+	}
+	cleaned := filepath.Clean(filepath.FromSlash(name))
+	if cleaned == "." {
+		return "", true, nil
+	}
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) {
+		return "", false, errInvalid
+	}
+	if archiveNameIsAbsolute(cleaned) || filepath.IsAbs(cleaned) || filepath.VolumeName(cleaned) != "" {
+		return "", false, errInvalid
+	}
+	prefix := extractDirClean + string(os.PathSeparator)
+	destPathClean := filepath.Clean(filepath.Join(extractDirClean, cleaned))
+	if destPathClean != extractDirClean && !strings.HasPrefix(destPathClean, prefix) {
+		return "", false, errInvalid
+	}
+	return destPathClean, false, nil
+}
+
+const (
+	maxTarEntries       = 256
+	maxTarExpandedBytes = 512 << 20
+)
+
+func extractTarGz(archivePath, extractDir string) error {
+	return extractTarGzLimited(archivePath, extractDir, maxTarEntries, maxTarExpandedBytes)
+}
+
+// tarBoundReader caps decompressed tar bytes and counts physical 512-byte
+// headers before archive/tar. Next() silently consumes local PAX ('x') and
+// GNU long-name/long-link ('L'/'K') records, so those must be counted here.
+type tarBoundReader struct {
+	r           io.Reader
+	streamCap   int64
+	maxHeaders  int
+	n           int64
+	headers     int
+	blk         [512]byte
+	blkN        int
+	payloadLeft int64
+	err         error
+}
+
+func tarBlockZero(b []byte) bool {
+	for _, c := range b {
+		if c != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func parseTarOctal(b []byte) (int64, bool) {
+	if len(b) > 0 && b[0]&0x80 != 0 {
+		return 0, false
+	}
+	var n int64
+	seen := false
+	for _, c := range b {
+		switch {
+		case c == 0 || c == ' ':
+			if seen {
+				return n, true
+			}
+		case c < '0' || c > '7':
+			return 0, false
+		default:
+			seen = true
+			n = n*8 + int64(c-'0')
+			if n < 0 {
+				return 0, false
+			}
+		}
+	}
+	return n, true
+}
+
+func (t *tarBoundReader) observe(p []byte) error {
+	for len(p) > 0 {
+		if t.payloadLeft > 0 {
+			n := t.payloadLeft
+			if int64(len(p)) < n {
+				n = int64(len(p))
+			}
+			p = p[n:]
+			t.payloadLeft -= n
+			continue
+		}
+		need := 512 - t.blkN
+		take := need
+		if len(p) < take {
+			take = len(p)
+		}
+		copy(t.blk[t.blkN:], p[:take])
+		t.blkN += take
+		p = p[take:]
+		if t.blkN < 512 {
+			return nil
+		}
+		t.blkN = 0
+		if tarBlockZero(t.blk[:]) {
+			continue
+		}
+		t.headers++
+		if t.headers > t.maxHeaders {
+			return fmt.Errorf("tar has too many entries")
+		}
+		size, ok := parseTarOctal(t.blk[124:136])
+		if !ok || size < 0 {
+			return fmt.Errorf("tar expanded size exceeds limit")
+		}
+		padded := size
+		if rem := size % 512; rem != 0 {
+			padded += 512 - rem
+		}
+		t.payloadLeft = padded
+	}
+	return nil
+}
+
+func (t *tarBoundReader) Read(p []byte) (int, error) {
+	if t.err != nil {
+		return 0, t.err
+	}
+	n, err := t.r.Read(p)
+	if n > 0 {
+		t.n += int64(n)
+		if t.n > t.streamCap {
+			t.err = fmt.Errorf("tar expanded size exceeds limit")
+			return n, t.err
+		}
+		if obsErr := t.observe(p[:n]); obsErr != nil {
+			t.err = obsErr
+			return n, t.err
+		}
+	}
+	return n, err
+}
+
+func extractTarGzLimited(archivePath, extractDir string, maxEntries int, maxBytes int64) error {
+	f, err := os.Open(archivePath) // #nosec G304,G703 -- local temp download; gosec-high excludes G304 but not G703
+	if err != nil {
+		return fmt.Errorf("open tar.gz %s: %w", archivePath, err)
+	}
+	defer f.Close() //nolint:errcheck // read-only archive, close error non-critical
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("gzip %s: %w", archivePath, err)
+	}
+	defer gz.Close() //nolint:errcheck // read-only gzip, close error non-critical
+
+	streamCap := maxBytes + int64(maxEntries)*512 + 1024
+	if streamCap < maxBytes {
+		streamCap = maxBytes
+	}
+	bound := &tarBoundReader{r: gz, streamCap: streamCap, maxHeaders: maxEntries}
+	tr := tar.NewReader(bound)
+	extractDirClean := filepath.Clean(extractDir)
+	entries := 0
+	var expanded int64
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read tar %s: %w", archivePath, err)
+		}
+
+		// Count every header and declared payload before skipping meta
+		// members (PAX/GNU long names) or "." destinations. Skipping first
+		// let a 64KiB "." entry and hundreds of PAX globals bypass the limits.
+		entries++
+		if entries > maxEntries {
+			return fmt.Errorf("tar has too many entries")
+		}
+		if hdr.Size < 0 {
+			return fmt.Errorf("tar entry %q has negative size", hdr.Name)
+		}
+		if hdr.Size > maxBytes || expanded > maxBytes-hdr.Size {
+			return fmt.Errorf("tar expanded size exceeds limit")
+		}
+
+		skipMeta := false
+		switch hdr.Typeflag {
+		case tar.TypeXHeader, tar.TypeXGlobalHeader, tar.TypeGNULongName, tar.TypeGNULongLink:
+			skipMeta = true
+		}
+
+		var destPathClean string
+		skipDest := false
+		if !skipMeta {
+			destPathClean, skipDest, err = archiveEntryDest(extractDirClean, hdr.Name, "tar")
+			if err != nil {
+				return err
+			}
+		}
+		if skipMeta || skipDest {
+			if hdr.Size > 0 {
+				// #nosec G110 -- already charged against maxBytes above
+				n, copyErr := io.CopyN(io.Discard, tr, hdr.Size)
+				expanded += n
+				if copyErr != nil && copyErr != io.EOF {
+					return fmt.Errorf("read tar %s: %w", archivePath, copyErr)
+				}
+			}
+			continue
+		}
+
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			// #nosec G301,G703 -- SDR-002: tar extraction dir; SDR-006: prefix-contained path
+			if err := os.MkdirAll(destPathClean, 0o755); err != nil {
+				return fmt.Errorf("mkdir %s: %w", destPathClean, err)
+			}
+		case tar.TypeReg:
+			// tar.Reader.Next normalizes legacy NUL file flags to TypeReg.
+			// Size already charged against maxBytes above, before any skip.
+			// #nosec G301,G703 -- SDR-002: tar extraction dir; SDR-006: prefix-contained path
+			if err := os.MkdirAll(filepath.Dir(destPathClean), 0o755); err != nil {
+				return fmt.Errorf("mkdir %s: %w", filepath.Dir(destPathClean), err)
+			}
+			// #nosec G302,G703 -- SDR-003: extracted file permissions; SDR-006: prefix-contained path
+			out, err := os.OpenFile(destPathClean, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+			if err != nil {
+				return fmt.Errorf("create %s: %w", destPathClean, err)
+			}
+			// #nosec G110 -- SDR-004: user-initiated archive extraction; bounded by maxTarExpandedBytes
+			n, err := io.CopyN(out, tr, hdr.Size)
+			if err != nil {
+				_ = out.Close()
+				return fmt.Errorf("write %s: %w", destPathClean, err)
+			}
+			expanded += n
+			if err := out.Close(); err != nil {
+				return fmt.Errorf("close %s: %w", destPathClean, err)
+			}
+			if runtime.GOOS != "windows" {
+				perm := hdr.FileInfo().Mode().Perm()
+				if perm != 0 {
+					if err := os.Chmod(destPathClean, perm); err != nil { // #nosec G302,G703 -- apply archive-provided mode within validated extraction root
+						return fmt.Errorf("chmod %s: %w", destPathClean, err)
+					}
+				}
+			}
+		default:
+			return fmt.Errorf("tar contains unsupported file type %q", hdr.Name)
+		}
+	}
+	return nil
+}
+
 func extractZip(zipPath, extractDir string) error {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
@@ -3405,25 +3705,14 @@ func extractZip(zipPath, extractDir string) error {
 	defer r.Close() //nolint:errcheck // read-only zip, close error non-critical
 
 	extractDirClean := filepath.Clean(extractDir)
-	prefix := extractDirClean + string(os.PathSeparator)
 
 	for _, f := range r.File {
-		name := filepath.FromSlash(f.Name)
-		cleaned := filepath.Clean(name)
-		if cleaned == "." {
+		destPathClean, skip, err := archiveEntryDest(extractDirClean, f.Name, "zip")
+		if err != nil {
+			return err
+		}
+		if skip {
 			continue
-		}
-		if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) {
-			return fmt.Errorf("zip slip: invalid path %q", f.Name)
-		}
-		if filepath.IsAbs(cleaned) || filepath.VolumeName(cleaned) != "" {
-			return fmt.Errorf("zip slip: invalid path %q", f.Name)
-		}
-
-		destPath := filepath.Join(extractDirClean, cleaned)
-		destPathClean := filepath.Clean(destPath)
-		if destPathClean != extractDirClean && !strings.HasPrefix(destPathClean, prefix) {
-			return fmt.Errorf("zip slip: invalid path %q", f.Name)
 		}
 
 		mode := f.Mode()

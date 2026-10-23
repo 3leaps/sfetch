@@ -1,7 +1,9 @@
 package main
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -9,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -36,12 +39,16 @@ func TestCopyFilePreservesPermissions(t *testing.T) {
 		t.Fatalf("copyFile: %v", err)
 	}
 
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		t.Fatalf("stat src: %v", err)
+	}
 	info, err := os.Stat(dst)
 	if err != nil {
 		t.Fatalf("stat dst: %v", err)
 	}
-	if got, want := info.Mode().Perm(), os.FileMode(0o755); got != want {
-		t.Fatalf("dst perms: got %o want %o", got, want)
+	if got, want := info.Mode().Perm(), srcInfo.Mode().Perm(); got != want {
+		t.Fatalf("dst perms: got %o want %o (src)", got, want)
 	}
 }
 
@@ -129,12 +136,16 @@ func TestInstallFileCopyFallbackPreservesPermsWhenNoChmodNeeded(t *testing.T) {
 		t.Fatalf("installFileWithRename: %v", err)
 	}
 
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		t.Fatalf("stat src: %v", err)
+	}
 	info, err := os.Stat(dst)
 	if err != nil {
 		t.Fatalf("stat dst: %v", err)
 	}
-	if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
-		t.Fatalf("dst perms: got %o want %o", got, want)
+	if got, want := info.Mode().Perm(), srcInfo.Mode().Perm(); got != want {
+		t.Fatalf("dst perms: got %o want %o (src)", got, want)
 	}
 }
 
@@ -411,41 +422,59 @@ func TestExtractZipRejectsZipSlip(t *testing.T) {
 func TestExtractZipRejectsAbsolutePaths(t *testing.T) {
 	t.Parallel()
 
-	tmp := t.TempDir()
-	zipPath := filepath.Join(tmp, "abs.zip")
-	extractDir := filepath.Join(tmp, "extract")
-	if err := os.Mkdir(extractDir, 0o755); err != nil {
-		t.Fatalf("mkdir extractDir: %v", err)
+	tests := []struct {
+		name  string
+		entry string
+	}{
+		{name: "unix abs", entry: "/evil"},
+		{name: "backslash abs", entry: `\evil`},
+		{name: "drive slash", entry: "C:/evil"},
+		{name: "drive backslash", entry: `C:\evil`},
+		{name: "unc slash", entry: "//host/share/evil"},
+		{name: "unc backslash", entry: `\\host\share\evil`},
 	}
 
-	out, err := os.Create(zipPath)
-	if err != nil {
-		t.Fatalf("create zip: %v", err)
-	}
-	zw := zip.NewWriter(out)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	hdr := &zip.FileHeader{Name: "/evil", Method: zip.Deflate}
-	w, err := zw.CreateHeader(hdr)
-	if err != nil {
-		_ = zw.Close()
-		_ = out.Close()
-		t.Fatalf("CreateHeader: %v", err)
-	}
-	if _, err := w.Write([]byte("pwnd")); err != nil {
-		_ = zw.Close()
-		_ = out.Close()
-		t.Fatalf("write zip entry: %v", err)
-	}
-	if err := zw.Close(); err != nil {
-		_ = out.Close()
-		t.Fatalf("close zip writer: %v", err)
-	}
-	if err := out.Close(); err != nil {
-		t.Fatalf("close zip file: %v", err)
-	}
+			tmp := t.TempDir()
+			zipPath := filepath.Join(tmp, "abs.zip")
+			extractDir := filepath.Join(tmp, "extract")
+			if err := os.Mkdir(extractDir, 0o755); err != nil {
+				t.Fatalf("mkdir extractDir: %v", err)
+			}
 
-	if err := extractZip(zipPath, extractDir); err == nil {
-		t.Fatalf("expected absolute path rejection")
+			out, err := os.Create(zipPath)
+			if err != nil {
+				t.Fatalf("create zip: %v", err)
+			}
+			zw := zip.NewWriter(out)
+
+			hdr := &zip.FileHeader{Name: tc.entry, Method: zip.Deflate}
+			w, err := zw.CreateHeader(hdr)
+			if err != nil {
+				_ = zw.Close()
+				_ = out.Close()
+				t.Fatalf("CreateHeader: %v", err)
+			}
+			if _, err := w.Write([]byte("pwnd")); err != nil {
+				_ = zw.Close()
+				_ = out.Close()
+				t.Fatalf("write zip entry: %v", err)
+			}
+			if err := zw.Close(); err != nil {
+				_ = out.Close()
+				t.Fatalf("close zip writer: %v", err)
+			}
+			if err := out.Close(); err != nil {
+				t.Fatalf("close zip file: %v", err)
+			}
+
+			if err := extractZip(zipPath, extractDir); err == nil {
+				t.Fatalf("expected absolute path rejection for %q", tc.entry)
+			}
+		})
 	}
 }
 
@@ -558,6 +587,506 @@ func TestExtractZipNestedPaths(t *testing.T) {
 	}
 }
 
+func TestArchiveNameIsAbsolute(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{name: "relative", in: "bin/tool", want: false},
+		{name: "bare", in: "tool", want: false},
+		{name: "unix abs", in: "/evil", want: true},
+		{name: "backslash abs", in: `\evil`, want: true},
+		{name: "drive slash", in: "C:/evil", want: true},
+		{name: "drive backslash", in: `C:\evil`, want: true},
+		{name: "drive relative", in: "C:evil", want: true},
+		{name: "unc slash", in: "//host/share/evil", want: true},
+		{name: "unc backslash", in: `\\host\share\evil`, want: true},
+		{name: "empty", in: "", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := archiveNameIsAbsolute(tc.in); got != tc.want {
+				t.Fatalf("archiveNameIsAbsolute(%q)=%v want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExtractTarCmdArgsForceLocalOnWindows(t *testing.T) {
+	t.Parallel()
+
+	got := extractTarCmdArgs(`C:\a\file.tar.xz`, `C:\a\out`, "-xJf")
+	if runtime.GOOS == "windows" {
+		if len(got) < 1 || got[0] != "--force-local" {
+			t.Fatalf("windows tar args: got %v, want --force-local first", got)
+		}
+		return
+	}
+	if len(got) < 1 || got[0] != "-xJf" {
+		t.Fatalf("unix tar args: got %v, want -xJf first", got)
+	}
+	for _, a := range got {
+		if a == "--force-local" {
+			t.Fatalf("unix tar args unexpectedly include --force-local: %v", got)
+		}
+	}
+}
+
+func TestExtractTarGz(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "tool.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	writeTestTarGz(t, archivePath, []testTarEntry{
+		{name: "sfetch", body: "hello-tar", mode: 0o755},
+	})
+
+	if err := extractArchive(ArchiveFormatTarGz, archivePath, extractDir); err != nil {
+		t.Fatalf("extractArchive tar.gz: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(extractDir, "sfetch"))
+	if err != nil {
+		t.Fatalf("read extracted: %v", err)
+	}
+	if string(got) != "hello-tar" {
+		t.Fatalf("extracted content: got %q want %q", string(got), "hello-tar")
+	}
+}
+
+func TestExtractTarGzLegacyNULHeaders(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "legacy.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	// Write raw wire bytes: tar.Writer would normalize the legacy NUL flag.
+	writeRawTarGz(t, archivePath, []rawTarMember{
+		{name: "bin/", typeflag: '\x00'},
+		{name: "bin/tool", typeflag: '\x00', payload: []byte("legacy payload")},
+	})
+	if err := extractTarGzLimited(archivePath, extractDir, 2, 14); err != nil {
+		t.Fatalf("extract legacy headers: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(extractDir, "bin", "tool"))
+	if err != nil {
+		t.Fatalf("read legacy file: %v", err)
+	}
+	if string(got) != "legacy payload" {
+		t.Fatalf("legacy content: got %q", got)
+	}
+}
+
+func TestExtractTarGzRejectsOversize(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "bomb.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	// High-ratio: 64KiB of zeros compresses to a tiny gzip, but the tar Size
+	// exceeds the test limit. Reverting the expanded-size check accepts it.
+	writeTestTarGz(t, archivePath, []testTarEntry{
+		{name: "zeros", body: strings.Repeat("\x00", 64<<10), mode: 0o644},
+	})
+	info, err := os.Stat(archivePath)
+	if err != nil {
+		t.Fatalf("stat archive: %v", err)
+	}
+	if info.Size() >= 64<<10 {
+		t.Fatalf("expected high-ratio archive, got %d bytes on disk", info.Size())
+	}
+	if err := extractTarGzLimited(archivePath, extractDir, 256, 1024); err == nil {
+		t.Fatal("expected expanded-size rejection")
+	}
+	if _, err := os.Stat(filepath.Join(extractDir, "zeros")); err == nil {
+		t.Fatal("oversize entry was written")
+	}
+}
+
+func TestExtractTarGzRejectsTooManyEntries(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "many.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	entries := make([]testTarEntry, 5)
+	for i := range entries {
+		entries[i] = testTarEntry{name: fmt.Sprintf("f%d", i), body: "x", mode: 0o644}
+	}
+	writeTestTarGz(t, archivePath, entries)
+	if err := extractTarGzLimited(archivePath, extractDir, 3, 512<<20); err == nil {
+		t.Fatal("expected entry-count rejection")
+	}
+}
+
+func TestExtractTarGzCountsDotMemberSize(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "dot.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	// 64KiB "." member: skipped as a destination, but must still charge size.
+	writeTestTarGz(t, archivePath, []testTarEntry{
+		{name: ".", body: strings.Repeat("\x00", 64<<10), mode: 0o644},
+		{name: "ok", body: "x", mode: 0o644},
+	})
+	if err := extractTarGzLimited(archivePath, extractDir, 256, 1024); err == nil {
+		t.Fatal("expected expanded-size rejection of 64KiB '.' member")
+	}
+}
+
+func TestExtractTarGzCountsPAXGlobalHeaders(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "pax.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	entries := make([]testTarEntry, 301)
+	for i := 0; i < 300; i++ {
+		entries[i] = testTarEntry{
+			name:     fmt.Sprintf("pax-%d", i),
+			typeflag: tar.TypeXGlobalHeader,
+			pax:      map[string]string{"comment": fmt.Sprintf("%d", i)},
+		}
+	}
+	entries[300] = testTarEntry{name: "ok", body: "x", mode: 0o644}
+	writeTestTarGz(t, archivePath, entries)
+	if err := extractTarGzLimited(archivePath, extractDir, 3, 512<<20); err == nil {
+		t.Fatal("expected entry-count rejection of 300 PAX global headers")
+	}
+}
+
+func TestExtractTarGzRejectsLocalPAXHeaders(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "local-pax.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	// archive/tar.Next() consumes TypeXHeader, so counting only returned
+	// headers lets 300 local PAX + a 1-byte file through maxEntries=2.
+	members := make([]rawTarMember, 0, 301)
+	for i := 0; i < 300; i++ {
+		members = append(members, rawTarMember{
+			name:     fmt.Sprintf("PaxHeaders/%d", i),
+			typeflag: tar.TypeXHeader,
+			payload:  []byte(paxRecord("comment", fmt.Sprintf("%d", i))),
+		})
+	}
+	members = append(members, rawTarMember{name: "ok", typeflag: tar.TypeReg, payload: []byte("x")})
+	writeRawTarGz(t, archivePath, members)
+	if err := extractTarGzLimited(archivePath, extractDir, 2, 32); err == nil {
+		t.Fatal("expected rejection of 300 local PAX headers with maxEntries=2 maxBytes=32")
+	}
+	if err := extractTarGzLimited(archivePath, extractDir, 2, 512<<20); err == nil {
+		t.Fatal("expected physical-header rejection of 300 local PAX headers")
+	}
+}
+
+func TestExtractTarGzAllowsLocalPAXWithinBudget(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "one-pax.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	writeRawTarGz(t, archivePath, []rawTarMember{
+		{name: "PaxHeaders/ok", typeflag: tar.TypeXHeader, payload: []byte(paxRecord("comment", "1"))},
+		{name: "ok", typeflag: tar.TypeReg, payload: []byte("x")},
+	})
+	if err := extractTarGzLimited(archivePath, extractDir, 3, 512<<20); err != nil {
+		t.Fatalf("1 local PAX + 1 file within budget: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(extractDir, "ok"))
+	if err != nil {
+		t.Fatalf("read extracted: %v", err)
+	}
+	if string(got) != "x" {
+		t.Fatalf("extracted content: got %q want %q", string(got), "x")
+	}
+}
+
+func TestExtractTarGzRejectsGNULongName(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "gnu-longname.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	long := strings.Repeat("n", 200)
+	members := make([]rawTarMember, 0, 601)
+	for i := 0; i < 300; i++ {
+		members = append(members,
+			rawTarMember{name: "././@LongLink", typeflag: tar.TypeGNULongName, payload: append([]byte(long), 0)},
+			rawTarMember{name: "short", typeflag: tar.TypeReg, payload: []byte("x")},
+		)
+	}
+	writeRawTarGz(t, archivePath, members)
+	if err := extractTarGzLimited(archivePath, extractDir, 2, 512<<20); err == nil {
+		t.Fatal("expected physical-header rejection of GNU long-name extensions")
+	}
+}
+
+func TestExtractTarGzRejectsGNULongLink(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "gnu-longlink.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	target := strings.Repeat("t", 200)
+	members := make([]rawTarMember, 0, 301)
+	for i := 0; i < 300; i++ {
+		members = append(members, rawTarMember{
+			name:     "././@LongLink",
+			typeflag: tar.TypeGNULongLink,
+			payload:  append([]byte(target), 0),
+		})
+	}
+	members = append(members, rawTarMember{name: "ok", typeflag: tar.TypeReg, payload: []byte("x")})
+	writeRawTarGz(t, archivePath, members)
+	if err := extractTarGzLimited(archivePath, extractDir, 2, 512<<20); err == nil {
+		t.Fatal("expected physical-header rejection of GNU long-link extensions")
+	}
+}
+
+func TestExtractTarGzFixture(t *testing.T) {
+	t.Parallel()
+
+	extractDir := t.TempDir()
+	if err := extractTarGz("testdata/integration/sfetch_test_darwin_arm64.tar.gz", extractDir); err != nil {
+		t.Fatalf("extractTarGz fixture: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(extractDir, "sfetch")); err != nil {
+		t.Fatalf("expected sfetch in fixture extract: %v", err)
+	}
+}
+
+func TestExtractTarGzRejectsAbsolutePaths(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		entry string
+	}{
+		{name: "unix abs", entry: "/evil"},
+		{name: "drive slash", entry: "C:/evil"},
+		{name: "unc slash", entry: "//host/share/evil"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tmp := t.TempDir()
+			archivePath := filepath.Join(tmp, "abs.tar.gz")
+			extractDir := filepath.Join(tmp, "extract")
+			if err := os.Mkdir(extractDir, 0o755); err != nil {
+				t.Fatalf("mkdir extractDir: %v", err)
+			}
+			writeTestTarGz(t, archivePath, []testTarEntry{
+				{name: tc.entry, body: "pwnd", mode: 0o644},
+			})
+			if err := extractTarGz(archivePath, extractDir); err == nil {
+				t.Fatalf("expected absolute path rejection for %q", tc.entry)
+			}
+		})
+	}
+}
+
+func TestExtractTarGzRejectsZipSlip(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "slip.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	if err := os.Mkdir(extractDir, 0o755); err != nil {
+		t.Fatalf("mkdir extractDir: %v", err)
+	}
+	writeTestTarGz(t, archivePath, []testTarEntry{
+		{name: "../evil", body: "pwnd", mode: 0o644},
+	})
+	if err := extractTarGz(archivePath, extractDir); err == nil {
+		t.Fatalf("expected tar slip rejection")
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "evil")); err == nil {
+		t.Fatalf("tar slip wrote outside extraction dir")
+	}
+}
+
+type testTarEntry struct {
+	name     string
+	body     string
+	mode     os.FileMode
+	typeflag byte
+	pax      map[string]string
+}
+
+type rawTarMember struct {
+	name     string
+	typeflag byte
+	payload  []byte
+}
+
+func paxRecord(k, v string) string {
+	rest := " " + k + "=" + v + "\n"
+	n := len(rest) + 1
+	for {
+		s := fmt.Sprintf("%d%s", n, rest)
+		if len(s) == n {
+			return s
+		}
+		n = len(s)
+	}
+}
+
+func writeUSTARHeader(w io.Writer, name string, size int64, typeflag byte) error {
+	var hdr [512]byte
+	if len(name) > 100 {
+		return fmt.Errorf("ustar name too long")
+	}
+	copy(hdr[0:100], name)
+	copy(hdr[100:108], []byte("0000644\x00"))
+	copy(hdr[108:116], []byte("0000000\x00"))
+	copy(hdr[116:124], []byte("0000000\x00"))
+	copy(hdr[124:136], []byte(fmt.Sprintf("%011o\x00", uint64(size))))
+	copy(hdr[136:148], []byte("00000000000\x00"))
+	hdr[156] = typeflag
+	copy(hdr[257:262], []byte("ustar"))
+	hdr[263] = '0'
+	hdr[264] = '0'
+	for i := 148; i < 156; i++ {
+		hdr[i] = ' '
+	}
+	sum := 0
+	for i := 0; i < 512; i++ {
+		sum += int(hdr[i])
+	}
+	copy(hdr[148:154], []byte(fmt.Sprintf("%06o", sum)))
+	hdr[154] = 0
+	hdr[155] = ' '
+	_, err := w.Write(hdr[:])
+	return err
+}
+
+func writeRawTarGz(t *testing.T, path string, members []rawTarMember) {
+	t.Helper()
+	out, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create raw tar.gz: %v", err)
+	}
+	gz := gzip.NewWriter(out)
+	for _, m := range members {
+		if err := writeUSTARHeader(gz, m.name, int64(len(m.payload)), m.typeflag); err != nil {
+			_ = gz.Close()
+			_ = out.Close()
+			t.Fatalf("write ustar header: %v", err)
+		}
+		if len(m.payload) == 0 {
+			continue
+		}
+		if _, err := gz.Write(m.payload); err != nil {
+			_ = gz.Close()
+			_ = out.Close()
+			t.Fatalf("write ustar payload: %v", err)
+		}
+		if rem := len(m.payload) % 512; rem != 0 {
+			if _, err := gz.Write(make([]byte, 512-rem)); err != nil {
+				_ = gz.Close()
+				_ = out.Close()
+				t.Fatalf("write ustar padding: %v", err)
+			}
+		}
+	}
+	if _, err := gz.Write(make([]byte, 1024)); err != nil {
+		_ = gz.Close()
+		_ = out.Close()
+		t.Fatalf("write tar trailer: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		_ = out.Close()
+		t.Fatalf("close gzip writer: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatalf("close raw tar.gz: %v", err)
+	}
+}
+
+func writeTestTarGz(t *testing.T, path string, entries []testTarEntry) {
+	t.Helper()
+	out, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create tar.gz: %v", err)
+	}
+	gz := gzip.NewWriter(out)
+	tw := tar.NewWriter(gz)
+	for _, e := range entries {
+		typeflag := e.typeflag
+		if typeflag == 0 {
+			typeflag = tar.TypeReg
+		}
+		hdr := &tar.Header{
+			Name:       e.name,
+			Mode:       int64(e.mode),
+			Size:       int64(len(e.body)),
+			Typeflag:   typeflag,
+			PAXRecords: e.pax,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			_ = tw.Close()
+			_ = gz.Close()
+			_ = out.Close()
+			t.Fatalf("write tar header: %v", err)
+		}
+		if typeflag == tar.TypeXGlobalHeader || typeflag == tar.TypeXHeader {
+			continue
+		}
+		if _, err := io.WriteString(tw, e.body); err != nil {
+			_ = tw.Close()
+			_ = gz.Close()
+			_ = out.Close()
+			t.Fatalf("write tar body: %v", err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		_ = gz.Close()
+		_ = out.Close()
+		t.Fatalf("close tar writer: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		_ = out.Close()
+		t.Fatalf("close gzip writer: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatalf("close tar.gz: %v", err)
+	}
+}
+
 func TestResolveArchiveBinaryPath(t *testing.T) {
 	t.Parallel()
 
@@ -637,6 +1166,7 @@ func TestCLIFlagValidation(t *testing.T) {
 		name       string
 		args       []string
 		wantCode   int
+		wantStdout string // substring to match in stdout
 		wantStderr string // substring to match in stderr
 	}{
 		{
@@ -697,13 +1227,19 @@ func TestCLIFlagValidation(t *testing.T) {
 			name:       "version flag returns success",
 			args:       []string{"--version"},
 			wantCode:   0,
-			wantStderr: "sfetch",
+			wantStdout: "sfetch",
 		},
 		{
 			name:       "version-extended flag returns success",
 			args:       []string{"--version-extended"},
 			wantCode:   0,
-			wantStderr: "go version",
+			wantStdout: "go version",
+		},
+		{
+			name:       "version subcommand returns success",
+			args:       []string{"version"},
+			wantCode:   0,
+			wantStdout: "sfetch",
 		},
 	}
 
@@ -716,6 +1252,9 @@ func TestCLIFlagValidation(t *testing.T) {
 			code := run(tc.args, &stdout, &stderr)
 			if code != tc.wantCode {
 				t.Errorf("exit code: got %d want %d (stderr=%q)", code, tc.wantCode, stderr.String())
+			}
+			if tc.wantStdout != "" && !strings.Contains(stdout.String(), tc.wantStdout) {
+				t.Errorf("stdout: got %q, want substring %q", stdout.String(), tc.wantStdout)
 			}
 			if tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
 				t.Errorf("stderr: got %q, want substring %q", stderr.String(), tc.wantStderr)
@@ -915,7 +1454,19 @@ func TestSigVerify(t *testing.T) {
 }
 
 func TestVersion(t *testing.T) {
-	// manual --version "sfetch dev"
+	t.Parallel()
+
+	var stdout, stderr strings.Builder
+	code := run([]string{"--version"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("--version exit %d stderr=%q", code, stderr.String())
+	}
+	if got := stdout.String(); !strings.HasPrefix(got, "sfetch ") {
+		t.Fatalf("--version stdout: got %q", got)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("--version wrote stderr: %q", stderr.String())
+	}
 }
 
 func TestResolvePGPKey(t *testing.T) {
@@ -2488,12 +3039,15 @@ func TestEmbeddedTrustAnchors(t *testing.T) {
 	})
 
 	t.Run("matches SSOT anchor file and bootstrap engine", func(t *testing.T) {
-		anchor, err := os.ReadFile("scripts/sfetch-minisign-anchor.pub")
+		anchor, err := os.ReadFile("docs/security/sfetch-minisign.pub")
 		if err != nil {
-			t.Fatalf("read scripts/sfetch-minisign-anchor.pub: %v", err)
+			t.Fatalf("read docs/security/sfetch-minisign.pub: %v", err)
 		}
 		if !strings.Contains(string(anchor), EmbeddedMinisignPubkey) {
-			t.Error("EmbeddedMinisignPubkey does not match scripts/sfetch-minisign-anchor.pub")
+			t.Error("EmbeddedMinisignPubkey does not match docs/security/sfetch-minisign.pub")
+		}
+		if _, err := os.Stat("scripts/sfetch-minisign-anchor.pub"); err == nil {
+			t.Error("scripts/sfetch-minisign-anchor.pub must not exist; embed docs/security/sfetch-minisign.pub")
 		}
 		engine, err := os.ReadFile("scripts/bootstrap-sfetch-verified.sh")
 		if err != nil {

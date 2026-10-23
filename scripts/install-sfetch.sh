@@ -37,7 +37,7 @@ SFETCH_API="https://api.github.com/repos/${SFETCH_REPO}/releases"
 # This key is pinned here to prevent TOCTOU attacks where an attacker
 # could replace both the release artifacts and the verification key.
 #
-# IMPORTANT: This key must match scripts/sfetch-minisign-anchor.pub (SSOT)
+# IMPORTANT: This key must match docs/security/sfetch-minisign.pub (SSOT)
 # and EmbeddedMinisignPubkey in main.go (go:embed of that file).
 # Update both when rotating keys (see docs/security/signing-runbook.md)
 SFETCH_MINISIGN_PUBKEY="RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVqjKj3ctSA1"
@@ -95,6 +95,26 @@ semver_le_tag() {
     return 0
 }
 
+# select_trust_anchor TAG: set ACTIVE_MINISIGN_PUBKEY, ACTIVE_PGP_FPR and
+# ANCHOR_GEN for the resolved tag. The tag selects exactly one key generation:
+# tags at or below SFETCH_PREVKEY_MAX are previous-key-signed; tags above
+# are current-key-signed. Refuse non-semver tags rather than guess a key.
+select_trust_anchor() {
+    local version="$1"
+    if ! is_exact_semver_tag "$version"; then
+        err "cannot select trust anchor for non-semver tag: ${version:-<empty>}"
+    fi
+    ACTIVE_MINISIGN_PUBKEY="$SFETCH_MINISIGN_PUBKEY"
+    ACTIVE_PGP_FPR="$SFETCH_PGP_FPR"
+    ANCHOR_GEN="current"
+    if semver_le_tag "$version" "$SFETCH_PREVKEY_MAX"; then
+        ANCHOR_GEN="legacy"
+        ACTIVE_MINISIGN_PUBKEY="$SFETCH_MINISIGN_PUBKEY_LEGACY"
+        ACTIVE_PGP_FPR="$SFETCH_PGP_FPR_LEGACY"
+    fi
+    log "trust anchor: ${ANCHOR_GEN} (pin ${version})"
+}
+
 read_release_tag_name() {
     local release_json_file="$1"
     local version=""
@@ -140,51 +160,50 @@ print_verifier_help() {
 # Platform detection
 # -----------------------------------------------------------------------------
 
+windows_arch_from_hint() {
+    case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+        amd64 | x64 | x86_64)
+            echo "amd64"
+            return 0
+            ;;
+        arm64 | aarch64)
+            echo "arm64"
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 detect_windows_arch() {
     local arch_hint
 
     # GitHub-hosted runners expose the native runner architecture via RUNNER_ARCH,
     # which stays accurate even when Git Bash and spawned processes are emulated.
-    arch_hint=$(printf '%s' "${RUNNER_ARCH:-}" | tr '[:upper:]' '[:lower:]')
-    case "$arch_hint" in
-        amd64 | x64 | x86_64)
-            echo "amd64"
-            return 0
-            ;;
-        arm64 | aarch64)
-            echo "arm64"
-            return 0
-            ;;
-    esac
-
-    # GitHub's Windows ARM64 runners invoke Git Bash under x64 emulation, and
-    # both uname -m and PROCESSOR_ARCHITECTURE can still report amd64 there.
-    # Ask native PowerShell for the host OS architecture next.
-    if command -v powershell.exe >/dev/null 2>&1; then
-        arch_hint=$(powershell.exe -NoProfile -NonInteractive -Command "[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture" 2>/dev/null | tr -d '\r' | tr '[:upper:]' '[:lower:]' | head -n1)
-        case "$arch_hint" in
-            amd64 | x64 | x86_64)
-                echo "amd64"
-                return 0
-                ;;
-            arm64 | aarch64)
-                echo "arm64"
-                return 0
-                ;;
-        esac
+    if arch_hint=$(windows_arch_from_hint "${RUNNER_ARCH:-}"); then
+        echo "$arch_hint"
+        return 0
     fi
 
-    arch_hint=$(printf '%s' "${PROCESSOR_ARCHITEW6432:-${PROCESSOR_ARCHITECTURE:-}}" | tr '[:upper:]' '[:lower:]')
-    case "$arch_hint" in
-        amd64 | x64 | x86_64)
-            echo "amd64"
+    # WOW64 publishes the host arch in PROCESSOR_ARCHITEW6432. Prefer that
+    # before PowerShell: GitHub Windows ARM64 runners invoke Git Bash and
+    # powershell.exe under x64 emulation, and OSArchitecture then reports X64.
+    if arch_hint=$(windows_arch_from_hint "${PROCESSOR_ARCHITEW6432:-}"); then
+        echo "$arch_hint"
+        return 0
+    fi
+
+    if command -v powershell.exe >/dev/null 2>&1; then
+        arch_hint=$(powershell.exe -NoProfile -NonInteractive -Command "[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture" 2>/dev/null | tr -d '\r' | tr '[:upper:]' '[:lower:]' | head -n1 || true)
+        if arch_hint=$(windows_arch_from_hint "$arch_hint"); then
+            echo "$arch_hint"
             return 0
-            ;;
-        arm64 | aarch64)
-            echo "arm64"
-            return 0
-            ;;
-    esac
+        fi
+    fi
+
+    if arch_hint=$(windows_arch_from_hint "${PROCESSOR_ARCHITECTURE:-}"); then
+        echo "$arch_hint"
+        return 0
+    fi
 
     return 1
 }
@@ -345,6 +364,25 @@ verify_checksum() {
 # Signature verification
 # -----------------------------------------------------------------------------
 
+# gpg_cleanup: stop any agent started for the isolated GnuPG home, then
+# remove it. Safe to call more than once.
+GPG_HOME=""
+gpg_cleanup() {
+    if [ -n "$GPG_HOME" ] && [ -d "$GPG_HOME" ]; then
+        gpgconf --homedir "$GPG_HOME" --kill all >/dev/null 2>&1 || true
+        rm -rf "$GPG_HOME"
+    fi
+    GPG_HOME=""
+}
+
+# Primary fingerprint from a VALIDSIG status line. Field 12 is the primary
+# (GnuPG DETAILS). GnuPG 2.5.x appends flags after that, so $NF is not portable.
+gpg_validsig_primary() {
+    local -a _vs
+    read -r -a _vs <<<"$1"
+    printf '%s' "${_vs[11]:-}"
+}
+
 verify_signature() {
     local sums_file="$1"
     local tmpdir="$2"
@@ -380,24 +418,128 @@ verify_signature() {
     if [ "$verified" = false ] && [ "$REQUIRE_MINISIGN" = false ] && [ "$VERIFY_GPG" = true ] && [ -f "${sums_file}.asc" ]; then
         local gpg_key="${tmpdir}/sfetch-release-signing-key.asc"
         if [ -f "$gpg_key" ]; then
-            local fpr
-            fpr=$(gpg --with-colons --import-options show-only --fingerprint "$gpg_key" 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')
-            if [ "$fpr" != "$ACTIVE_PGP_FPR" ]; then
-                err "GPG key fingerprint mismatch (expected ${ACTIVE_PGP_FPR}, got ${fpr:-unknown})"
+            # Isolated home under /tmp: macOS default TMPDIR is too long for
+            # the gpg-agent socket. gpg_cleanup stops the agent and removes it.
+            GPG_HOME="$(mktemp -d /tmp/sfetch-gpg.XXXXXX)" || err "cannot create GnuPG home"
+            # Three overlapping checks, kept together on purpose (mutant 8):
+            # 1. secret-key reject (has_sec) — a bundled secret packet must not
+            #    ride along even when the public pin matches.
+            # 2. pub/sec primary count (nprimary==1) — a second public primary
+            #    in the same file must not ride along (the narrow --import
+            #    show-only first-fpr check was fail-open on a bundled extra key).
+            # 3. VALIDSIG primary (field 12) — the signer may be a subkey; the
+            #    pin is the primary fingerprint. Removing only one of these
+            #    leaves a hole the other two do not cover.
+            local listing fprs _f gpg_rc=0
+            set +e
+            listing=$(gpg --homedir "$GPG_HOME" --batch --no-tty --with-colons \
+                --import-options show-only --import "$gpg_key" 2>/dev/null)
+            gpg_rc=$?
+            set -e
+            if [ "$gpg_rc" -eq 127 ]; then
+                gpg_cleanup
+                echo "error: gpg tool failure (rc=$gpg_rc)" >&2
+                exit 127
+            fi
+            if [ "$gpg_rc" -ne 0 ]; then
+                gpg_cleanup
+                err "GPG key file could not be read"
+            fi
+            # Parse the whole listing in the shell (no pipes: an early-exiting)
+            # reader under pipefail could otherwise skip a check).
+            local line rec want=false has_sec=false nprimary=0
+            fprs=""
+            while IFS= read -r line; do
+                rec="${line%%:*}"
+                case "$rec" in
+                    sec) has_sec=true want=true nprimary=$((nprimary + 1)) ;;
+                    pub) want=true nprimary=$((nprimary + 1)) ;;
+                    fpr)
+                        if [ "$want" = true ]; then
+                            IFS=: read -r -a _f <<<"$line"
+                            fprs="${fprs}${fprs:+ }${_f[9]:-}"
+                            want=false
+                        fi
+                        ;;
+                esac
+            done <<<"$listing"
+            if [ "$has_sec" = true ]; then
+                gpg_cleanup
+                err "GPG key file must not contain secret keys"
+            fi
+            if [ "$nprimary" -ne 1 ]; then
+                gpg_cleanup
+                err "GPG key file must contain exactly one primary key"
+            fi
+            if [ "$fprs" != "$ACTIVE_PGP_FPR" ]; then
+                gpg_cleanup
+                err "GPG key fingerprint mismatch (expected ${ACTIVE_PGP_FPR}, got ${fprs:-unknown})"
             fi
             log "Verifying signature with gpg (pinned fingerprint)..."
-            local gpg_home
-            gpg_home=$(mktemp -d)
-            if gpg --batch --no-tty --homedir "$gpg_home" --import "$gpg_key" 2>/dev/null &&
-                gpg --batch --no-tty --homedir "$gpg_home" --trust-model always \
-                    --verify "${sums_file}.asc" "$sums_file" 2>/dev/null; then
-                log "GPG signature verified"
-                verified=true
-                TRUST_LEVEL="medium (gpg, pinned key)"
-            else
+            # The listing pin (fprs == ACTIVE_PGP_FPR) is the selected generation.
+            # VALIDSIG field 12 (primary-key-fpr) must equal that imported
+            # primary so a signature from some other key in the homedir cannot
+            # ride along. $NF is flags on GnuPG 2.5.x. Comparing VALIDSIG to
+            # ACTIVE_PGP_FPR a second time would mask a listing that checked
+            # the default pin instead of the selected one.
+            # --trust-model always still emits EXPKEYSIG/EXPSIG/REVKEYSIG and
+            # KEYEXPIRED with rc=0 plus VALIDSIG; those are not a valid pin.
+            local status sig_primary gpg_bad=false gpg_rc=0 gpg_tok nvalid=0
+            set +e
+            gpg --batch --no-tty --homedir "$GPG_HOME" --import "$gpg_key" 2>/dev/null
+            gpg_rc=$?
+            set -e
+            if [ "$gpg_rc" -eq 127 ]; then
+                gpg_cleanup
+                echo "error: gpg tool failure (rc=$gpg_rc)" >&2
+                exit 127
+            fi
+            if [ "$gpg_rc" -ne 0 ]; then
+                gpg_cleanup
                 err "GPG signature verification failed"
             fi
-            rm -rf "$gpg_home"
+            set +e
+            status=$(gpg --batch --no-tty --homedir "$GPG_HOME" --trust-model always \
+                --status-fd 1 --verify "${sums_file}.asc" "$sums_file" 2>/dev/null)
+            gpg_rc=$?
+            set -e
+            if [ "$gpg_rc" -eq 127 ]; then
+                gpg_cleanup
+                echo "error: gpg tool failure (rc=$gpg_rc)" >&2
+                exit 127
+            fi
+            sig_primary=""
+            while IFS= read -r line; do
+                case "$line" in
+                    "[GNUPG:] VALIDSIG "*)
+                        nvalid=$((nvalid + 1))
+                        sig_primary="$(gpg_validsig_primary "$line")"
+                        ;;
+                esac
+                gpg_tok="${line#'[GNUPG:] '}"
+                gpg_tok="${gpg_tok%% *}"
+                case "$gpg_tok" in
+                    EXPKEYSIG|EXPSIG|REVKEYSIG|KEYREVOKED|KEYEXPIRED|BADSIG|ERRSIG)
+                        gpg_bad=true
+                        ;;
+                esac
+            done <<<"${status:-}"
+            if [ "$gpg_rc" -ne 0 ] || [ "$gpg_bad" = true ]; then
+                gpg_cleanup
+                err "GPG signature verification failed"
+            fi
+            if [ "$nvalid" -ne 1 ]; then
+                gpg_cleanup
+                err "GPG signature must contain exactly one VALIDSIG (got ${nvalid})"
+            fi
+            if [ "$sig_primary" != "$fprs" ]; then
+                gpg_cleanup
+                err "GPG signature is not from the pinned key (got ${sig_primary:-none})"
+            fi
+            log "GPG signature verified"
+            verified=true
+            TRUST_LEVEL="medium (gpg, pinned key)"
+            gpg_cleanup
         else
             warn "GPG public key not found in release"
         fi
@@ -554,9 +696,10 @@ main() {
         err "signature verification required; install minisign (recommended) or gpg, or pass --allow-checksum-only to bypass (NOT recommended)"
     fi
 
-    # Create temp directory (not local - needed for EXIT trap)
+    # Create temp directory (not local - needed for EXIT trap). gpg_cleanup
+    # stops any agent started for the isolated GnuPG home inside tmpdir.
     tmpdir=$(mktemp -d)
-    trap 'rm -rf "$tmpdir"' EXIT
+    trap 'gpg_cleanup; rm -rf "$tmpdir"' EXIT
 
     # Fetch release info
     local release_url
@@ -574,21 +717,7 @@ main() {
     version=$(read_release_tag_name "$release_json")
     log "Installing sfetch ${version}"
 
-    # Pin map: the resolved tag selects exactly one key generation. Tags at or
-    # below SFETCH_PREVKEY_MAX are previous-key-signed; tags above are
-    # current-key-signed. Refuse non-semver tags rather than guess a key.
-    if ! is_exact_semver_tag "$version"; then
-        err "cannot select trust anchor for non-semver tag: ${version:-<empty>}"
-    fi
-    ACTIVE_MINISIGN_PUBKEY="$SFETCH_MINISIGN_PUBKEY"
-    ACTIVE_PGP_FPR="$SFETCH_PGP_FPR"
-    local anchor_gen="current"
-    if semver_le_tag "$version" "$SFETCH_PREVKEY_MAX"; then
-        anchor_gen="legacy"
-        ACTIVE_MINISIGN_PUBKEY="$SFETCH_MINISIGN_PUBKEY_LEGACY"
-        ACTIVE_PGP_FPR="$SFETCH_PGP_FPR_LEGACY"
-    fi
-    log "trust anchor: ${anchor_gen} (pin ${version})"
+    select_trust_anchor "$version"
 
     # Determine archive name
     local archive_name="sfetch_${platform}"

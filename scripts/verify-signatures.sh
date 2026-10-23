@@ -8,7 +8,7 @@ set -euo pipefail
 # Env:
 #   SFETCH_MINISIGN_PUB - path to operator minisign public key (required advisory).
 #     Must match the canonical consumer trust anchor. Actual minisign -V always
-#     uses scripts/sfetch-minisign-anchor.pub (SSOT) so parser divergence cannot
+#     uses docs/security/sfetch-minisign.pub (SSOT) so parser divergence cannot
 #     reintroduce "signed with some key ≠ consumer key".
 #   SFETCH_GPG_HOMEDIR  - isolated gpg homedir for PGP verification (optional)
 #
@@ -37,7 +37,8 @@ _anchor_checked=0
 # Canonical consumer-facing trust anchor SSOT (must match main.go embed,
 # install-sfetch.sh, and bootstrap-sfetch-verified.sh).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CANONICAL_ANCHOR_PUB="${SCRIPT_DIR}/sfetch-minisign-anchor.pub"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+CANONICAL_ANCHOR_PUB="${REPO_ROOT}/docs/security/sfetch-minisign.pub"
 
 # Extract the operative minisign public key the same way minisign does:
 # line 1 = untrusted comment, line 2 = RW… key (when standard .pub format).
@@ -93,7 +94,7 @@ assert_operator_pub_matches_canonical() {
     }
     if [ "${got}" != "${expect}" ]; then
         echo "error: SFETCH_MINISIGN_PUB does not match the canonical consumer trust anchor" >&2
-        echo "  expected (scripts/sfetch-minisign-anchor.pub): ${expect}" >&2
+        echo "  expected (docs/security/sfetch-minisign.pub): ${expect}" >&2
         echo "  got (SFETCH_MINISIGN_PUB):                     ${got}" >&2
         echo "  Signing with a non-consumer key would make the release gate green while" >&2
         echo "  every bootstrap consumer fails against the embedded anchor." >&2
