@@ -661,6 +661,29 @@ func TestExtractTarGz(t *testing.T) {
 	}
 }
 
+func TestExtractTarGzLegacyNULHeaders(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	archivePath := filepath.Join(tmp, "legacy.tar.gz")
+	extractDir := filepath.Join(tmp, "extract")
+	// Write raw wire bytes: tar.Writer would normalize the legacy NUL flag.
+	writeRawTarGz(t, archivePath, []rawTarMember{
+		{name: "bin/", typeflag: '\x00'},
+		{name: "bin/tool", typeflag: '\x00', payload: []byte("legacy payload")},
+	})
+	if err := extractTarGzLimited(archivePath, extractDir, 2, 14); err != nil {
+		t.Fatalf("extract legacy headers: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(extractDir, "bin", "tool"))
+	if err != nil {
+		t.Fatalf("read legacy file: %v", err)
+	}
+	if string(got) != "legacy payload" {
+		t.Fatalf("legacy content: got %q", got)
+	}
+}
+
 func TestExtractTarGzRejectsOversize(t *testing.T) {
 	t.Parallel()
 

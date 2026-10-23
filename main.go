@@ -3660,7 +3660,8 @@ func extractTarGzLimited(archivePath, extractDir string, maxEntries int, maxByte
 			if err := os.MkdirAll(destPathClean, 0o755); err != nil {
 				return fmt.Errorf("mkdir %s: %w", destPathClean, err)
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
+			// tar.Reader.Next normalizes legacy NUL file flags to TypeReg.
 			// Size already charged against maxBytes above, before any skip.
 			// #nosec G301,G703 -- SDR-002: tar extraction dir; SDR-006: prefix-contained path
 			if err := os.MkdirAll(filepath.Dir(destPathClean), 0o755); err != nil {
