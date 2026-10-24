@@ -9,9 +9,9 @@
 ### The one-liner
 **sfetch is the `curl | sh` you can actually trust in 2026.**
 
-A tiny (~3 MB), statically-linked Go binary that downloads release artifacts from GitHub and **verifies signatures and checksums automatically** - using minisign, PGP, or raw ed25519.
+A statically-linked Go binary that downloads release artifacts from GitHub and **verifies signatures and checksums automatically** - using minisign, PGP, or raw ed25519.
 
-No runtime dependencies. No package manager required. Works in CI, Docker, and air-gapped environments. See [CI/CD Usage Guide](docs/cicd-usage-guide.md) for container and pipeline examples.
+Minisign verification needs no external tools. No package manager required. Works in CI, Docker, and air-gapped environments. See [CI/CD Usage Guide](docs/cicd-usage-guide.md) for container and pipeline examples.
 For release engineering guardrails learned from recent Windows ARM64 and CI authentication failures, see [CI Guardrails](docs/ci-guardrails.md).
 
 ### Why sfetch exists
@@ -107,6 +107,10 @@ Additional flags: `--max-redirects` (default 5), `--allowed-content-types`, `--a
 - **Archives** (`.tar.gz`, `.zip`, etc.): Permissions from the archive are preserved. Executables packaged with `0755` remain executable after extraction.
 - **Raw scripts/binaries** (e.g., `install.sh`, `kubectl`): Automatically set to `0755` on macOS/Linux to ensure executability.
 - **Cross-device installs**: When `--dest-dir` is on a different filesystem than the temp directory (common in containers), sfetch falls back to copy and preserves the source permissions.
+
+Native `.tar.gz` extraction validates destination paths, accepts regular files and
+directories, and rejects links and unsupported entry types. It limits archives
+to 256 physical tar headers and 512 MiB of expanded data.
 
 ### Proxy support
 sfetch honors standard proxy environment variables and provides CLI flags for explicit control.
@@ -206,6 +210,18 @@ INSTALL_BINDIR=~/bin make install  # override install location
 - Edit `buildconfig.mk` to change the canonical binary name (`NAME`) or default install destination once.
 - On Windows, `make install` targets `%USERPROFILE%\bin`; ensure that directory is present in `PATH`.
 
+### Version information
+
+```bash
+sfetch version             # sfetch <version>
+sfetch --version           # same concise output
+sfetch version --extended  # includes commit, build time, Go version, and platform
+sfetch version --json      # machine-readable fields
+```
+
+Version information is written to stdout. Scripts that read `--version` from
+stderr should read stdout or use `sfetch version --json`.
+
 ### Bootstrap install
 
 **Recommended (v0.4.11+):** verify the installer before execution.
@@ -214,14 +230,14 @@ Match `-P` to the tag: tags ≤ v0.4.11 verify under the previous key; newer tag
 
 ```bash
 # Three-step path when install-sfetch.sh.minisig is published (v0.4.11+)
-TAG=v0.4.14
+TAG=v0.4.15
 curl -fsSL "https://github.com/3leaps/sfetch/releases/download/${TAG}/install-sfetch.sh" -o install-sfetch.sh
 curl -fsSL "https://github.com/3leaps/sfetch/releases/download/${TAG}/install-sfetch.sh.minisig" -o install-sfetch.sh.minisig
 minisign -Vm install-sfetch.sh -P RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVqjKj3ctSA1
 bash install-sfetch.sh --tag "$TAG" --yes
 
 # Or use the shared engine (CI/Makefile; refuses "latest"):
-# ./scripts/bootstrap-sfetch-verified.sh --version v0.4.14 --dir ~/.local/bin
+# ./scripts/bootstrap-sfetch-verified.sh --version v0.4.15 --dir ~/.local/bin
 ```
 
 **GitHub Actions:** pin the composite action by commit SHA — see [CI/CD Usage Guide](docs/cicd-usage-guide.md).
@@ -229,7 +245,7 @@ bash install-sfetch.sh --tag "$TAG" --yes
 ```yaml
 - uses: 3leaps/sfetch/.github/actions/setup-sfetch@<commit-sha>
   with:
-    sfetch-version: v0.4.14
+    sfetch-version: v0.4.15
 ```
 
 #### Quick install (interactive humans)
@@ -254,7 +270,7 @@ Pass arguments using `bash -s --`:
 curl -sSfL .../install-sfetch.sh | bash -s -- --dir ~/bin
 
 # Install specific version
-curl -sSfL .../install-sfetch.sh | bash -s -- --tag v0.4.14
+curl -sSfL .../install-sfetch.sh | bash -s -- --tag v0.4.15
 
 # Dry run (download and verify, don't install)
 curl -sSfL .../install-sfetch.sh | bash -s -- --dry-run
@@ -318,8 +334,10 @@ make release-prepare-tag-message
 make release-tag && make release-push-tag
 # inspect run: gh run view "$RELEASE_RUN_ID" --json conclusion,headSha,status,attempt,event
 # workflow path: gh api repos/3leaps/sfetch/actions/runs/$RELEASE_RUN_ID/attempts/$RELEASE_RUN_ATTEMPT --jq .path
+make release-clean
 make release-download
 make release-checksums
+make release-verify-checksums
 make release-create-draft    # after checksums, before signing
 make release-sign
 make release-export-keys     # stage tagged public keys

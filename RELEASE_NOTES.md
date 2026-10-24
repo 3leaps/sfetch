@@ -1,3 +1,69 @@
+## v0.4.15
+
+### Summary
+
+Release tooling and verification update with consistent version output and
+native bounded `.tar.gz` extraction. Maintainers now use an explicit
+signed-tag and draft-release workflow, with CI producing workflow artifacts
+and publication verifying the complete signed asset set.
+
+### Highlights
+
+**Version information**
+- `sfetch version` and `sfetch --version` print `sfetch <version>` to stdout.
+- `version --extended` and `--version-extended` include the commit, build time,
+  Go version, and platform. `version --json` provides machine-readable fields.
+
+**Archive and signature verification**
+- `.tar.gz` extraction runs natively on all supported platforms, validates
+  destination paths, and bounds expanded data and physical tar headers,
+  including PAX and GNU metadata.
+- Installer OpenPGP verification rejects secret-key input, multiple primary
+  keys, and ambiguous signature results, and binds the signing key to the
+  pinned primary fingerprint.
+- Release and tag verification use the public keys and fingerprint anchors
+  committed in the tagged revision. Decernor checks the public exports;
+  temporary GnuPG homes isolate signing and verification operations.
+
+**Maintainer release workflow**
+- Explicit `SFETCH_RELEASE_TAG` input must match `VERSION`; bare `RELEASE_TAG`
+  is refused. Tag preparation creates an external message for review before
+  local signing and tag publication.
+- Tag CI verifies the signed tag and uploads unsigned packages as workflow
+  artifacts. Maintainers download a named successful run attempt, create a
+  draft, sign, verify, upload, and publish through the Make targets.
+- Normal upload includes the release-notes asset. Publication verifies the
+  exact asset names, bytes, and required signatures before promoting a draft.
+- Scoop and Homebrew updates are separate handoffs after verified publication.
+
+**Bootstrap and development tooling**
+- The verified bootstrap ceiling advances to `v0.4.15`; self-bootstrap and CI
+  install smoke advance to the published, signed `v0.4.14` release.
+- CI runs native checks for macOS arm64, Linux amd64/arm64, and Windows
+  amd64/arm64. GnuPG fixture homes work with the default macOS temporary
+  directory and are cleaned after success or failure; tag selectors work
+  with the default Debian awk.
+- gosec is pinned to v2.29.0, installed explicitly, and required by the
+  security gate. Go 1.26.10 and the application dependency versions are
+  unchanged from v0.4.14.
+
+### Compatibility
+
+Version output now goes to stdout. Scripts that read `--version` from stderr
+should read stdout or use `sfetch version --json`.
+
+Native `.tar.gz` extraction accepts regular files and directories, rejects
+links and unsupported entry types, and enforces limits of 256 physical
+headers and 512 MiB of expanded data. Archives outside these limits are
+rejected.
+
+The five supported platforms and consumer verification trust anchors are
+unchanged. Pair `sfetch-version: v0.4.15` with an immutable action revision
+whose declared bootstrap range includes that tag. Maintainers should follow
+`RELEASE_CHECKLIST.md` for the signed-tag and verified-publication sequence.
+
+---
+
 ## v0.4.14
 
 ### Summary
