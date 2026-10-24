@@ -70,7 +70,7 @@ export SFETCH_RELEASE_TAG=v$(cat VERSION)
 export SFETCH_MINISIGN_KEY=/path/to/sfetch.key
 export SFETCH_MINISIGN_PUB=/path/to/sfetch.pub   # only for `make release-export-pin` when no committed pin exists; verification reads the tagged blob
 export SFETCH_PGP_KEY_ID=<signing-subkey-fpr>!   # required for publish (SHA256SUMS.asc and SHA512SUMS.asc)
-export SFETCH_GPG_HOMEDIR=/path/to/isolated/gpg/homedir   # not the default homedir
+export SFETCH_GPG_HOMEDIR=/path/to/operator/gpg/homedir   # outside repo; not the default homedir
 export SFETCH_GPG_SIGNING_FINGERPRINT=0CACA49B3119B6BC12B2CA11B9B485F294B9FE07
 export SFETCH_DECERNOR_BIN=/path/to/decernor              # absolute, non-symlink, >= 0.1.8
 export SFETCH_TAGGER_NAME="<name>"                        # with SFETCH_TAGGER_EMAIL, must match
@@ -84,6 +84,11 @@ export RELEASE_RUN_ATTEMPT=<successful attempt of that run>
 `keys/expected-fingerprints.txt` (`0CACA49B3119B6BC12B2CA11B9B485F294B9FE07`).
 PGP on both checksum manifests is required for publish; PGP does not sign the
 installer.
+
+Tag signing uses `SFETCH_GPG_HOMEDIR` and its existing agent/smartcard setup
+directly; it does not export secret keys. The primary secret key may remain
+offline. Public verification uses only the committed pin in a temporary
+keyring, separate from the operator home.
 
 ### Select the CI run and attempt
 

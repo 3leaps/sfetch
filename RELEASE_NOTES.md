@@ -23,7 +23,9 @@ and publication verifying the complete signed asset set.
   pinned primary fingerprint.
 - Release and tag verification use the public keys and fingerprint anchors
   committed in the tagged revision. Decernor checks the public exports;
-  temporary GnuPG homes isolate signing and verification operations.
+  temporary GnuPG homes isolate public verification. Maintainer tag signing
+  uses the explicitly configured operator keyring and supports non-exportable
+  smartcard subkeys without secret-key export.
 
 **Maintainer release workflow**
 - Explicit `SFETCH_RELEASE_TAG` input must match `VERSION`; bare `RELEASE_TAG`

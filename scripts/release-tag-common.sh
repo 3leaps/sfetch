@@ -16,22 +16,10 @@ tag_discard_verify_home() {
 	fi
 }
 
-tag_discard_signing_home() {
-	local home="${TAG_SIGN_GNUPGHOME:-${TAG_SIGN_GNUPGHOME_LAST:-}}"
-	if [[ -n "$home" ]]; then
-		gpgconf --homedir "$home" --kill all >/dev/null 2>&1 || true
-		rm -rf "$home"
-	fi
-	if [[ -n "${GNUPGHOME:-}" && -n "$home" && "$GNUPGHOME" == "$home" ]]; then
-		unset GNUPGHOME
-	fi
-	TAG_SIGN_GNUPGHOME=""
-	TAG_SIGN_GNUPGHOME_LAST=""
-}
-
+# Only verification homes are disposable. The operator owns the signing
+# keyring and its agent/card state; never remove it or stop its agent.
 tag_cleanup_homes() {
 	tag_discard_verify_home
-	tag_discard_signing_home
 }
 
 # Expand ~ and collapse . / .. without following symlinks. Relative paths fail.
@@ -185,9 +173,9 @@ tag_fresh_verify_gnupg_home() {
 	TAG_VERIFY_GNUPGHOME="$dir"
 }
 
-# Operator source keyring: used only as an import origin. Signing never
-# binds GNUPGHOME to this directory. Canonicalize (~, trailing slash, ., ..)
-# before comparing to the default homedir; refuse non-0700 (do not chmod).
+# Validate the explicitly selected operator keyring. Canonicalize (~, trailing
+# slash, ., ..) before comparing to the default homedir; refuse non-0700
+# (do not chmod). Signing uses this home and its existing agent/card setup.
 tag_bind_operator_gnupg_home() {
 	[[ -n "${SFETCH_GPG_HOMEDIR:-}" ]] || {
 		tag_die 'external GPG home required'
@@ -240,47 +228,11 @@ tag_bind_operator_gnupg_home() {
 	SFETCH_GPG_HOMEDIR="$canon"
 }
 
-# Fresh isolated signing home. Never an existing operator directory.
-tag_fresh_signing_gnupg_home() {
-	local dir mode
-	dir="$(mktemp -d /tmp/sfetch-tag-sign-gnupg.XXXXXX)" || {
-		tag_die 'cannot create signing GnuPG home'
-		return 1
-	}
-	# Bind and arm TERM/INT before chmod so a signal during setup still
-	# discards this directory. EXIT is armed by the caller; TERM is not.
-	TAG_SIGN_GNUPGHOME="$dir"
-	TAG_SIGN_GNUPGHOME_LAST="$dir"
-	trap 'tag_cleanup_homes; exit 143' TERM INT
-	if [[ -L "$dir" || ! -d "$dir" ]]; then
-		tag_discard_signing_home
-		tag_die 'signing GnuPG home must be a fresh directory, not a symlink'
-		return 1
-	fi
-	chmod 700 "$dir" || {
-		tag_discard_signing_home
-		tag_die 'cannot chmod signing GnuPG home'
-		return 1
-	}
-	mode="$(tag_stat_mode "$dir")"
-	[[ "$mode" == "700" ]] || {
-		tag_discard_signing_home
-		tag_die 'signing GnuPG home must be mode 0700'
-		return 1
-	}
-}
-
-# Import the selected secret key into a fresh temp home and bind GNUPGHOME there.
+# Use the operator's keyring directly: hardware-backed signing subkeys cannot
+# be exported into a temporary home. Public verification stays isolated.
 tag_prepare_signing_home() {
 	tag_bind_operator_gnupg_home || return 1
-	tag_fresh_signing_gnupg_home || return 1
-	if ! gpg --homedir "$SFETCH_GPG_HOMEDIR" --batch --export-secret-keys "${SFETCH_PGP_KEY_ID%!}" 2>/dev/null |
-		gpg --homedir "$TAG_SIGN_GNUPGHOME" --batch --import >/dev/null 2>&1; then
-		tag_discard_signing_home
-		tag_die 'cannot import signing material into isolated home'
-		return 1
-	fi
-	export GNUPGHOME="$TAG_SIGN_GNUPGHOME"
+	export GNUPGHOME="$SFETCH_GPG_HOMEDIR"
 }
 
 tag_key_selector() {

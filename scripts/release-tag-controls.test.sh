@@ -208,7 +208,7 @@ mkdir -m 700 "$throwaway"
 	unset GNUPGHOME
 	export SFETCH_GPG_HOMEDIR="$throwaway"
 	tag_bind_operator_gnupg_home
-	# Source home is validated only; signing must not bind to it.
+	# Validation alone does not change the selected GnuPG home.
 	[[ "${GNUPGHOME:-}" != "$throwaway" ]]
 	[[ "$(tag_stat_mode "$throwaway")" == 700 ]]
 )
@@ -245,43 +245,76 @@ tag_fresh_verify_gnupg_home
 verify_home="$TAG_VERIFY_GNUPGHOME"
 tag_discard_verify_home
 [[ ! -e "$verify_home" ]]
-# Signing uses a fresh 0700 temp home, never the operator directory.
-(
-	export HOME="$fake_home"
-	unset GNUPGHOME
-	export SFETCH_GPG_HOMEDIR="$throwaway"
-	tag_fresh_signing_gnupg_home
-	[[ -n "$TAG_SIGN_GNUPGHOME" ]]
-	[[ "$TAG_SIGN_GNUPGHOME" != "$throwaway" ]]
-	[[ "$TAG_SIGN_GNUPGHOME" != "$fake_home/.gnupg" ]]
-	[[ -d "$TAG_SIGN_GNUPGHOME" && ! -L "$TAG_SIGN_GNUPGHOME" ]]
-	[[ "$(tag_stat_mode "$TAG_SIGN_GNUPGHOME")" == 700 ]]
-	sign_home="$TAG_SIGN_GNUPGHOME"
-	tag_discard_signing_home
-	[[ ! -e "$sign_home" ]]
-)
-# Isolated import: signing GNUPGHOME is a temp copy, then discarded.
+# An export-refusing signer models non-exportable card-backed key custody.
+# Only disposable software keys are used; no physical card is required.
+real_gpg="$(command -v gpg)"
+real_gpgconf="$(command -v gpgconf)"
 op_home="$scratch/op-sign"
 mkdir -m 700 "$op_home"
 gpg --homedir "$op_home" --batch --pinentry-mode loopback --passphrase '' \
-	--quick-gen-key 'sign@test.invalid' ed25519 sign never >/dev/null 2>&1
+	--quick-gen-key 'sign@test.invalid' ed25519 cert never >/dev/null 2>&1
 op_primary="$(gpg --homedir "$op_home" --with-colons --fingerprint sign@test.invalid | awk -F: '/^fpr:/ {print $10; exit}')"
+gpg --homedir "$op_home" --batch --pinentry-mode loopback --passphrase '' \
+	--quick-add-key "$op_primary" ed25519 sign never >/dev/null 2>&1
+op_subkey="$(gpg --homedir "$op_home" --with-colons --with-subkey-fingerprint --list-keys "$op_primary" | awk -F: '$1=="sub" {s=1;next} s && $1=="fpr" {print $10;exit}')"
+mkdir "$scratch/no-export-bin"
+cat >"$scratch/no-export-bin/gpg" <<'SH'
+#!/usr/bin/env bash
+for arg in "$@"; do
+	case "$arg" in
+	--export-secret-keys | --export-secret-subkeys)
+		printf 'attempted\n' >>"$NO_EXPORT_MARKER"
+		echo 'fixture: secret key is not exportable' >&2
+		exit 90 ;;
+	esac
+done
+exec "$REAL_GPG" "$@"
+SH
+cat >"$scratch/no-export-bin/gpgconf" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+*" --homedir $OPERATOR_HOME --kill "*)
+	printf 'attempted\n' >>"$OPERATOR_AGENT_MARKER"
+	echo 'fixture: operator agent must stay running' >&2
+	exit 91 ;;
+esac
+exec "$REAL_GPGCONF" "$@"
+SH
+chmod +x "$scratch/no-export-bin/gpg" "$scratch/no-export-bin/gpgconf"
+printf 'operator-owned\n' >"$op_home/preserve"
 (
 	export HOME="$fake_home"
 	unset GNUPGHOME
 	export SFETCH_GPG_HOMEDIR="$op_home"
-	export SFETCH_PGP_KEY_ID="${op_primary}!"
+	export SFETCH_PGP_KEY_ID="${op_subkey}!"
+	export PATH="$scratch/no-export-bin:$PATH" REAL_GPG="$real_gpg"
+	export NO_EXPORT_MARKER="$scratch/secret-export-attempt"
+	export REAL_GPGCONF="$real_gpgconf" OPERATOR_HOME="$op_home"
+	export OPERATOR_AGENT_MARKER="$scratch/operator-agent-kill-attempt"
+	# Prove this boundary refuses secret export before exercising production.
+	expect_fail gpg --homedir "$op_home" --export-secret-keys "$op_subkey"
+	rm "$NO_EXPORT_MARKER"
 	tag_prepare_signing_home
-	[[ "$GNUPGHOME" == "$TAG_SIGN_GNUPGHOME" ]]
-	[[ "$GNUPGHOME" != "$op_home" ]]
-	[[ -d "$op_home" ]]
-	sign_home="$TAG_SIGN_GNUPGHOME"
-	tag_discard_signing_home
-	[[ ! -e "$sign_home" ]]
-	[[ -d "$op_home" ]]
+	[[ "$GNUPGHOME" == "$op_home" ]]
+	printf 'signing fixture\n' >"$scratch/sign-input"
+	gpg --batch --local-user "$SFETCH_PGP_KEY_ID" --detach-sign \
+		--output "$scratch/sign-input.sig" "$scratch/sign-input"
+	gpg --batch --status-fd 1 --verify "$scratch/sign-input.sig" "$scratch/sign-input" \
+		>"$scratch/sign-status" 2>/dev/null
+	grep -q "^\[GNUPG:\] VALIDSIG $op_subkey " "$scratch/sign-status"
+	[[ ! -e "$NO_EXPORT_MARKER" ]]
+	# Cleanup removes only the public verification home, never operator state.
+	tag_fresh_verify_gnupg_home
+	verify_home="$TAG_VERIFY_GNUPGHOME"
+	tag_cleanup_homes
+	[[ ! -e "$verify_home" ]]
+	[[ "$GNUPGHOME" == "$op_home" ]]
+	[[ "$(cat "$op_home/preserve")" == operator-owned ]]
+	[[ ! -e "$OPERATOR_AGENT_MARKER" ]]
+	gpg --batch --list-secret-keys "$op_subkey" >/dev/null 2>&1
 )
 gpgconf --homedir "$op_home" --kill all >/dev/null 2>&1 || true
-if ! python3 - "$root/scripts/release-tag.sh" <<'PY'
+if ! python3 - "$root/scripts/release-tag.sh" <<'PY_CHECK'
 from pathlib import Path
 import re
 import sys
@@ -299,32 +332,25 @@ if trap < 0 or selector < 0 or signing < 0 or not (trap < selector < signing):
     raise SystemExit(f'order trap={trap} selector={selector} signing={signing}')
 if not any('TERM' in ln and 'tag_cleanup_homes' in ln for ln in lines):
     raise SystemExit('cleanup trap must include TERM')
-# Commented-out or disabled setup must not count as a call.
-disabled = text.replace("tag_prepare_signing_home\n", "# tag_prepare_signing_home\n", 1)
-if re.search(r'(?m)^tag_prepare_signing_home$', disabled):
-    raise SystemExit('signing-home checker does not fail when the setup call is disabled')
-PY
+PY_CHECK
 then
-	echo 'error: release-tag.sh must arm cleanup before creating GnuPG homes' >&2
+	echo 'error: release-tag.sh must arm cleanup before creating verification homes' >&2
 	exit 1
 fi
-grep -q 'tag_cleanup_homes' "$root/scripts/release-tag.sh" || {
-	echo 'error: signed-tag EXIT trap must discard signing and verify homes' >&2
-	exit 1
-}
-# TERM during signing-home setup must discard the temp dir.
-term_path="$scratch/term-sign-path"
-term_pid_file="$scratch/term-sign-pid"
-rm -f "$term_path" "$term_pid_file"
-bash -c '
+# TERM discards only this run's verification home and preserves the operator.
+term_path="$scratch/term-verify-path"
+rm -f "$term_path"
+bash -s -- "$root/scripts/release-tag-common.sh" "$term_path" <<'TERM_TEST' &
 set -euo pipefail
-# shellcheck source=scripts/release-tag-common.sh
 source "$1"
-tag_fresh_signing_gnupg_home
-printf "%s\n" "$TAG_SIGN_GNUPGHOME" >"$2"
-printf "%s\n" "$$" >"$3"
-sleep 60
-' _ "$root/scripts/release-tag-common.sh" "$term_path" "$term_pid_file" &
+trap tag_cleanup_homes EXIT
+tag_fresh_verify_gnupg_home
+sleep 60 &
+sleeper=$!
+trap 'kill "$sleeper" >/dev/null 2>&1 || true; exit 143' TERM INT
+printf "%s\n" "$TAG_VERIFY_GNUPGHOME" >"$2"
+wait "$sleeper"
+TERM_TEST
 term_child=$!
 for _ in $(seq 1 50); do
 	[[ -s "$term_path" ]] && break
@@ -332,7 +358,7 @@ for _ in $(seq 1 50); do
 done
 [[ -s "$term_path" ]] || {
 	kill "$term_child" >/dev/null 2>&1 || true
-	echo 'error: signing home was not created for TERM test' >&2
+	echo 'error: verification home was not created for TERM test' >&2
 	exit 1
 }
 term_home="$(cat "$term_path")"
@@ -340,8 +366,9 @@ term_home="$(cat "$term_path")"
 kill -s TERM "$term_child" >/dev/null 2>&1 || true
 wait "$term_child" >/dev/null 2>&1 || true
 [[ ! -e "$term_home" ]] || {
-	echo 'error: signing home leaked on TERM during setup' >&2
+	echo 'error: verification home leaked on TERM' >&2
 	rm -rf "$term_home"
 	exit 1
 }
-echo '[ok] signed-tag negative controls passed'
+[[ "$(cat "$op_home/preserve")" == operator-owned ]]
+echo '[ok] signed-tag controls and non-exportable signing path passed'

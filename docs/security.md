@@ -143,7 +143,7 @@ export SFETCH_RELEASE_TAG=v$(cat VERSION)
 export SFETCH_MINISIGN_KEY=/path/to/key.key
 export SFETCH_MINISIGN_PUB=/path/to/key.pub
 export SFETCH_PGP_KEY_ID=<signing-subkey-fpr>!   # required for publish (SHA256SUMS.asc and SHA512SUMS.asc)
-export SFETCH_GPG_HOMEDIR=/path/to/isolated/gpg/homedir
+export SFETCH_GPG_HOMEDIR=/path/to/operator/gpg/homedir
 export SFETCH_GPG_SIGNING_FINGERPRINT=0CACA49B3119B6BC12B2CA11B9B485F294B9FE07
 export SFETCH_DECERNOR_BIN=/path/to/decernor
 export SFETCH_TAGGER_NAME SFETCH_TAGGER_EMAIL    # must match config/release/tagger-identity.txt

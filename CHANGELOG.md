@@ -43,10 +43,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signer to the pinned primary fingerprint.
 - **Committed release identities.** Public exports and fingerprint anchors
   from the tagged revision govern verification. Decernor validates the
-  exports, and temporary GnuPG homes isolate signing/verification operations.
+  exports, and temporary GnuPG homes isolate public verification.
 
 ### Fixed
 
+- **Smartcard-backed tag signing.** Sign through the configured operator
+  keyring and agent without exporting secret keys into a temporary home.
 - **Draft upload includes release notes.** The normal upload path supplies
   the notes asset required by the exact-set and byte-verification publish gate.
 - **Release-tooling portability.** GnuPG fixtures use short private homes
