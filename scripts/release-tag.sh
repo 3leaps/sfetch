@@ -5,8 +5,8 @@ set -euo pipefail
 source "$(dirname "$0")/release-tag-common.sh"
 cd "$tag_root"
 message=""
-# Cleanup must be armed before any GnuPG home is created so a later failure
-# still removes the isolated signing and verify directories.
+# Cleanup must be armed before public verification homes are created.
+# The operator signing home and its agent/card state are never discarded.
 trap 'tag_cleanup_homes; rm -f "$message"' EXIT
 trap 'tag_cleanup_homes; rm -f "$message"; exit 143' TERM INT
 tag_version

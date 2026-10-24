@@ -233,13 +233,16 @@ grep -q 'refusing to overwrite' "$root/scripts/install-release-anchors.sh" ||
 grep -q 'mv -f' "$root/scripts/install-release-anchors.sh" &&
 	fail "M9: install-release-anchors must not force-overwrite with mv -f"
 
-# SEC-H1: signing uses a fresh mktemp home; cleanup is armed before it is created.
-grep -q 'tag_fresh_signing_gnupg_home' "$root/scripts/release-tag-common.sh" ||
-	fail "SEC-H1: tag operator must create a fresh signing home"
-grep -q 'tag_cleanup_homes' "$root/scripts/release-tag.sh" || fail "SEC-H1: release-tag.sh must clean signing and verify homes"
+# Signing uses the explicit operator keyring without exporting card-backed keys.
+grep -Fq 'export GNUPGHOME="$SFETCH_GPG_HOMEDIR"' "$root/scripts/release-tag-common.sh" ||
+	fail "tag signing must use the configured operator home"
+if grep -Eq -- '--export-secret-(keys|subkeys)' "$root/scripts/release-tag-common.sh"; then
+	fail "tag signing must not export secret keys"
+fi
+grep -q 'tag_cleanup_homes' "$root/scripts/release-tag.sh" || fail "release-tag.sh must clean public verification homes"
 grep -q 'must not be the default homedir' "$root/scripts/release-tag-common.sh" ||
-	fail "SEC-H1: tag operator must refuse the default homedir"
-grep -q 'mode 0700' "$root/scripts/release-tag-common.sh" || fail "SEC-H1: tag operator must require mode 0700"
+	fail "tag operator must refuse the default homedir"
+grep -q 'mode 0700' "$root/scripts/release-tag-common.sh" || fail "tag operator must require mode 0700"
 python3 - "$root/scripts/verify-pinned-tag.sh" <<'PY' || fail "M6-round2: tag verify must call Decernor before the listing check"
 from pathlib import Path
 import sys

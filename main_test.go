@@ -1158,9 +1158,21 @@ func TestInstallFlagMutualExclusion(t *testing.T) {
 	}
 }
 
+func cliURLFixture(t *testing.T) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = io.WriteString(w, "fixture")
+	}))
+	// Keep the server alive until parallel subtests have finished.
+	t.Cleanup(server.Close)
+	return server.URL + "/fixture.bin"
+}
+
 // Pass 3: CLI flag validation tests
 func TestCLIFlagValidation(t *testing.T) {
 	t.Parallel()
+	artifactURL := cliURLFixture(t)
 
 	tests := []struct {
 		name       string
@@ -1195,13 +1207,13 @@ func TestCLIFlagValidation(t *testing.T) {
 		},
 		{
 			name:       "url bypasses repo requirement",
-			args:       []string{"--url", "https://example.com/", "--dry-run", "--skip-tools-check"},
+			args:       []string{"--url", artifactURL, "--allow-http", "--dry-run", "--skip-tools-check"},
 			wantCode:   0,
 			wantStderr: "sfetch dry-run assessment",
 		},
 		{
 			name:       "positional url",
-			args:       []string{"https://example.com/", "--dry-run", "--skip-tools-check"},
+			args:       []string{artifactURL, "--allow-http", "--dry-run", "--skip-tools-check"},
 			wantCode:   0,
 			wantStderr: "sfetch dry-run assessment",
 		},

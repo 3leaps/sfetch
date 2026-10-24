@@ -144,9 +144,10 @@ func TestVersionRejectsExtraPositionals(t *testing.T) {
 
 func TestVersionPositionalURLStillWorks(t *testing.T) {
 	t.Parallel()
+	artifactURL := cliURLFixture(t)
 
 	var stdout, stderr strings.Builder
-	code := run([]string{"https://example.com/", "--dry-run", "--skip-tools-check"}, &stdout, &stderr)
+	code := run([]string{artifactURL, "--allow-http", "--dry-run", "--skip-tools-check"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("positional URL exit %d stderr=%q", code, stderr.String())
 	}
