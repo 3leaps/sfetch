@@ -227,8 +227,9 @@ Covered by maintained regression tests, not by inspection alone:
 
 ### Context
 
-`internal/httpx.DoWithStall` sends a request built by its caller so it can
-guard the response body with a stall timeout. gosec traces the request URL
+`internal/httpx.Do` sends a request built by its caller through a client whose
+transport guards every response body (each redirect hop included) with a stall
+timeout. gosec traces the request URL
 back to CLI and release-metadata input and reports server-side request
 forgery.
 
@@ -255,7 +256,7 @@ forgery.
 
 | File | Function | Purpose |
 |------|----------|---------|
-| internal/httpx/httpx.go | DoWithStall | Send caller-built request with stall-guarded body |
+| internal/httpx/httpx.go | Do | Send caller-built request; transport stall-guards each hop's body |
 
 ---
 

@@ -65,27 +65,39 @@ func Transport() *http.Transport {
 	return transport
 }
 
-// NewClient returns a client using Transport and no whole-request deadline.
-// Pair it with Do so body reads are guarded by the stall timeout.
+// NewClient returns a client with no whole-request deadline whose every
+// response body, on every hop, is guarded by StallTimeout.
 func NewClient() *http.Client {
-	return &http.Client{Transport: Transport()}
+	return NewClientWithStall(StallTimeout)
 }
 
-// Do sends req with client and guards the response body with the default
-// stall timeout. The returned body must be closed by the caller.
+// NewClientWithStall is NewClient with an explicit stall timeout (tests).
+func NewClientWithStall(stall time.Duration) *http.Client {
+	return &http.Client{Transport: &stallTransport{base: Transport(), stall: stall}}
+}
+
+// Do sends req with client. Kept as the single send point for sfetch
+// requests; body stall protection comes from the client's transport.
 func Do(client *http.Client, req *http.Request) (*http.Response, error) {
-	return DoWithStall(client, req, StallTimeout)
+	return client.Do(req) // #nosec G704 -- SDR-007: caller-chosen URL; callers enforce scheme/redirect/auth policy
 }
 
-// DoWithStall is Do with an explicit stall timeout (used by tests).
-func DoWithStall(client *http.Client, req *http.Request, stall time.Duration) (*http.Response, error) {
+// stallTransport guards each response body it returns with an idle-stall
+// timeout. It works per round trip, so redirect responses whose bodies
+// net/http drains internally are bounded as well as the final response.
+type stallTransport struct {
+	base  http.RoundTripper
+	stall time.Duration
+}
+
+func (t *stallTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx, cancel := context.WithCancelCause(req.Context())
-	resp, err := client.Do(req.WithContext(ctx)) // #nosec G704 -- SDR-007: caller-chosen URL; callers enforce scheme/redirect/auth policy
+	resp, err := t.base.RoundTrip(req.WithContext(ctx))
 	if err != nil {
 		cancel(nil)
 		return nil, err
 	}
-	resp.Body = newStallBody(ctx, resp.Body, stall, cancel)
+	resp.Body = newStallBody(ctx, resp.Body, t.stall, cancel)
 	return resp, nil
 }
 
