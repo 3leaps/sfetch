@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -573,4 +574,68 @@ func TestIntegrationSelfUpdate(t *testing.T) {
 			t.Errorf("expected custom path %s in output:\n%s", expectedPath, output.String())
 		}
 	})
+}
+
+// A raw release binary with a dotted version in its name installs under the
+// repo-derived binary name and is executable.
+func TestIntegrationRawVersionedBinaryInstallsAsBinaryName(t *testing.T) {
+	assetName := fmt.Sprintf("chanvoy-v0.3.3-%s-%s", runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS == "windows" {
+		assetName += ".exe"
+	}
+	payload := []byte("#!/bin/sh\necho chanvoy\n")
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/test/chanvoy/releases/latest":
+			base := fmt.Sprintf("http://%s", r.Host)
+			rel := fakeRelease{
+				TagName: "v0.3.3",
+				Assets:  []Asset{{Name: assetName, BrowserDownloadUrl: base + "/assets/bin"}},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(&rel); err != nil {
+				t.Errorf("encode release: %v", err)
+			}
+		case "/assets/bin":
+			_, _ = w.Write(payload)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	destDir := t.TempDir()
+	cmd := exec.Command("go", "run", ".",
+		"--repo", "test/chanvoy",
+		"--latest",
+		"--dest-dir", destDir,
+		"--cache-dir", filepath.Join(t.TempDir(), "cache"),
+		"--insecure",
+	)
+	cmd.Env = append(os.Environ(), "SFETCH_API_BASE="+ts.URL)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("sfetch failed: %v\noutput:\n%s", err, output.String())
+	}
+
+	want := "chanvoy"
+	if runtime.GOOS == "windows" {
+		want += ".exe"
+	}
+	installed := filepath.Join(destDir, want)
+	info, err := os.Stat(installed)
+	if err != nil {
+		entries, _ := os.ReadDir(destDir)
+		names := []string{}
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("expected %s: %v (dest contains %v)\noutput:\n%s", installed, err, names, output.String())
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("installed %s mode %v is not executable", installed, info.Mode().Perm())
+	}
 }

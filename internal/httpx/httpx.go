@@ -80,7 +80,7 @@ func Do(client *http.Client, req *http.Request) (*http.Response, error) {
 // DoWithStall is Do with an explicit stall timeout (used by tests).
 func DoWithStall(client *http.Client, req *http.Request, stall time.Duration) (*http.Response, error) {
 	ctx, cancel := context.WithCancelCause(req.Context())
-	resp, err := client.Do(req.WithContext(ctx))
+	resp, err := client.Do(req.WithContext(ctx)) // #nosec G704 -- SDR-007: caller-chosen URL; callers enforce scheme/redirect/auth policy
 	if err != nil {
 		cancel(nil)
 		return nil, err

@@ -1794,6 +1794,16 @@ func TestInferAssetClassification(t *testing.T) {
 		{"bootstrap.py", AssetTypeRaw, "", true},
 		{"kubectl", AssetTypeRaw, "", true},
 		{"terraform.exe", AssetTypeRaw, "", false},
+		// Dotted version/platform suffixes are not file extensions.
+		{"chanvoy-v0.3.3-macos-aarch64", AssetTypeRaw, "", true},
+		{"tool-1.2.3-linux-amd64", AssetTypeRaw, "", true},
+		{"gonimbus-darwin-arm64", AssetTypeRaw, "", true},
+		// Data, docs, libraries, and verification material are not executables.
+		{"README.md", AssetTypeRaw, "", false},
+		{"config.json", AssetTypeRaw, "", false},
+		{"tool.pub", AssetTypeRaw, "", false},
+		{"SHA256SUMS.minisig", AssetTypeRaw, "", false},
+		{"libtool.so", AssetTypeRaw, "", false},
 		{"package.deb", AssetTypePackage, "", false},
 		{"package.rpm", AssetTypePackage, "", false},
 	}
@@ -1987,6 +1997,33 @@ func TestAutoDetectMinisignKeyAsset(t *testing.T) {
 				{Name: "release-key.asc"}, // PGP, not minisign
 			},
 			want: "",
+		},
+		{
+			name: "single <repo>.pub is used",
+			assets: []Asset{
+				{Name: "chanvoy-v0.3.4-macos-aarch64"},
+				{Name: "SHA256SUMS.minisig"},
+				{Name: "chanvoy.gpg.asc"},
+				{Name: "chanvoy.pub"},
+			},
+			want: "chanvoy.pub",
+		},
+		{
+			name: "several unmatched .pub assets are ambiguous",
+			assets: []Asset{
+				{Name: "SHA256SUMS.minisig"},
+				{Name: "alpha.pub"},
+				{Name: "beta.pub"},
+			},
+			want: "",
+		},
+		{
+			name: "pattern match still wins over the single-.pub fallback",
+			assets: []Asset{
+				{Name: "other.pub"},
+				{Name: "project-minisign.pub"},
+			},
+			want: "project-minisign.pub",
 		},
 	}
 
@@ -5022,5 +5059,38 @@ func TestURLClientAllowsLargeDownloads(t *testing.T) {
 	}
 	if c.CheckRedirect == nil {
 		t.Fatal("CheckRedirect not set; redirect policy lost")
+	}
+}
+
+func TestRawInstallName(t *testing.T) {
+	raw := func(name string) AssetClassification { return inferAssetClassification(name) }
+	tests := []struct {
+		desc       string
+		asset      string
+		binaryName string
+		goos       string
+		want       string
+	}{
+		{"versioned raw binary installs as binary name", "chanvoy-v0.3.3-macos-aarch64", "chanvoy", "darwin", "chanvoy"},
+		{"platform raw binary installs as binary name", "gonimbus-darwin-arm64", "gonimbus", "darwin", "gonimbus"},
+		{"--binary-name override wins", "gonimbus-linux-amd64", "gn", "linux", "gn"},
+		{"windows exe installs as binary name with .exe", "gonimbus-windows-amd64.exe", "gonimbus", "windows", "gonimbus.exe"},
+		{"windows raw without .exe gains .exe", "tool-windows-arm64", "tool", "windows", "tool.exe"},
+		{"binary name already ending .exe is not doubled", "tool-windows-amd64.exe", "tool.exe", "windows", "tool.exe"},
+		{"script keeps its name", "install.sh", "tool", "linux", "install.sh"},
+		{"non-executable keeps its name", "config.json", "tool", "linux", "config.json"},
+		{"no binary name keeps asset name (--url default)", "chanvoy-v0.3.3-macos-aarch64", "", "darwin", "chanvoy-v0.3.3-macos-aarch64"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			if got := rawInstallName(raw(tt.asset), tt.asset, tt.binaryName, tt.goos); got != tt.want {
+				t.Fatalf("rawInstallName(%q, %q, %s) = %q, want %q", tt.asset, tt.binaryName, tt.goos, got, tt.want)
+			}
+		})
+	}
+
+	pkg := inferAssetClassification("tool.deb")
+	if got := rawInstallName(pkg, "tool.deb", "tool", "linux"); got != "tool.deb" {
+		t.Fatalf("package renamed to %q; packages must keep their name", got)
 	}
 }

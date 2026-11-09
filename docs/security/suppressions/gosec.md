@@ -218,6 +218,47 @@ Covered by maintained regression tests, not by inspection alone:
 
 ---
 
+## SDR-007: Caller-Chosen Request URLs (G704)
+
+**Rule:** G704 - SSRF via taint analysis
+**Severity:** High
+**Instances:** 1
+**Decision:** Suppress with `#nosec G704 -- SDR-007`
+
+### Context
+
+`internal/httpx.DoWithStall` sends a request built by its caller so it can
+guard the response body with a stall timeout. gosec traces the request URL
+back to CLI and release-metadata input and reports server-side request
+forgery.
+
+### Why Suppression is Appropriate
+
+1. **Fetching a user-chosen URL is the product.** sfetch downloads the
+   release, URL, or GitHub-raw target the local user names. There is no
+   server context whose network position an attacker could borrow.
+2. **Policy lives at the callers, not the transport helper.** The GitHub
+   client strips `Authorization` on redirects to untrusted hosts; the URL
+   path enforces HTTPS unless `--allow-http`, blocks redirects unless
+   `--follow-redirects`, caps redirect count, and rejects credentials in
+   URLs. `httpx` changes only timeouts.
+3. **No new reachability.** Before `httpx`, the same requests were sent with
+   `client.Do` directly in `internal/host/github` and `doURLRequest`.
+
+### Verification
+
+- `TestNewClientAllowsLargeAssetStreaming`, `TestURLClientAllowsLargeDownloads`
+  (callers keep their redirect policy)
+- Existing redirect, auth-stripping, and HTTPS-only tests
+
+### Affected Locations
+
+| File | Function | Purpose |
+|------|----------|---------|
+| internal/httpx/httpx.go | DoWithStall | Send caller-built request with stall-guarded body |
+
+---
+
 ## Suppression Audit Log
 
 | Date | SDR | Action | Author |
@@ -228,3 +269,4 @@ Covered by maintained regression tests, not by inspection alone:
 | 2026-01-10 | SDR-004 | Created | Claude Opus 4.5 |
 | 2026-01-10 | SDR-005 | Created | Claude Opus 4.5 |
 | 2026-09-16 | SDR-006 | Created | Muse Spark |
+| 2026-11-09 | SDR-007 | Created | Claude Opus 5.5 |

@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Raw release binaries install under the binary name.** A raw asset such as
+  `tool-v1.2.3-macos-aarch64` installs as `tool` (`tool.exe` on Windows). The
+  name defaults to the repo name and `--binary-name` overrides it. Scripts,
+  packages, and non-executable files keep their asset name; `--url` and
+  `--github-raw` keep the file name unless `--binary-name` is set.
+
+### Fixed
+
+- **Large downloads no longer time out.** The 30-second whole-request limit
+  also bounded reading the response body, so large assets failed on slower
+  connections. Connection setup, TLS handshake, and response headers stay
+  bounded at 30 seconds; the body is now limited only by a 60-second stall
+  timeout.
+- **Raw binaries with dotted versions are executable.** Names such as
+  `tool-v1.2.3-linux-amd64` were treated as having a file extension and
+  installed without the executable bit.
+- **Minisign key auto-detection finds `<repo>.pub`.** When no key name pattern
+  matches, a release's only `.pub` asset is used.
+
 ## [0.4.15] - 2026-10-23
 
 ### Added

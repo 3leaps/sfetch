@@ -97,6 +97,6 @@ Default `SignatureCandidates` (Workflow B):
 ## Usage Reference
 
 - Prefer `--asset-match` (glob/substring) for simple selection; keep `--asset-regex` for advanced regex matching.
-- Asset types: archives (`.tar.gz/.tgz/.tar.xz/.txz/.tar.bz2/.tbz2/.tar/.zip`), raw scripts/binaries (no extraction, chmod on macOS/Linux), package installers (`.deb/.rpm/.pkg/.msi`) are tagged and warned but not installed.
+- Asset types: archives (`.tar.gz/.tgz/.tar.xz/.txz/.tar.bz2/.tbz2/.tar/.zip`), raw scripts/binaries (no extraction, chmod on macOS/Linux; raw binaries install as the binary name, default repo name or `--binary-name`), package installers (`.deb/.rpm/.pkg/.msi`) are tagged and warned but not installed.
 
 For concrete CLI examples, run `sfetch -helpextended` to print the embedded quickstart, or see the README’s signature section.

@@ -1780,7 +1780,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	assetMatch := fs.String("asset-match", "", "asset name glob/substring (simpler than regex)")
 	assetRegex := fs.String("asset-regex", "", "asset name regex (advanced override)")
 	assetTypeFlag := fs.String("asset-type", "", "force asset handling type (archive, raw, package)")
-	binaryNameFlag := fs.String("binary-name", "", "binary name to extract (default: inferred from repo name)")
+	binaryNameFlag := fs.String("binary-name", "", "binary name to extract or install as (default: inferred from repo name)")
 	destDir := fs.String("dest-dir", "", "destination directory")
 	output := fs.String("output", "", "output path")
 	cacheDir := fs.String("cache-dir", "", "cache directory")
@@ -2295,7 +2295,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			installName = selected.Name
 			binaryPath = assetPath
 		case AssetTypeRaw:
-			installName = selected.Name
+			// --url / --github-raw keep the file name unless --binary-name is set.
+			installName = rawInstallName(classification, selected.Name, *binaryNameFlag, runtime.GOOS)
 			binaryPath = assetPath
 		default:
 			installName = selected.Name
@@ -2543,7 +2544,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			installName = selected.Name
 			binaryPath = assetPath
 		case AssetTypeRaw:
-			installName = selected.Name
+			// --url / --github-raw keep the file name unless --binary-name is set.
+			installName = rawInstallName(classification, selected.Name, *binaryNameFlag, runtime.GOOS)
 			binaryPath = assetPath
 		default:
 			installName = selected.Name
@@ -3129,7 +3131,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		installName = selected.Name
 		binaryPath = assetPath
 	case AssetTypeRaw:
-		installName = selected.Name
+		installName = rawInstallName(classification, selected.Name, binaryName, goos)
 		binaryPath = assetPath
 	default:
 		installName = selected.Name
@@ -3328,12 +3330,62 @@ func inferAssetClassification(assetName string) AssetClassification {
 	cls.Type = AssetTypeRaw
 	cls.IsScript = isScriptExtension(lower)
 
-	ext := filepath.Ext(lower)
-	if cls.IsScript || ext == "" {
+	// .exe needs no exec bit; other executable-like names do.
+	if cls.IsScript || (isExecutableLikeRawName(lower) && filepath.Ext(lower) != ".exe") {
 		cls.NeedsChmod = true
 	}
 
 	return cls
+}
+
+// nonExecutableRawExts are file extensions that mark a raw asset as data,
+// documentation, a library, or verification material rather than a
+// standalone executable.
+var nonExecutableRawExts = map[string]bool{
+	".txt": true, ".md": true, ".json": true, ".yaml": true, ".yml": true,
+	".toml": true, ".xml": true, ".html": true, ".pdf": true, ".csv": true,
+	".sig": true, ".minisig": true, ".asc": true, ".pub": true, ".pem": true,
+	".crt": true, ".cer": true, ".sha256": true, ".sha512": true, ".sum": true,
+	".sbom": true, ".spdx": true, ".cdx": true, ".intoto": true, ".jsonl": true,
+	".dll": true, ".so": true, ".dylib": true, ".a": true, ".lib": true,
+	".wasm": true, ".jar": true, ".whl": true, ".gem": true, ".nupkg": true,
+	".dmg": true, ".appimage": true, ".apk": true, ".img": true, ".iso": true,
+}
+
+// isExecutableLikeRawName reports whether a raw (non-archive, non-package)
+// asset name looks like a standalone executable. Names such as
+// "tool-v1.2.3-macos-aarch64" have a filepath.Ext of ".3-macos-aarch64",
+// which is part of a version/platform suffix, not a file type; only a
+// recognised non-executable extension rules the name out. Expects a
+// lower-cased name.
+func isExecutableLikeRawName(lower string) bool {
+	if isScriptExtension(lower) {
+		return false
+	}
+	ext := filepath.Ext(lower)
+	if ext == "" || ext == ".exe" {
+		return true
+	}
+	return !nonExecutableRawExts[ext]
+}
+
+// rawInstallName returns the installed file name for a raw asset. A raw
+// executable (not a script) is installed as binaryName, with ".exe" on
+// Windows, so "chanvoy-v0.3.3-macos-aarch64" installs as "chanvoy". When
+// binaryName is empty, or the asset is a script, package, or non-executable
+// file, the asset name is kept.
+func rawInstallName(cls AssetClassification, assetName, binaryName, goos string) string {
+	if cls.Type != AssetTypeRaw || cls.IsScript || binaryName == "" {
+		return assetName
+	}
+	if !isExecutableLikeRawName(strings.ToLower(assetName)) {
+		return assetName
+	}
+	name := binaryName
+	if goos == "windows" && !strings.HasSuffix(strings.ToLower(name), ".exe") {
+		name += ".exe"
+	}
+	return name
 }
 
 func inferArchiveFormat(assetName string) ArchiveFormat {
@@ -4735,7 +4787,24 @@ func autoDetectMinisignKeyAsset(assets []Asset) *Asset {
 			}
 		}
 	}
-	return nil
+
+	// Fallback: a release that publishes exactly one .pub key (for example
+	// "<repo>.pub") uses it. Several unmatched .pub assets are ambiguous and
+	// require an explicit --minisign-key-asset. A .pub that is not a minisign
+	// key fails verification; it is never trusted silently.
+	var only *Asset
+	for i := range assets {
+		nameLower := strings.ToLower(assets[i].Name)
+		if !strings.HasSuffix(nameLower, ".pub") ||
+			strings.Contains(nameLower, ".tar") || strings.Contains(nameLower, ".zip") || strings.Contains(nameLower, ".gz") {
+			continue
+		}
+		if only != nil {
+			return nil
+		}
+		only = &assets[i]
+	}
+	return only
 }
 
 // resolveMinisignKey resolves a minisign public key from various sources.
