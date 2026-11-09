@@ -1804,6 +1804,12 @@ func TestInferAssetClassification(t *testing.T) {
 		{"tool.pub", AssetTypeRaw, "", false},
 		{"SHA256SUMS.minisig", AssetTypeRaw, "", false},
 		{"libtool.so", AssetTypeRaw, "", false},
+		// Versioned shared libraries are not executables.
+		{"libtool-linux-amd64.so.1", AssetTypeRaw, "", false},
+		{"libfoo.so.1.2.3", AssetTypeRaw, "", false},
+		// Purely numeric trailing segments on an executable stay executable.
+		{"tool-1.2.3", AssetTypeRaw, "", true},
+		{"tool-linux-amd64.1", AssetTypeRaw, "", true},
 		{"package.deb", AssetTypePackage, "", false},
 		{"package.rpm", AssetTypePackage, "", false},
 	}
@@ -5079,6 +5085,8 @@ func TestRawInstallName(t *testing.T) {
 		{"binary name already ending .exe is not doubled", "tool-windows-amd64.exe", "tool.exe", "windows", "tool.exe"},
 		{"script keeps its name", "install.sh", "tool", "linux", "install.sh"},
 		{"non-executable keeps its name", "config.json", "tool", "linux", "config.json"},
+		{"versioned shared library keeps its name", "libtool-linux-amd64.so.1", "tool", "linux", "libtool-linux-amd64.so.1"},
+		{"multi-segment versioned library keeps its name", "libfoo.so.1.2.3", "foo", "linux", "libfoo.so.1.2.3"},
 		{"no binary name keeps asset name (--url default)", "chanvoy-v0.3.3-macos-aarch64", "", "darwin", "chanvoy-v0.3.3-macos-aarch64"},
 	}
 	for _, tt := range tests {

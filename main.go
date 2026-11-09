@@ -3366,7 +3366,31 @@ func isExecutableLikeRawName(lower string) bool {
 	if ext == "" || ext == ".exe" {
 		return true
 	}
+	if nonExecutableRawExts[ext] {
+		return false
+	}
+	// Versioned libraries ("libfoo.so.1", "libfoo.so.1.2.3") end in purely
+	// numeric segments; look past them for the real extension. A segment
+	// such as ".3-macos-aarch64" is not purely numeric and stops the walk.
+	stem := lower
+	for isNumericExt(ext) {
+		stem = strings.TrimSuffix(stem, ext)
+		ext = filepath.Ext(stem)
+	}
 	return !nonExecutableRawExts[ext]
+}
+
+// isNumericExt reports whether ext is a dot followed only by ASCII digits.
+func isNumericExt(ext string) bool {
+	if len(ext) < 2 {
+		return false
+	}
+	for _, r := range ext[1:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // rawInstallName returns the installed file name for a raw asset. A raw
