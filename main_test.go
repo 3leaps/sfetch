@@ -5013,3 +5013,14 @@ func TestResolveArchiveBinaryPath_WindowsExeInstallName(t *testing.T) {
 		t.Errorf("installName = %q, want %q", installName, "mytool.exe")
 	}
 }
+
+func TestURLClientAllowsLargeDownloads(t *testing.T) {
+	var redirects []string
+	c := newURLClient(urlFetchOptions{followRedirects: true, maxRedirects: 5}, &redirects)
+	if c.Timeout != 0 {
+		t.Fatalf("Client.Timeout = %s, want 0: a whole-request deadline also bounds body reads and fails large downloads", c.Timeout)
+	}
+	if c.CheckRedirect == nil {
+		t.Fatal("CheckRedirect not set; redirect policy lost")
+	}
+}

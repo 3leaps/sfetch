@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/3leaps/sfetch/internal/hostenv"
+	"github.com/3leaps/sfetch/internal/httpx"
 	"github.com/3leaps/sfetch/pkg/update"
 )
 
@@ -1413,7 +1414,9 @@ func contentTypeAllowed(contentType string, allowed []string) bool {
 }
 
 func newURLClient(opts urlFetchOptions, redirects *[]string) *http.Client {
-	client := &http.Client{Timeout: 30 * time.Second}
+	// No whole-request deadline: large downloads must be able to stream.
+	// httpx bounds connect, TLS, header wait, and body stalls instead.
+	client := httpx.NewClient()
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if !opts.followRedirects {
 			return http.ErrUseLastResponse
@@ -1443,7 +1446,7 @@ func doURLRequest(method, target string, opts urlFetchOptions) (*http.Response, 
 	}
 	req.Header.Set("User-Agent", fmt.Sprintf("sfetch/%s", version))
 
-	resp, err := client.Do(req)
+	resp, err := httpx.Do(client, req)
 	if err != nil {
 		return nil, redirects, err
 	}
