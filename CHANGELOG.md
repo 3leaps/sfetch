@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   packages, and non-executable files keep their asset name; `--url` and
   `--github-raw` keep the file name unless `--binary-name` is set.
 
+### Security
+
+- **Self-update verifies only against the embedded trust anchor.** It no
+  longer uses a minisign key published in the release, refuses key flags,
+  and cannot skip verification (`--insecure`, `--skip-sig`,
+  `--skip-checksum`).
+
 ### Fixed
 
 - **Large downloads no longer time out.** The 30-second whole-request limit

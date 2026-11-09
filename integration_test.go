@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -637,5 +638,107 @@ func TestIntegrationRawVersionedBinaryInstallsAsBinaryName(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
 		t.Fatalf("installed %s mode %v is not executable", installed, info.Mode().Perm())
+	}
+}
+
+// Self-update must verify only against the embedded trust anchor. A release
+// whose SHA256SUMS is signed by another key, shipped alongside that key as a
+// release asset, must be rejected rather than auto-detected and trusted.
+func TestIntegrationSelfUpdateRejectsReleaseSuppliedKey(t *testing.T) {
+	assetBytes, err := os.ReadFile("testdata/integration/sfetch_test_darwin_arm64.tar.gz")
+	if err != nil {
+		t.Fatalf("read asset: %v", err)
+	}
+	shaBytes, err := os.ReadFile("testdata/integration/SHA256SUMS")
+	if err != nil {
+		t.Fatalf("read checksum: %v", err)
+	}
+	minisigBytes, err := os.ReadFile("testdata/integration/SHA256SUMS.minisig")
+	if err != nil {
+		t.Fatalf("read minisig: %v", err)
+	}
+	attackerKey, err := os.ReadFile("testdata/integration/test-minisign.pub")
+	if err != nil {
+		t.Fatalf("read pubkey: %v", err)
+	}
+	if bytes.Contains(attackerKey, []byte(EmbeddedMinisignPubkey)) {
+		t.Fatal("fixture key must differ from the embedded anchor")
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/repos/3leaps/sfetch/releases"):
+			base := fmt.Sprintf("http://%s", r.Host)
+			rel := fakeRelease{
+				TagName: "v9.9.9",
+				Assets: []Asset{
+					{Name: "sfetch_test_darwin_arm64.tar.gz", BrowserDownloadUrl: base + "/assets/bin"},
+					{Name: "SHA256SUMS", BrowserDownloadUrl: base + "/assets/sha"},
+					{Name: "SHA256SUMS.minisig", BrowserDownloadUrl: base + "/assets/sha-minisig"},
+					{Name: "sfetch-minisign.pub", BrowserDownloadUrl: base + "/assets/pubkey"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(&rel); err != nil {
+				t.Errorf("encode release: %v", err)
+			}
+		case r.URL.Path == "/assets/bin":
+			_, _ = w.Write(assetBytes)
+		case r.URL.Path == "/assets/sha":
+			_, _ = w.Write(shaBytes)
+		case r.URL.Path == "/assets/sha-minisig":
+			_, _ = w.Write(minisigBytes)
+		case r.URL.Path == "/assets/pubkey":
+			_, _ = w.Write(attackerKey)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	run := func(extra ...string) (string, error) {
+		args := append([]string{"run", ".",
+			"--self-update", "--yes", "--self-update-force",
+			"--tag", "v9.9.9",
+			"--self-update-dir", t.TempDir(),
+			"--cache-dir", filepath.Join(t.TempDir(), "cache"),
+		}, extra...)
+		cmd := exec.Command("go", args...)
+		cmd.Env = append(os.Environ(), "SFETCH_API_BASE="+ts.URL)
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &out
+		err := cmd.Run()
+		return out.String(), err
+	}
+
+	out, err := run()
+	if err == nil {
+		t.Fatalf("self-update accepted a release signed by a non-anchor key:\n%s", out)
+	}
+	if strings.Contains(out, "Auto-detected minisign key asset") {
+		t.Fatalf("self-update consulted a release-supplied key:\n%s", out)
+	}
+	if strings.Contains(out, "Installed ") {
+		t.Fatalf("self-update installed despite failed verification:\n%s", out)
+	}
+
+	keyFile := filepath.Join(t.TempDir(), "k.pub")
+	if err := os.WriteFile(keyFile, attackerKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, extra := range [][]string{
+		{"--minisign-key", keyFile},
+		{"--minisign-key-asset", "sfetch-minisign.pub"},
+		{"--insecure"},
+		{"--skip-sig"},
+	} {
+		out, err := run(extra...)
+		if err == nil {
+			t.Fatalf("self-update accepted %v:\n%s", extra, out)
+		}
+		if !strings.Contains(out, "--self-update") {
+			t.Fatalf("expected a --self-update refusal for %v, got:\n%s", extra, out)
+		}
 	}
 }

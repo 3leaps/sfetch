@@ -272,6 +272,27 @@ var EmbeddedMinisignPubkey = mustMinisignPubkeyLine(embeddedMinisignPubFile)
 // EmbeddedMinisignKeyID is a human label for the release signing key.
 const EmbeddedMinisignKeyID = "3leaps/sfetch release signing key"
 
+// writeEmbeddedMinisignAnchor writes the embedded release-signing public key
+// to a private temp file for the minisign verifier. The caller must run
+// cleanup.
+func writeEmbeddedMinisignAnchor() (string, func(), error) {
+	f, err := os.CreateTemp("", "sfetch-anchor-*.pub")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("write embedded trust anchor: %w", err)
+	}
+	cleanup := func() { _ = os.Remove(f.Name()) }
+	if _, err := f.WriteString(embeddedMinisignPubFile); err != nil {
+		_ = f.Close()
+		cleanup()
+		return "", func() {}, fmt.Errorf("write embedded trust anchor: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("write embedded trust anchor: %w", err)
+	}
+	return f.Name(), cleanup, nil
+}
+
 func mustMinisignPubkeyLine(content string) string {
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
@@ -2019,6 +2040,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		_, _ = fmt.Fprintf(stderr, "Self-update target: %s\n", targetPath) //nolint:errcheck
+
+		// Self-update replaces the running binary, so it verifies only
+		// against the embedded trust anchor. A key shipped in the release, or
+		// supplied by flag, could come from whoever can write release assets.
+		if *minisignPubKey != "" || *minisignKeyURL != "" || *minisignKeyAsset != "" ||
+			*pgpKeyFile != "" || *pgpKeyURL != "" || *pgpKeyAsset != "" || *key != "" {
+			_, _ = fmt.Fprintln(stderr, "error: --self-update verifies against the embedded trust anchor; key flags are not allowed") //nolint:errcheck
+			return 1
+		}
+		if *insecure || *skipSig || *skipChecksum {
+			_, _ = fmt.Fprintln(stderr, "error: --self-update cannot skip verification (--insecure, --skip-sig, --skip-checksum)") //nolint:errcheck
+			return 1
+		}
+		anchorPath, cleanup, err := writeEmbeddedMinisignAnchor()
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
+			return 1
+		}
+		defer cleanup()
+		*minisignPubKey = anchorPath
+		*requireMinisign = true
 	}
 
 	if !*skipToolsCheck {

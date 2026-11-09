@@ -182,7 +182,7 @@ sfetch --repo 3leaps/sfetch --latest --dest-dir /tmp --provenance-file audit.jso
 sfetch --self-verify
 ```
 
-**Self-update** - update sfetch to the latest verified release:
+**Self-update** - update sfetch to the latest verified release. The release is verified against the embedded minisign trust anchor (`sfetch --show-trust-anchors`); keys from the release or from key flags are not used, and verification cannot be skipped:
 ```bash
 # Update if newer version is available (skips reinstall if already current)
 sfetch --self-update --yes
