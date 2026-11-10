@@ -1,0 +1,19 @@
+---
+# goneat dependency policy for sfetch.
+#
+# vulnerabilities.allow lists govulncheck advisory IDs that are reported at
+# info instead of high. Each entry is a reviewed waiver with an expiry; an
+# expired entry fails the security gate again.
+
+vulnerabilities:
+  allow:
+    - id: GO-2026-5932
+      status: not_imported
+      reason: "sfetch imports no golang.org/x/crypto/openpgp package; x/crypto is required only for blake2b (via go-minisign), pbkdf2 and scrypt."
+      analysis: |
+        govulncheck reports GO-2026-5932 at module level only for
+        golang.org/x/crypto v0.58.0: sfetch's code does not call it and
+        imports no package from the advisory. The recorded fix is an
+        untagged pseudo-version; remove this entry once a tagged x/crypto
+        release with the fix has cooled and is adopted.
+      until: "2027-02-10"
