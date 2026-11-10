@@ -212,3 +212,13 @@ func TestShouldAttachAuth(t *testing.T) {
 		})
 	}
 }
+
+func TestNewClientAllowsLargeAssetStreaming(t *testing.T) {
+	c := newClient()
+	if c.Timeout != 0 {
+		t.Fatalf("Client.Timeout = %s, want 0: a whole-request deadline also bounds body reads and fails large assets", c.Timeout)
+	}
+	if c.CheckRedirect == nil {
+		t.Fatal("CheckRedirect not set; auth stripping on redirect lost")
+	}
+}

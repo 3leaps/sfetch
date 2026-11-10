@@ -72,7 +72,9 @@ sfetch resolves minisign public keys in priority order:
 1. **`--minisign-key <path>`** - Local file path (or URL if starts with `http://`/`https://`)
 2. **`--minisign-key-url <url>`** - Download from URL
 3. **`--minisign-key-asset <name>`** - Fetch from release assets by exact name
-4. **Auto-detect** - Scan release assets for `*minisign*.pub` or `*-signing-key.pub`
+4. **Auto-detect** - Scan release assets for `*minisign*.pub`, `*-signing-key.pub`, or `*release-key.pub`; if none match and the release publishes exactly one `.pub` asset (for example `<repo>.pub`), use it. Several unmatched `.pub` assets are ambiguous and need `--minisign-key-asset`.
+
+An auto-detected key comes from the same release as the signature. It shows the release assets are consistent with each other; it does not prove who published them. Pin a key you obtained independently with `--minisign-key` when that matters.
 
 ### Strict mode
 

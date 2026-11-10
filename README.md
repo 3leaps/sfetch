@@ -105,12 +105,17 @@ Additional flags: `--max-redirects` (default 5), `--allowed-content-types`, `--a
 
 ### Install permissions
 - **Archives** (`.tar.gz`, `.zip`, etc.): Permissions from the archive are preserved. Executables packaged with `0755` remain executable after extraction.
-- **Raw scripts/binaries** (e.g., `install.sh`, `kubectl`): Automatically set to `0755` on macOS/Linux to ensure executability.
+- **Raw scripts/binaries** (e.g., `install.sh`, `kubectl`, `tool-v1.2.3-linux-amd64`): Automatically set to `0755` on macOS/Linux to ensure executability. Version and platform suffixes in the name (such as `-v1.2.3-macos-aarch64`) are not treated as file extensions.
+- **Raw binary naming**: A raw release binary installs under the binary name, not the asset name: `chanvoy-v0.3.3-macos-aarch64` installs as `chanvoy` (`chanvoy.exe` on Windows). The binary name defaults to the repo name; override it with `--binary-name`. Scripts, packages, and non-executable files keep their asset name. `--url` and `--github-raw` downloads keep the file name unless `--binary-name` is set.
 - **Cross-device installs**: When `--dest-dir` is on a different filesystem than the temp directory (common in containers), sfetch falls back to copy and preserves the source permissions.
 
 Native `.tar.gz` extraction validates destination paths, accepts regular files and
 directories, and rejects links and unsupported entry types. It limits archives
 to 256 physical tar headers and 512 MiB of expanded data.
+
+### Network timeouts
+
+Connection setup, TLS handshake, and the wait for response headers are each bounded at 30 seconds. Downloads have no overall time limit, so large assets complete on slower connections; a download that receives no data for 60 seconds fails with `download stalled`.
 
 ### Proxy support
 sfetch honors standard proxy environment variables and provides CLI flags for explicit control.
@@ -137,7 +142,7 @@ sfetch --repo 3leaps/sfetch --latest --https-proxy http://localhost:8888 --dest-
 - `--minisign-key-url <url>` - download key from URL
 - `--minisign-key-asset <name>` - fetch key from release assets
 - `--require-minisign` - fail if minisign verification unavailable
-- Auto-detects `*.pub` files from release assets when no key flags provided
+- Auto-detects a key from release assets when no key flags are provided: names containing `minisign`, `*-signing-key.pub`, or `*release-key.pub`, or the release's only `.pub` asset (for example `<repo>.pub`)
 
 **PGP** - requires `gpg` binary
 - `--pgp-key-file <key.asc>` - path to ASCII-armored public key
@@ -177,7 +182,7 @@ sfetch --repo 3leaps/sfetch --latest --dest-dir /tmp --provenance-file audit.jso
 sfetch --self-verify
 ```
 
-**Self-update** - update sfetch to the latest verified release:
+**Self-update** - update sfetch to the latest verified release. The release is verified against the embedded minisign trust anchor (`sfetch --show-trust-anchors`); keys from the release or from key flags are not used, and verification cannot be skipped:
 ```bash
 # Update if newer version is available (skips reinstall if already current)
 sfetch --self-update --yes

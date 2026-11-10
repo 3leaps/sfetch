@@ -7,7 +7,8 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
+
+	"github.com/3leaps/sfetch/internal/httpx"
 )
 
 // TokenSource reports where a resolved token came from. Empty when no token
@@ -169,11 +170,17 @@ func GetAsset(url, userAgent string) (*http.Response, error) {
 	return doGet(url, userAgent, "application/octet-stream")
 }
 
+// newClient returns the client used for GitHub requests. It has no
+// whole-request deadline so large assets can stream; httpx bounds connect,
+// TLS, header wait, and body stalls instead.
+func newClient() *http.Client {
+	client := httpx.NewClient()
+	client.CheckRedirect = stripAuthOnUntrustedRedirect
+	return client
+}
+
 func doGet(url, userAgent, accept string) (*http.Response, error) {
-	client := &http.Client{
-		Timeout:       30 * time.Second,
-		CheckRedirect: stripAuthOnUntrustedRedirect,
-	}
+	client := newClient()
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -191,7 +198,7 @@ func doGet(url, userAgent, accept string) (*http.Response, error) {
 			req.Header.Set("Authorization", "Bearer "+tok)
 		}
 	}
-	return client.Do(req)
+	return httpx.Do(client, req)
 }
 
 // stripAuthOnUntrustedRedirect runs on every redirect hop and removes the
