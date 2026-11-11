@@ -47,8 +47,8 @@ BIN_DIR := $(CURDIR)/bin
 # pin (see .github/workflows/ci.yml). Always a fully-signed published release —
 # never "latest" and never the in-flight cut — so main CI cannot 404 during the
 # tag/upload window. Advance after each release publishes + signs.
-SFETCH_VERSION := v0.4.14
-GONEAT_VERSION ?= v0.6.6
+SFETCH_VERSION := v0.4.15
+GONEAT_VERSION ?= v0.6.8
 GOVULNCHECK_VERSION ?= v1.8.0
 GOLANGCI_LINT_VERSION ?= v2.14.0
 GOSEC_VERSION ?= v2.29.0

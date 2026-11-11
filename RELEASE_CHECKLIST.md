@@ -25,7 +25,7 @@ Why this matters: after verified publish, `make update-scoop-manifest` writes th
 ## 1. Prepare & Tag
 
 - [ ] Start a release branch from clean, updated `main`
-- [ ] Advance `VERSION` with `make version-patch` (or `make version-set V=0.4.15` for an explicit version)
+- [ ] Advance `VERSION` with `make version-patch` (or `make version-set V=0.4.16` for an explicit version)
 - [ ] Advance the Makefile `SFETCH_VERSION` self-bootstrap/CI smoke pin to the previous fully signed, published release. Confirm it with `make print-sfetch-version`; never pin an unpublished release
 - [ ] **Advance verified-bootstrap range constants** (required every release — missing bump fails consumers, not sfetch CI, unless you run the assert):
   - [ ] Set `SFETCH_BOOTSTRAP_MAX` in `scripts/bootstrap-sfetch-verified.sh` to `v$(cat VERSION)` (committed constant — **do not** derive at engine runtime from `VERSION` or the consumer tree)
@@ -37,7 +37,7 @@ Why this matters: after verified publish, `make update-scoop-manifest` writes th
 - [ ] Update `RELEASE_NOTES.md`
 - [ ] Create `docs/releases/vX.Y.Z.md`
 - [ ] Read through `README.md` and this checklist for version examples and workflow changes
-- [ ] Run the full gates with the project toolchain and pinned local tools: `GOTOOLCHAIN=go1.26.10 PATH="$PWD/bin:$PATH" make prepush`
+- [ ] Run the full gates with the project toolchain and pinned local tools: `GOTOOLCHAIN=go1.26.11 PATH="$PWD/bin:$PATH" make prepush`
 - [ ] Commit the release pack on the release branch; obtain review, open a pull request, and merge after review and CI pass
 - [ ] Return to clean, updated `main` at the merged release pack
 - [ ] Configure the signing, identity, Decernor, and message-directory inputs in section 2 before starting the maintainer ceremony. The maintainer (not an agent) then signs and pushes the tag:

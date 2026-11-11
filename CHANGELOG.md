@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.16] - 2026-11-11
+
 ### Changed
 
 - **Raw release binaries install under the binary name.** A raw asset such as
@@ -16,9 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name defaults to the repo name and `--binary-name` overrides it. Scripts,
   packages, and non-executable files keep their asset name; `--url` and
   `--github-raw` keep the file name unless `--binary-name` is set.
+- **Release tooling pins.** The verified bootstrap ceiling advances to
+  v0.4.16; self-bootstrap and CI install smoke pin signed v0.4.15. CI and the
+  Makefile use goneat v0.6.8, with a reviewed govulncheck waiver for
+  GO-2026-5932 that expires 2027-02-10 (module-level only;
+  `golang.org/x/crypto/openpgp` is not imported).
 
 ### Security
 
+- **Go 1.26.11.** Release binaries are built with Go 1.26.11, which fixes
+  GO-2026-6859 in `net/http`.
 - **Self-update verifies only against the embedded trust anchor.** It no
   longer uses a minisign key published in the release, refuses key flags,
   and cannot skip verification (`--insecure`, `--skip-sig`,
@@ -317,7 +326,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Maintenance note:** This file is pruned to the latest 10 releases. For older entries, see `docs/releases/`.
 
-[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.15...HEAD
+[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.16...HEAD
+[0.4.16]: https://github.com/3leaps/sfetch/compare/v0.4.15...v0.4.16
 [0.4.15]: https://github.com/3leaps/sfetch/compare/v0.4.14...v0.4.15
 [0.4.14]: https://github.com/3leaps/sfetch/compare/v0.4.13...v0.4.14
 [0.4.13]: https://github.com/3leaps/sfetch/compare/v0.4.12...v0.4.13

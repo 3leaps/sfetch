@@ -24,7 +24,7 @@ jobs:
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
 
       - name: Install system tools
         run: |
@@ -40,7 +40,7 @@ jobs:
       - name: Install goneat via sfetch (dogfooding)
         run: |
           ./bin/sfetch --repo fulmenhq/goneat \
-            --tag v0.6.6 \
+            --tag v0.6.8 \
             --dest-dir bin \
             --require-minisign \
             --minisign-key docs/security/fulmenhq-goneat-minisign.pub
@@ -134,7 +134,7 @@ jobs:
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
 
       - name: Assert runner matches matrix target
         shell: bash
@@ -285,7 +285,7 @@ jobs:
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
 
       - name: Build sfetch (from this commit)
         shell: bash
@@ -304,7 +304,7 @@ jobs:
           export PATH="$BIN_DIR:$PATH"
 
           sfetch --repo fulmenhq/goneat \
-            --tag v0.6.6 \
+            --tag v0.6.8 \
             --dest-dir "$BIN_DIR" \
             --cache-dir "$CACHE_DIR" \
             --require-minisign \
@@ -322,7 +322,7 @@ jobs:
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
 
       # Pinned official minisign 0.12 archive (no Chocolatey/winget).
       - name: Install pinned minisign 0.12
@@ -343,7 +343,7 @@ jobs:
         run: |
           .\bin\sfetch.exe `
             --repo fulmenhq/goneat `
-            --tag v0.6.6 `
+            --tag v0.6.8 `
             --dest-dir bin `
             --require-minisign `
             --minisign-key docs/security/fulmenhq-goneat-minisign.pub
@@ -359,7 +359,7 @@ jobs:
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
 
       # Pinned official minisign 0.12 archive (no Chocolatey/winget).
       - name: Install pinned minisign 0.12
@@ -391,7 +391,7 @@ jobs:
         run: |
           .\bin\sfetch.exe `
             --repo fulmenhq/goneat `
-            --tag v0.6.6 `
+            --tag v0.6.8 `
             --dest-dir bin `
             --require-minisign `
             --minisign-key docs/security/fulmenhq-goneat-minisign.pub
