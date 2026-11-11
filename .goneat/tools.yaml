@@ -71,8 +71,8 @@ tools:
         - scoop
         - winget
     version_scheme: semver
-    minimum_version: 1.26.10
-    recommended_version: 1.26.10
+    minimum_version: 1.26.11
+    recommended_version: 1.26.11
   golangci-lint:
     name: golangci-lint
     description: Fast linters runner for Go

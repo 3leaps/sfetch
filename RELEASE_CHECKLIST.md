@@ -37,7 +37,7 @@ Why this matters: after verified publish, `make update-scoop-manifest` writes th
 - [ ] Update `RELEASE_NOTES.md`
 - [ ] Create `docs/releases/vX.Y.Z.md`
 - [ ] Read through `README.md` and this checklist for version examples and workflow changes
-- [ ] Run the full gates with the project toolchain and pinned local tools: `GOTOOLCHAIN=go1.26.10 PATH="$PWD/bin:$PATH" make prepush`
+- [ ] Run the full gates with the project toolchain and pinned local tools: `GOTOOLCHAIN=go1.26.11 PATH="$PWD/bin:$PATH" make prepush`
 - [ ] Commit the release pack on the release branch; obtain review, open a pull request, and merge after review and CI pass
 - [ ] Return to clean, updated `main` at the merged release pack
 - [ ] Configure the signing, identity, Decernor, and message-directory inputs in section 2 before starting the maintainer ceremony. The maintainer (not an agent) then signs and pushes the tag:

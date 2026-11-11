@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Go 1.26.11.** Release binaries are built with Go 1.26.11, which fixes
+  GO-2026-6859 in `net/http`.
 - **Self-update verifies only against the embedded trust anchor.** It no
   longer uses a minisign key published in the release, refuses key flags,
   and cannot skip verification (`--insecure`, `--skip-sig`,
