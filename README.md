@@ -1,7 +1,7 @@
 # sfetch
 
 [![Go 1.26+](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/3leaps/sfetch?include_prereleases)](https://github.com/3leaps/sfetch/releases)
 
 **Secure, verifiable, zero-trust downloader for the uncertain world**

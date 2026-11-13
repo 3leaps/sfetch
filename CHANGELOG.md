@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **License files.** `LICENSE` contains the standard MIT License text. The
+  project name and trademark notice is in `NOTICE`. The README badge shows MIT.
+
 ## [0.4.16] - 2026-11-11
 
 ### Changed
