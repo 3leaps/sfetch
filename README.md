@@ -235,14 +235,14 @@ Match `-P` to the tag: tags ≤ v0.4.11 verify under the previous key; newer tag
 
 ```bash
 # Three-step path when install-sfetch.sh.minisig is published (v0.4.11+)
-TAG=v0.4.16
+TAG=v0.4.17
 curl -fsSL "https://github.com/3leaps/sfetch/releases/download/${TAG}/install-sfetch.sh" -o install-sfetch.sh
 curl -fsSL "https://github.com/3leaps/sfetch/releases/download/${TAG}/install-sfetch.sh.minisig" -o install-sfetch.sh.minisig
 minisign -Vm install-sfetch.sh -P RWTqUZ/PtmfAbQ3RKIlp/YTKT6zFeNMAZ8iAMelhlmqEsVqjKj3ctSA1
 bash install-sfetch.sh --tag "$TAG" --yes
 
 # Or use the shared engine (CI/Makefile; refuses "latest"):
-# ./scripts/bootstrap-sfetch-verified.sh --version v0.4.16 --dir ~/.local/bin
+# ./scripts/bootstrap-sfetch-verified.sh --version v0.4.17 --dir ~/.local/bin
 ```
 
 **GitHub Actions:** pin the composite action by commit SHA — see [CI/CD Usage Guide](docs/cicd-usage-guide.md).
@@ -250,7 +250,7 @@ bash install-sfetch.sh --tag "$TAG" --yes
 ```yaml
 - uses: 3leaps/sfetch/.github/actions/setup-sfetch@<commit-sha>
   with:
-    sfetch-version: v0.4.16
+    sfetch-version: v0.4.17
 ```
 
 #### Quick install (interactive humans)
@@ -275,7 +275,7 @@ Pass arguments using `bash -s --`:
 curl -sSfL .../install-sfetch.sh | bash -s -- --dir ~/bin
 
 # Install specific version
-curl -sSfL .../install-sfetch.sh | bash -s -- --tag v0.4.16
+curl -sSfL .../install-sfetch.sh | bash -s -- --tag v0.4.17
 
 # Dry run (download and verify, don't install)
 curl -sSfL .../install-sfetch.sh | bash -s -- --dry-run

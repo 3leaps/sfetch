@@ -25,7 +25,7 @@ Why this matters: after verified publish, `make update-scoop-manifest` writes th
 ## 1. Prepare & Tag
 
 - [ ] Start a release branch from clean, updated `main`
-- [ ] Advance `VERSION` with `make version-patch` (or `make version-set V=0.4.16` for an explicit version)
+- [ ] Advance `VERSION` with `make version-patch` (or `make version-set V=0.4.17` for an explicit version)
 - [ ] Advance the Makefile `SFETCH_VERSION` self-bootstrap/CI smoke pin to the previous fully signed, published release. Confirm it with `make print-sfetch-version`; never pin an unpublished release
 - [ ] **Advance verified-bootstrap range constants** (required every release — missing bump fails consumers, not sfetch CI, unless you run the assert):
   - [ ] Set `SFETCH_BOOTSTRAP_MAX` in `scripts/bootstrap-sfetch-verified.sh` to `v$(cat VERSION)` (committed constant — **do not** derive at engine runtime from `VERSION` or the consumer tree)

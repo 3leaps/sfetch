@@ -9,16 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.17] - 2026-11-13
+
 ### Security
 
 - **Signatures are verified in the format their file name declares.** A
   per-asset signature whose content is in another format (for example a PGP
   signature in a `.minisig` file) is refused before any key is resolved.
+  Previously such a signature was verified with a key for its content format,
+  which could be a key taken from the release instead of the configured
+  `--minisign-key` or, for `--self-update`, the embedded trust anchor.
 
 ### Changed
 
 - **License files.** `LICENSE` contains the standard MIT License text. The
   project name and trademark notice is in `NOTICE`. The README badge shows MIT.
+- **Release tooling pins.** The verified bootstrap ceiling advances to
+  v0.4.17; self-bootstrap and CI install smoke pin signed v0.4.16.
 
 ## [0.4.16] - 2026-11-11
 
@@ -337,7 +344,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Maintenance note:** This file is pruned to the latest 10 releases. For older entries, see `docs/releases/`.
 
-[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.16...HEAD
+[Unreleased]: https://github.com/3leaps/sfetch/compare/v0.4.17...HEAD
+[0.4.17]: https://github.com/3leaps/sfetch/compare/v0.4.16...v0.4.17
 [0.4.16]: https://github.com/3leaps/sfetch/compare/v0.4.15...v0.4.16
 [0.4.15]: https://github.com/3leaps/sfetch/compare/v0.4.14...v0.4.15
 [0.4.14]: https://github.com/3leaps/sfetch/compare/v0.4.13...v0.4.14
