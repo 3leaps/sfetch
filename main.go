@@ -3079,6 +3079,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 			_, _ = fmt.Fprintln(stderr, err) //nolint:errcheck
 			return 1
 		}
+		// Verify in the format the file name declares. The assessment,
+		// --require-minisign, and the trust score all use that format; a
+		// different content format would pick another verifier and key source
+		// (for example a release-supplied PGP key instead of the minisign key).
+		if sigData.format != assessment.SignatureFormat {
+			_, _ = fmt.Fprintf(stderr, "error: signature format mismatch: %s is named as %s but contains a %s signature\n", //nolint:errcheck
+				assessment.SignatureFile, assessment.SignatureFormat, sigData.format)
+			return 1
+		}
 
 		switch sigData.format {
 		case sigFormatPGP:

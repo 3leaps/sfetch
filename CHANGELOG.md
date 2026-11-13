@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Signatures are verified in the format their file name declares.** A
+  per-asset signature whose content is in another format (for example a PGP
+  signature in a `.minisig` file) is refused before any key is resolved.
+
 ### Changed
 
 - **License files.** `LICENSE` contains the standard MIT License text. The

@@ -742,3 +742,130 @@ func TestIntegrationSelfUpdateRejectsReleaseSuppliedKey(t *testing.T) {
 		}
 	}
 }
+
+// A signature is verified in the format its file name declares. A .minisig
+// file that holds a PGP signature must be refused before any key is resolved;
+// otherwise the PGP branch would auto-detect a release-supplied .asc key and
+// bypass the configured (or, for self-update, embedded) minisign key.
+func TestIntegrationRejectsSignatureFormatMismatch(t *testing.T) {
+	assetBytes, err := os.ReadFile("testdata/integration/sfetch_test_darwin_arm64.tar.gz")
+	if err != nil {
+		t.Fatalf("read asset: %v", err)
+	}
+	shaBytes, err := os.ReadFile("testdata/integration/SHA256SUMS")
+	if err != nil {
+		t.Fatalf("read checksum: %v", err)
+	}
+	pgpSig, err := os.ReadFile("testdata/integration/sfetch_test_darwin_arm64.tar.gz.asc")
+	if err != nil {
+		t.Fatalf("read pgp sig: %v", err)
+	}
+	minisig, err := os.ReadFile("testdata/integration/SHA256SUMS.minisig")
+	if err != nil {
+		t.Fatalf("read minisig: %v", err)
+	}
+	releaseKey, err := os.ReadFile("testdata/keys/test-pgp-pub.asc")
+	if err != nil {
+		t.Fatalf("read pgp key: %v", err)
+	}
+
+	serve := func(repoPath, sigName string, sigBytes []byte) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasPrefix(r.URL.Path, repoPath):
+				base := fmt.Sprintf("http://%s", r.Host)
+				rel := fakeRelease{
+					TagName: "v9.9.9",
+					Assets: []Asset{
+						{Name: "sfetch_test_darwin_arm64.tar.gz", BrowserDownloadUrl: base + "/assets/bin"},
+						{Name: "SHA256SUMS", BrowserDownloadUrl: base + "/assets/sha"},
+						// Signature bytes whose format differs from the file name.
+						{Name: sigName, BrowserDownloadUrl: base + "/assets/sig"},
+						{Name: "release-key.asc", BrowserDownloadUrl: base + "/assets/key"},
+					},
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(&rel); err != nil {
+					t.Errorf("encode release: %v", err)
+				}
+			case r.URL.Path == "/assets/bin":
+				_, _ = w.Write(assetBytes)
+			case r.URL.Path == "/assets/sha":
+				_, _ = w.Write(shaBytes)
+			case r.URL.Path == "/assets/sig":
+				_, _ = w.Write(sigBytes)
+			case r.URL.Path == "/assets/key":
+				_, _ = w.Write(releaseKey)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+	}
+	run := func(ts *httptest.Server, args ...string) (string, error) {
+		cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
+		cmd.Env = append(os.Environ(), "SFETCH_API_BASE="+ts.URL)
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &out
+		err := cmd.Run()
+		return out.String(), err
+	}
+	check := func(t *testing.T, out string, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("accepted a signature whose content format differs from its file name:\n%s", out)
+		}
+		if strings.Contains(out, "Auto-detected PGP key asset") || strings.Contains(out, "PGP signature verified OK") {
+			t.Fatalf("resolved or verified with a release-supplied PGP key:\n%s", out)
+		}
+		if !strings.Contains(out, "signature format mismatch") {
+			t.Fatalf("expected a signature format mismatch error:\n%s", out)
+		}
+	}
+
+	t.Run("self-update", func(t *testing.T) {
+		ts := serve("/repos/3leaps/sfetch/releases", "sfetch_test_darwin_arm64.tar.gz.minisig", pgpSig)
+		defer ts.Close()
+		out, err := run(ts, "--self-update", "--yes", "--self-update-force", "--tag", "v9.9.9",
+			"--self-update-dir", t.TempDir(), "--cache-dir", filepath.Join(t.TempDir(), "cache"))
+		check(t, out, err)
+		if strings.Contains(out, "Installed ") {
+			t.Fatalf("self-update installed despite the mismatch:\n%s", out)
+		}
+	})
+	t.Run("pinned minisign key", func(t *testing.T) {
+		ts := serve("/repos/test/example/releases", "sfetch_test_darwin_arm64.tar.gz.minisig", pgpSig)
+		defer ts.Close()
+		destDir := t.TempDir()
+		out, err := run(ts, "--repo", "test/example", "--tag", "v9.9.9", "--dest-dir", destDir,
+			"--minisign-key", "testdata/keys/test-minisign.pub", "--binary-name", "sfetch",
+			"--cache-dir", filepath.Join(t.TempDir(), "cache"))
+		check(t, out, err)
+		if _, statErr := os.Stat(filepath.Join(destDir, "sfetch")); statErr == nil {
+			t.Fatalf("installed despite the mismatch:\n%s", out)
+		}
+	})
+
+	install := func(t *testing.T, sigName string, sigBytes []byte, keyArgs ...string) {
+		t.Helper()
+		ts := serve("/repos/test/example/releases", sigName, sigBytes)
+		defer ts.Close()
+		destDir := t.TempDir()
+		args := append([]string{"--repo", "test/example", "--tag", "v9.9.9", "--dest-dir", destDir,
+			"--binary-name", "sfetch", "--cache-dir", filepath.Join(t.TempDir(), "cache")}, keyArgs...)
+		out, err := run(ts, args...)
+		check(t, out, err)
+		if _, statErr := os.Stat(filepath.Join(destDir, "sfetch")); statErr == nil {
+			t.Fatalf("installed despite the mismatch:\n%s", out)
+		}
+	}
+	t.Run("pgp in .sig with ed25519 key", func(t *testing.T) {
+		install(t, "sfetch_test_darwin_arm64.tar.gz.sig", pgpSig, "--key", strings.Repeat("ab", 32))
+	})
+	t.Run("pgp in .sig.ed25519 with ed25519 key", func(t *testing.T) {
+		install(t, "sfetch_test_darwin_arm64.tar.gz.sig.ed25519", pgpSig, "--key", strings.Repeat("ab", 32))
+	})
+	t.Run("minisign in .asc with pinned pgp key", func(t *testing.T) {
+		install(t, "sfetch_test_darwin_arm64.tar.gz.asc", minisig, "--pgp-key-file", "testdata/keys/test-pgp-pub.asc")
+	})
+}
