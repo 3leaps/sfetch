@@ -1,3 +1,43 @@
+## v0.4.17
+
+### Summary
+
+Security fix: per-asset signatures are verified only in the format their file
+name declares, so a release-supplied key can no longer stand in for a pinned
+minisign key or the embedded self-update trust anchor.
+
+### Highlights
+
+**Signature verification**
+- A per-asset signature whose content is in a different format from its file
+  name (for example a PGP signature in a `.minisig` file, or a minisign
+  signature in a `.asc` or `.sig` file) is refused before any key is
+  resolved, and nothing is installed.
+- Previously such a signature was verified with a key for its content format.
+  With no PGP key configured, that could be a PGP key auto-detected from the
+  release, bypassing `--minisign-key` and, for `--self-update`, the embedded
+  trust anchor. Checksum-level signatures (such as `SHA256SUMS.minisig`) were
+  not affected.
+
+**Development tooling**
+- The verified bootstrap ceiling advances to `v0.4.17`; self-bootstrap and CI
+  install smoke advance to the published, signed `v0.4.16` release.
+- `LICENSE` contains the standard MIT License text; the project name and
+  trademark notice is in `NOTICE`.
+
+### Compatibility
+
+Releases whose signature file contents match their file names are unaffected.
+
+`--self-update` runs the verification of the version doing the update. To
+update with this fix in effect, install v0.4.17 with Homebrew, Scoop, or the
+signed installer, or verify the downloaded release independently.
+
+The five supported platforms, the Go toolchain (1.26.11), application
+dependencies, and consumer verification trust anchors are unchanged from
+v0.4.16. Pair `sfetch-version: v0.4.17` with an immutable action revision
+whose declared bootstrap range includes that tag.
+
 ## v0.4.16
 
 ### Summary
